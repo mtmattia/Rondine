@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +38,8 @@ object Repo {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var rondine: Rondine? = null
     private val syncLock = Mutex()
+    /** Completato quando il profilo è stato aperto (o si sa che non c'è). */
+    private val loaded = CompletableDeferred<Unit>()
 
     /** null = sto caricando, false = nessun profilo, true = pronto. */
     val ready = MutableStateFlow<Boolean?>(null)
@@ -68,6 +71,8 @@ object Repo {
                 if (rondine != null) refresh()
             } catch (e: RondineException) {
                 ready.value = false
+            } finally {
+                loaded.complete(Unit)
             }
         }
     }
@@ -78,6 +83,7 @@ object Repo {
         val r = createProfile(profileDir, name, node)
         if (!phone.isNullOrBlank()) r.setPhone(phone)
         rondine = r
+        loaded.complete(Unit)
         refresh()
         ready.value = true
     }
@@ -90,7 +96,14 @@ object Repo {
     }
 
     /** Ritira i messaggi; se l'app non è in primo piano mostra le notifiche. */
-    suspend fun sync(): Result<Unit> = syncLock.withLock {
+    suspend fun sync(): Result<Unit> {
+        // Una sveglia push può far partire il processo da zero: prima di ritirare la casella
+        // bisogna aspettare che il profilo sia aperto, se no la sveglia va persa.
+        loaded.await()
+        return syncLocked()
+    }
+
+    private suspend fun syncLocked(): Result<Unit> = syncLock.withLock {
         val r = rondine ?: return Result.success(Unit)
         try {
             val res = r.sync()

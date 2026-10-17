@@ -174,7 +174,8 @@ Il proprietario registra un bersaglio:
 - `{"kind": "apns", "token": "<hex>"}`: riservato alla versione iPhone (non ancora attivo).
 
 Il nodo sveglia dopo ogni deposito, al massimo una volta ogni 10 s per casella, e su
-`POST /v1/wake`. La sveglia non contiene mai mittente né contenuto.
+`POST /v1/wake`. Una sveglia chiesta prima dei 10 s non si scarta: si manda alla fine
+dell'intervallo (al massimo una in attesa per casella). La sveglia non contiene mai mittente né contenuto.
 
 ## 9. Scoperta dalla rubrica, senza centralino
 

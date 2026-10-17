@@ -18,7 +18,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Scoperta dalla rubrica a coppie | ✅ | bacheche comuni tra nodi diversi |
 | Invito via SMS | 🟡 | l'SMS parte; il link `rondine:` non è cliccabile negli SMS: serve una pagina https di rimando |
 | Numero di sicurezza | ✅ | SPEC §10 |
-| Notifiche push (UnifiedPush) | 🟡 | nodo e app pronti; da provare con ntfy su un telefono vero |
+| Notifiche push (UnifiedPush) | ✅ | provate sull'emulatore con ntfy e un server ntfy locale, anche ad app chiusa |
 | Notifiche iPhone (APNs) | ⬜ | dopo Android |
 | Gruppi | ⬜ | MLS li supporta già |
 | Foto, file, messaggi vocali | ⬜ | come blob cifrati |
@@ -61,7 +61,7 @@ QR.
       per chi ha un nome utente; sull'emulatore provati lettore, link corto e decodifica del QR
       mostrato, non l'inquadratura vera (la scena virtuale non si orienta senza gRPC)
 - [ ] pagina https per aprire i link d'invito da SMS e browser
-- [ ] prova di UnifiedPush con ntfy su telefono vero
+- [x] prova di UnifiedPush con ntfy (emulatore e server ntfy locale, vedi `docs/PROVE-ANDROID.md`)
 - [ ] nodo pubblico sul Mac (Cloudflare Tunnel)
 - [ ] chiave di firma delle release e prima release su GitHub
 

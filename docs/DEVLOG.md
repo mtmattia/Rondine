@@ -32,3 +32,7 @@ Una riga per modifica: data, cosa è cambiato.
   `Client::add` accetta link d'invito, link corto o nome scritto a mano (usato da CLI e app).
   App: "Scansiona codice QR" con zxing-android-embedded (Apache-2.0) e apertura dei link
   `rondine:@…`. AVD di prova con fotocamera posteriore "virtualscene".
+- 2026-10-17 — Notifiche provate davvero: server ntfy locale + app ntfy sull'emulatore. Corretti
+  due difetti: l'app avviata da una sveglia ritirava la casella prima di aver aperto il profilo
+  (notifica persa ad app chiusa), e il nodo scartava le sveglie entro 10 s invece di rimandarle
+  (SPEC §8, test di accettazione). Notifica col cerchio verde. Guida `docs/PROVE-ANDROID.md`.

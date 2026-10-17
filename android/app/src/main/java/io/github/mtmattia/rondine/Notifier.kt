@@ -15,6 +15,8 @@ import uniffi.rondine_ffi.Message
 
 object Notifier {
     private const val CHANNEL = "messaggi"
+    /** Verde bosco dell'icona, per il cerchio della piccola icona. */
+    private const val NOTIFICATION_COLOR = 0xFF0D4F3C.toInt()
 
     fun createChannel(context: Context) {
         val ch = NotificationChannel(CHANNEL, "Messaggi", NotificationManager.IMPORTANCE_HIGH)
@@ -49,6 +51,7 @@ object Notifier {
                 msgs.takeLast(5).forEach { style.addLine(it.body) }
                 val n = NotificationCompat.Builder(context, CHANNEL)
                     .setSmallIcon(R.drawable.ic_notification)
+                    .setColor(NOTIFICATION_COLOR)
                     .setContentTitle(name)
                     .setContentText(msgs.last().body)
                     .setStyle(style)

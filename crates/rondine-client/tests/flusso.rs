@@ -190,10 +190,11 @@ async fn bloccare_un_contatto_ferma_i_suoi_messaggi() -> R {
     Ok(())
 }
 
-#[tokio::test]
-async fn sveglia_unifiedpush_dopo_un_deposito() -> R {
-    // Un finto distributore UnifiedPush che registra le sveglie ricevute.
-    let got: Arc<Mutex<Vec<String>>> = Arc::default();
+type Wakes = Arc<Mutex<Vec<String>>>;
+
+/// Un finto distributore UnifiedPush che registra le sveglie ricevute.
+async fn fake_distributor() -> Result<(String, Wakes), Box<dyn std::error::Error>> {
+    let got: Wakes = Arc::default();
     let sink = got.clone();
     let app = axum::Router::new().route(
         "/up/{token}",
@@ -210,7 +211,27 @@ async fn sveglia_unifiedpush_dopo_un_deposito() -> R {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let push_url = format!("http://{}/up/telefono-mattia", listener.local_addr()?);
     tokio::spawn(async move { axum::serve(listener, app).await });
+    Ok((push_url, got))
+}
 
+/// Aspetta fino a `max_ms` che arrivino almeno `n` sveglie.
+async fn wait_wakes(
+    got: &Wakes,
+    n: usize,
+    max_ms: u64,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    for _ in 0..max_ms / 20 {
+        if got.lock().map_err(|_| "lock")?.len() >= n {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    Ok(got.lock().map_err(|_| "lock")?.clone())
+}
+
+#[tokio::test]
+async fn sveglia_unifiedpush_dopo_un_deposito() -> R {
+    let (push_url, got) = fake_distributor().await?;
     let n1 = start_node().await?;
     let tmp = TempDir::new()?;
     let mattia = profile(&tmp, "Mattia", &n1).await?;
@@ -218,14 +239,35 @@ async fn sveglia_unifiedpush_dopo_un_deposito() -> R {
     mattia.set_push_endpoint(&push_url).await?;
 
     silvia.add_from_invite(&mattia.invite_link()?).await?;
-    for _ in 0..50 {
-        if !got.lock().map_err(|_| "lock")?.is_empty() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    let wakes = got.lock().map_err(|_| "lock")?.clone();
+    let wakes = wait_wakes(&got, 1, 1000).await?;
     assert_eq!(wakes, [WAKE_BODY], "la sveglia non deve contenere altro");
+    Ok(())
+}
+
+/// Un secondo deposito subito dopo il primo non deve restare senza sveglia: il telefono può aver
+/// già ritirato la casella dopo la prima. Il nodo la rimanda alla fine dell'intervallo minimo.
+#[tokio::test]
+async fn sveglia_ravvicinata_rimandata_non_persa() -> R {
+    let (push_url, got) = fake_distributor().await?;
+    let n1 = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut silvia = profile(&tmp, "Silvia", &n1).await?;
+    mattia.set_push_endpoint(&push_url).await?;
+
+    silvia.add_from_invite(&mattia.invite_link()?).await?;
+    assert_eq!(wait_wakes(&got, 1, 1000).await?.len(), 1);
+    mattia.sync().await?;
+
+    // Due messaggi entro l'intervallo: una sola sveglia in più, ma arriva.
+    silvia.send_text(&mattia.identity(), "uno").await?;
+    silvia.send_text(&mattia.identity(), "due").await?;
+    let started = std::time::Instant::now();
+    let wakes = wait_wakes(&got, 2, 12_000).await?;
+    assert_eq!(wakes.len(), 2, "la seconda sveglia è andata persa");
+    assert!(started.elapsed().as_secs() <= 11);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(got.lock().map_err(|_| "lock")?.len(), 2, "sveglie doppie");
     Ok(())
 }
 

@@ -48,7 +48,7 @@ struct Inner {
     store: Mutex<Store>,
     pusher: Pusher,
     rate: Mutex<HashMap<String, (u64, u32)>>,
-    last_wake: Mutex<HashMap<String, u64>>,
+    last_wake: Mutex<HashMap<String, WakeSlot>>,
 }
 
 #[derive(Clone)]
@@ -279,34 +279,65 @@ impl AppState {
         Ok(p)
     }
 
-    /// Sveglia il proprietario di una casella, al massimo una volta ogni 10 s.
+    /// Sveglia il proprietario di una casella, al massimo una volta ogni 10 s. Una sveglia
+    /// chiesta prima non si scarta: si rimanda alla fine dell'intervallo (una sola in coda), perché
+    /// il telefono potrebbe aver già ritirato la casella dopo quella precedente.
     fn schedule_wake(&self, inbox: &str) -> ApiResult<()> {
         let t = now();
-        {
-            let mut last = self.0.last_wake.lock().map_err(|_| ApiError::internal())?;
-            if last
-                .get(inbox)
-                .is_some_and(|&prev| t < prev + WAKE_INTERVAL_SECS)
-            {
-                return Ok(());
+        let delay = {
+            let mut slots = self.0.last_wake.lock().map_err(|_| ApiError::internal())?;
+            let slot = slots.entry(inbox.to_string()).or_default();
+            if slot.last != 0 && t < slot.last + WAKE_INTERVAL_SECS {
+                if slot.pending {
+                    return Ok(());
+                }
+                slot.pending = true;
+                slot.last += WAKE_INTERVAL_SECS;
+                slot.last - t
+            } else {
+                slot.last = t;
+                0
             }
-            last.insert(inbox.to_string(), t);
-        }
-        let Some(target) = self.db()?.push_target(inbox)? else {
-            return Ok(());
         };
         let state = self.clone();
         let inbox = inbox.to_string();
         tokio::spawn(async move {
-            if state.0.pusher.wake(&target.kind, &target.target).await == PushOutcome::Gone
-                && let Ok(db) = state.db()
-                && db.clear_push(&inbox).is_err()
-            {
-                tracing::warn!("rimozione del bersaglio push non riuscita");
+            if delay > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                if let Ok(mut slots) = state.0.last_wake.lock()
+                    && let Some(slot) = slots.get_mut(&inbox)
+                {
+                    slot.pending = false;
+                }
             }
+            state.send_wake(&inbox).await;
         });
         Ok(())
     }
+
+    async fn send_wake(&self, inbox: &str) {
+        let target = match self.db().and_then(|db| Ok(db.push_target(inbox)?)) {
+            Ok(Some(t)) => t,
+            Ok(None) => return,
+            Err(_) => {
+                tracing::warn!("lettura del bersaglio push non riuscita");
+                return;
+            }
+        };
+        if self.0.pusher.wake(&target.kind, &target.target).await == PushOutcome::Gone
+            && let Ok(db) = self.db()
+            && db.clear_push(inbox).is_err()
+        {
+            tracing::warn!("rimozione del bersaglio push non riuscita");
+        }
+    }
+}
+
+/// Ultima sveglia mandata (o programmata) per una casella, e se ce n'è una in coda.
+#[derive(Default)]
+struct WakeSlot {
+    last: u64,
+    pending: bool,
 }
 
 // ---------- gestori ----------

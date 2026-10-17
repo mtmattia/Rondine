@@ -35,6 +35,8 @@ pub struct Contact {
     /// Permesso che il mio nodo ha emesso per questo contatto (da revocare per bloccarlo).
     pub my_permit_id: Option<String>,
     pub added_at: u64,
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -44,6 +46,9 @@ pub struct ChatMessage {
     pub outgoing: bool,
     pub body: String,
     pub ts: u64,
+    /// I messaggi in uscita nascono letti; quelli in arrivo finché non si apre la chat.
+    #[serde(default)]
+    pub read: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

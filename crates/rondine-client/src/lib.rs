@@ -42,6 +42,15 @@ pub enum Event {
     Rejected(String),
 }
 
+/// Riga della lista chat.
+#[derive(Debug, Clone)]
+pub struct ChatSummary {
+    pub contact: Contact,
+    pub last: Option<ChatMessage>,
+    pub last_ts: u64,
+    pub unread: usize,
+}
+
 pub struct Client {
     dir: PathBuf,
     state: State,
@@ -110,6 +119,11 @@ impl Client {
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
         client.save()?;
         Ok(client)
+    }
+
+    /// C'è già un profilo in questa cartella?
+    pub fn exists(dir: &Path) -> bool {
+        dir.join(STATE_FILE).exists()
     }
 
     /// Apre un profilo esistente.
@@ -354,6 +368,53 @@ impl Client {
             .collect()
     }
 
+    /// Segna come letti i messaggi di un contatto.
+    pub fn mark_read(&mut self, id: &PublicKey) -> Result<()> {
+        let mut changed = false;
+        for m in self
+            .state
+            .messages
+            .iter_mut()
+            .filter(|m| &m.contact == id && !m.read)
+        {
+            m.read = true;
+            changed = true;
+        }
+        if changed {
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    pub fn set_favorite(&mut self, id: &PublicKey, favorite: bool) -> Result<()> {
+        let c = self
+            .contact_mut(id)
+            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
+        c.favorite = favorite;
+        self.save()
+    }
+
+    /// Una riga per contatto, dalla conversazione più recente (la lista chat dell'app).
+    pub fn chats(&self) -> Vec<ChatSummary> {
+        let mut out: Vec<ChatSummary> = self
+            .state
+            .contacts
+            .iter()
+            .map(|c| {
+                let msgs = self.messages_with(&c.identity);
+                let last = msgs.last().map(|m| (*m).clone());
+                ChatSummary {
+                    unread: msgs.iter().filter(|m| !m.read).count(),
+                    last_ts: last.as_ref().map(|m| m.ts).unwrap_or(c.added_at),
+                    last,
+                    contact: c.clone(),
+                }
+            })
+            .collect();
+        out.sort_by_key(|r| std::cmp::Reverse(r.last_ts));
+        out
+    }
+
     pub fn safety_number(&self, id: &PublicKey) -> String {
         safety::safety_number(&self.identity.public(), id)
     }
@@ -414,6 +475,7 @@ impl Client {
                 groups: Vec::new(),
                 my_permit_id: None,
                 added_at: now(),
+                favorite: false,
             });
         }
         self.start_chat(&info.identity).await?;
@@ -552,6 +614,7 @@ impl Client {
             outgoing: true,
             body: body.to_string(),
             ts: now(),
+            read: true,
         };
         let app = serde_json::to_vec(&AppMessage::Text {
             v: 1,
@@ -678,6 +741,7 @@ impl Client {
                     groups: vec![group],
                     my_permit_id: None,
                     added_at: now(),
+                    favorite: false,
                 });
             }
         }
@@ -719,6 +783,7 @@ impl Client {
                     outgoing: false,
                     body,
                     ts,
+                    read: false,
                 };
                 self.state.messages.push(m.clone());
                 Ok(vec![Event::Message(m)])
@@ -892,6 +957,7 @@ impl Client {
                     groups: Vec::new(),
                     my_permit_id: None,
                     added_at: now(),
+                    favorite: false,
                 });
             } else if let Some(c) = self.contact_mut(&info.identity) {
                 c.phone = Some(other.clone());

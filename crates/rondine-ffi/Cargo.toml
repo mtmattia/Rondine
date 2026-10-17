@@ -1,0 +1,24 @@
+[package]
+name = "rondine-ffi"
+description = "Ponte UniFFI tra rondine-client e l'app Android (Kotlin)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "rondine_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+rondine-client.workspace = true
+rondine-core.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+uniffi = { version = "0.32", features = ["tokio", "cli"] }
+
+[lints]
+workspace = true

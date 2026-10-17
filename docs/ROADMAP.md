@@ -16,9 +16,9 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Permessi di consegna revocabili (blocco contatto) | ✅ | |
 | Nome utente univoco `nome@nodo` | ✅ | |
 | Scoperta dalla rubrica a coppie | ✅ | bacheche comuni tra nodi diversi |
-| Invito via SMS | ⬜ | M1, lato app Android |
+| Invito via SMS | 🟡 | l'SMS parte; il link `rondine:` non è cliccabile negli SMS: serve una pagina https di rimando |
 | Numero di sicurezza | ✅ | SPEC §10 |
-| Notifiche push (UnifiedPush) | 🟡 | nodo fatto; manca l'app |
+| Notifiche push (UnifiedPush) | 🟡 | nodo e app pronti; da provare con ntfy su un telefono vero |
 | Notifiche iPhone (APNs) | ⬜ | dopo Android |
 | Gruppi | ⬜ | MLS li supporta già |
 | Foto, file, messaggi vocali | ⬜ | come blob cifrati |
@@ -29,7 +29,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Rete locale senza internet | ⬜ | mDNS, M2 |
 | Mesh Bluetooth | ⬜ | M3 |
 | Chiamate vocali e video | ⬜ | WebRTC + TURN, dopo |
-| App Android | ⬜ | M1 |
+| App Android | 🟡 | chat, nomi, rubrica, inviti, QR, impostazioni; provata su emulatore |
 
 ## Traguardi
 
@@ -48,6 +48,17 @@ il destinatario con UnifiedPush.
 ### M1 — App Android (in corso)
 Interfaccia Kotlin/Compose sopra `rondine-client` (UniFFI), UnifiedPush, rubrica, invito via SMS,
 QR.
+
+- [x] ponte `rondine-ffi` e build Rust dentro Gradle
+- [x] benvenuto, lista chat con filtri e non lette, chat, nuova chat, QR, impostazioni,
+      numero di sicurezza, blocco
+- [x] provata su emulatore con un nodo vero e un secondo utente da CLI
+- [ ] icona definitiva
+- [ ] lettura del QR con la fotocamera
+- [ ] pagina https per aprire i link d'invito da SMS e browser
+- [ ] prova di UnifiedPush con ntfy su telefono vero
+- [ ] nodo pubblico sul Mac (Cloudflare Tunnel)
+- [ ] chiave di firma delle release e prima release su GitHub
 
 ### M2 — Rete diretta
 libp2p: collegamento diretto quando entrambi sono online, rete locale senza internet.

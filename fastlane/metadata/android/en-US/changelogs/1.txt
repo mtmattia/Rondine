@@ -1,0 +1,1 @@
+First alpha: encrypted 1:1 chats, usernames, mutual address book discovery, invite links and QR, UnifiedPush notifications.

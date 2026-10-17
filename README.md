@@ -36,12 +36,30 @@ I dettagli sono in [`docs/SPEC.md`](docs/SPEC.md), l'architettura in
 | `rondine-nodo` | il nodo |
 | `rondine-client` | logica e stato del client |
 | `rondine-cli` | comando `rondine` |
+| `rondine-ffi` | ponte verso Kotlin per l'app |
+| `android/` | app Android |
 
 ## Sviluppo
 
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+```
+
+### Provare in locale
+
+```sh
+cargo run -p rondine-nodo -- --public-url http://127.0.0.1:8330
+cargo run -p rondine-cli -- -p /tmp/mattia crea --nome Mattia --nodo http://127.0.0.1:8330
+cargo run -p rondine-cli -- -p /tmp/mattia nome prendi mattia
+```
+
+### App Android
+
+```sh
+cd android && ./gradlew assembleDebug
+adb reverse tcp:8330 tcp:8330   # l'emulatore raggiunge il nodo del computer su 127.0.0.1
+adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Le regole per chi contribuisce (persone e agenti) sono in [`CLAUDE.md`](CLAUDE.md).

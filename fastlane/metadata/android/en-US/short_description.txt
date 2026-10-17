@@ -1,0 +1,1 @@
+Encrypted messenger with no central server: usernames, address book, open nodes

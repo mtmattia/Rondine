@@ -1,0 +1,9 @@
+<p>Rondine is an <b>open source</b> messenger. Messages are end-to-end encrypted with MLS (RFC 9420) and no central server can read them.</p>
+<ul>
+<li><b>Usernames</b> in the form <i>@name@node</i>, like an email address.</li>
+<li><b>Address book</b> discovery that only works between people who have each other's number. Numbers never leave the phone in clear text.</li>
+<li><b>Invite links and QR codes</b>, revocable at any time.</li>
+<li>Small, replaceable <i>nodes</i> anyone can host; they only see encrypted data.</li>
+<li>Notifications via UnifiedPush (e.g. ntfy), no Google services.</li>
+</ul>
+<p>Status: <b>alpha</b>. The app interface is in Italian for now.</p>

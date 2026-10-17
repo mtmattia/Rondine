@@ -10,3 +10,7 @@ Una riga per modifica: data, cosa è cambiato.
   package, sveglia UnifiedPush con blocco degli indirizzi privati, nomi, bacheca), `rondine-client`
   e CLI `rondine`. Bacheche comuni per la rubrica tra nodi diversi (SPEC §9). 5 test di
   accettazione con nodi veri in-process.
+- 2026-10-17 — App Android (M1, prima versione): `rondine-ffi` con UniFFI 0.32, progetto Gradle
+  (AGP 9.3, Kotlin 2.4, Compose) che compila il core Rust con cargo-ndk. Schermate in stile
+  WhatsApp con marchio proprio. Provata su emulatore contro un nodo vero e un utente da CLI.
+  Metadati fastlane per F-Droid. Stato di lettura e preferiti nel client.

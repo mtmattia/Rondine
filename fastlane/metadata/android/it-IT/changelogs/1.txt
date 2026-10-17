@@ -1,0 +1,1 @@
+Prima versione alpha: chat 1:1 cifrate, nome utente, rubrica reciproca, link d'invito e QR, notifiche UnifiedPush.

@@ -42,3 +42,10 @@ tempfile = "3"
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+
+# Libreria per Android più piccola.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

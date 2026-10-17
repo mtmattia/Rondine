@@ -82,7 +82,11 @@ pub fn node_host(url: &str) -> Result<String> {
 
 pub fn node_url_for_host(host: &str) -> String {
     let bare = host.split(':').next().unwrap_or_default();
-    let local = bare == "localhost" || bare.starts_with("127.") || host.starts_with("[::1]");
+    // 10.0.2.2 è il computer visto dall'emulatore Android.
+    let local = bare == "localhost"
+        || bare.starts_with("127.")
+        || bare == "10.0.2.2"
+        || host.starts_with("[::1]");
     if local {
         format!("http://{host}")
     } else {

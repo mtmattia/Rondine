@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icona provvisoria: una rondine stilizzata. Sarà sostituita dall'icona definitiva. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M30,44 C40,40 50,42 56,48 C62,40 72,36 82,38 C74,42 68,48 64,56 L74,74 L60,62 C54,66 46,66 40,62 C46,58 50,54 52,50 C46,46 38,44 30,44 Z" />
+    <path android:fillColor="#E0663C"
+        android:pathData="M52,50 C50,54 46,58 40,62 C44,64 48,64 51,62 Z" />
+</vector>

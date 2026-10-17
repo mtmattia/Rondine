@@ -62,3 +62,15 @@ coprono.
 | `rondine-nodo` | il nodo: casella postale, permessi, sveglia push, nomi utente, bacheca di scoperta |
 | `rondine-client` | logica del client e stato su disco; è ciò che usano CLI e app |
 | `rondine-cli` | binario `rondine` |
+| `rondine-ffi` | ponte UniFFI verso Kotlin, usato dall'app Android |
+| `android/` | app Android (Kotlin + Compose); compila `rondine-ffi` con cargo-ndk |
+
+## App Android
+
+- Application ID: `io.github.mtmattia.rondine` (non cambiarlo: romperebbe gli aggiornamenti).
+- Nessuna dipendenza Google o non libera: deve restare pubblicabile su F-Droid. Notifiche solo
+  UnifiedPush. Metadati per gli store in `fastlane/metadata/android/`.
+- Interfaccia ispirata alla struttura di WhatsApp (schede, lista chat, bolle), ma con colori,
+  logo e nome propri: niente elementi del marchio WhatsApp.
+- Build: `cd android && ./gradlew assembleDebug` (servono SDK, NDK 29, `cargo-ndk` e i target
+  Rust `aarch64-linux-android` e `x86_64-linux-android`).

@@ -1,6 +1,6 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("rete: {0}")]
+    #[error("{}", describe_http(.0))]
     Http(#[from] reqwest::Error),
     #[error("TLS: {0}")]
     Tls(#[from] rustls::Error),
@@ -35,3 +35,41 @@ impl Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Spiega un errore di rete in italiano, senza i dettagli tecnici della libreria HTTP.
+fn describe_http(e: &reqwest::Error) -> String {
+    if bad_certificate(e) {
+        return "il certificato del nodo non è valido: connessione rifiutata per sicurezza".into();
+    }
+    if e.is_timeout() {
+        "il nodo non risponde: tempo scaduto".into()
+    } else if e.is_connect() {
+        "nodo non raggiungibile: controlla la connessione e l'indirizzo del nodo".into()
+    } else if e.is_decode() || e.is_body() {
+        "risposta del nodo non valida".into()
+    } else {
+        "errore di rete nel parlare con il nodo".into()
+    }
+}
+
+/// Il TLS ha rifiutato il certificato? L'errore di rustls arriva avvolto in uno o più
+/// `io::Error`, che non lo espongono come `source()`: va cercato anche dentro.
+fn bad_certificate(e: &reqwest::Error) -> bool {
+    matches!(
+        find_rustls(e),
+        Some(rustls::Error::InvalidCertificate(_) | rustls::Error::NoCertificatesPresented)
+    )
+}
+
+fn find_rustls<'a>(err: &'a (dyn std::error::Error + 'static)) -> Option<&'a rustls::Error> {
+    if let Some(tls) = err.downcast_ref::<rustls::Error>() {
+        return Some(tls);
+    }
+    if let Some(inner) = err
+        .downcast_ref::<std::io::Error>()
+        .and_then(|io| io.get_ref())
+    {
+        return find_rustls(inner);
+    }
+    err.source().and_then(find_rustls)
+}

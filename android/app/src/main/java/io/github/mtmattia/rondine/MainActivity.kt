@@ -81,6 +81,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onRestart() {
+        super.onRestart()
+        // Di ritorno, magari dopo aver installato ntfy: riprova a registrare le notifiche.
+        if (Repo.ready.value == true && Repo.pushState.value != PushState.Active) setupPush(interactive = false)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
@@ -96,7 +102,7 @@ class MainActivity : ComponentActivity() {
     private fun setupPush(interactive: Boolean) {
         val distributors = UnifiedPush.getDistributors(this)
         if (distributors.isEmpty()) {
-            Repo.pushStatus.value = "Nessun distributore: installa ntfy da F-Droid"
+            Repo.setPush(PushState.NoDistributor, "Nessun distributore: installa ntfy da F-Droid")
             return
         }
         if (!interactive && UnifiedPush.getAckDistributor(this) != null) {
@@ -107,7 +113,7 @@ class MainActivity : ComponentActivity() {
             if (ok) {
                 UnifiedPush.register(this, messageForDistributor = "Rondine")
             } else {
-                Repo.pushStatus.value = "Distributore non scelto"
+                Repo.setPush(PushState.NotChosen, "Distributore non scelto")
             }
         }
     }
@@ -143,6 +149,7 @@ class MainActivity : ComponentActivity() {
                     onNewChat = { nav.navigate("nuova") },
                     onSettings = { nav.navigate("impostazioni") },
                     onMyQr = { nav.navigate("qr") },
+                    onPickPush = { setupPush(interactive = true) },
                 )
             }
             composable("chat/{id}") { entry ->

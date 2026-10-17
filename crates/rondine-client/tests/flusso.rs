@@ -279,3 +279,51 @@ async fn lista_chat_non_lette_e_preferiti() -> R {
     assert!(!luca_row.contact.favorite);
     Ok(())
 }
+
+/// Un server qualsiasi che risponde sempre con una pagina HTML (non un nodo Rondine).
+async fn start_html_server() -> Result<String, Box<dyn std::error::Error>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}", listener.local_addr()?);
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            let body = "<!doctype html><html><body>Benvenuto sul mio blog</body></html>";
+            let res = format!(
+                "HTTP/1.1 404 Not Found\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = sock.write_all(res.as_bytes()).await;
+        }
+    });
+    Ok(url)
+}
+
+#[tokio::test]
+async fn errori_di_rete_comprensibili() -> R {
+    let tmp = TempDir::new()?;
+
+    // Un sito che non è un nodo: niente HTML grezzo nel messaggio.
+    let html = start_html_server().await?;
+    let err = Client::create(&tmp.path().join("a"), "Mattia", &html)
+        .await
+        .err()
+        .ok_or("doveva fallire")?
+        .to_string();
+    assert!(err.contains("non sembra un nodo Rondine"), "{err}");
+    assert!(!err.contains("<html"), "{err}");
+
+    // Nessuno in ascolto: si dice che il nodo non è raggiungibile.
+    let free = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let dead = format!("http://{}", free.local_addr()?);
+    drop(free);
+    let err = Client::create(&tmp.path().join("b"), "Mattia", &dead)
+        .await
+        .err()
+        .ok_or("doveva fallire")?
+        .to_string();
+    assert!(err.contains("non raggiungibile"), "{err}");
+    assert!(!err.contains("error sending request"), "{err}");
+    Ok(())
+}

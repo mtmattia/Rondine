@@ -53,7 +53,10 @@ QR.
 - [x] benvenuto, lista chat con filtri e non lette, chat, nuova chat, QR, impostazioni,
       numero di sicurezza, blocco
 - [x] provata su emulatore con un nodo vero e un secondo utente da CLI
-- [ ] icona definitiva
+- [x] icona definitiva
+- [x] avviso quando mancano le notifiche (nessun distributore UnifiedPush)
+- [x] errori di rete comprensibili (certificato, nodo irraggiungibile, indirizzo sbagliato)
+- [ ] colori dell'app presi dall'icona
 - [ ] lettura del QR con la fotocamera
 - [ ] pagina https per aprire i link d'invito da SMS e browser
 - [ ] prova di UnifiedPush con ntfy su telefono vero

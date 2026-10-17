@@ -1,5 +1,9 @@
 package io.github.mtmattia.rondine.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -29,6 +33,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -65,12 +70,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.mtmattia.rondine.PushState
 import io.github.mtmattia.rondine.Repo
 import kotlinx.coroutines.launch
 import uniffi.rondine_ffi.ChatRow
@@ -93,6 +100,7 @@ fun HomeScreen(
     onNewChat: () -> Unit,
     onSettings: () -> Unit,
     onMyQr: () -> Unit,
+    onPickPush: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
@@ -163,7 +171,7 @@ fun HomeScreen(
     ) { padding ->
         val m = Modifier.padding(padding)
         when (tab) {
-            0 -> ChatList(chats, onOpenChat, onNewChat, m)
+            0 -> ChatList(chats, onOpenChat, onNewChat, onPickPush, m)
             1 -> ComingSoon(
                 Icons.Outlined.Update, "Aggiornamenti in arrivo",
                 "Qui arriveranno gli stati dei tuoi contatti, cifrati come i messaggi.", m,
@@ -203,8 +211,11 @@ private fun ChatList(
     chats: List<ChatRow>,
     onOpenChat: (String) -> Unit,
     onNewChat: () -> Unit,
+    onPickPush: () -> Unit,
     modifier: Modifier,
 ) {
+    val push by Repo.pushState.collectAsState()
+    var pushHidden by remember { mutableStateOf(Repo.pushBannerHidden()) }
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(Filter.Tutte) }
     val shown = chats.filter { row ->
@@ -220,6 +231,14 @@ private fun ChatList(
     }
 
     LazyColumn(modifier.fillMaxSize()) {
+        if (!pushHidden && push in setOf(PushState.NoDistributor, PushState.NotChosen, PushState.Failed)) {
+            item {
+                PushBanner(push, onPickPush) {
+                    Repo.hidePushBanner()
+                    pushHidden = true
+                }
+            }
+        }
         item { SearchPill(query) { query = it } }
         item {
             LazyRow(
@@ -270,6 +289,65 @@ private fun ChatList(
         }
         items(shown, key = { it.contact.id }) { row -> ChatListItem(row, onOpenChat) }
         item { Spacer(Modifier.height(88.dp)) }
+    }
+}
+
+/** Avviso quando le notifiche non possono arrivare: senza distributore UnifiedPush i messaggi
+ *  si ritirano solo con l'app aperta. */
+@Composable
+private fun PushBanner(state: PushState, onPickPush: () -> Unit, onLater: () -> Unit) {
+    val context = LocalContext.current
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.NotificationsOff, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "Notifiche spente",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                when (state) {
+                    PushState.NoDistributor ->
+                        "Rondine non usa i server di Google: per le notifiche serve un'app come ntfy. " +
+                            "Senza, i messaggi arrivano solo quando apri Rondine."
+                    PushState.NotChosen ->
+                        "Scegli l'app che ti sveglia quando arriva un messaggio. " +
+                            "Senza, i messaggi arrivano solo quando apri Rondine."
+                    else ->
+                        "Non riesco ad attivare le notifiche. " +
+                            "Finché non funzionano, i messaggi arrivano solo quando apri Rondine."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onLater) { Text("Più tardi") }
+                if (state == PushState.NoDistributor) {
+                    TextButton(onClick = { openStore(context, NTFY_PACKAGE) }) { Text("Installa ntfy") }
+                } else {
+                    TextButton(onClick = onPickPush) { Text("Attiva") }
+                }
+            }
+        }
+    }
+}
+
+private const val NTFY_PACKAGE = "io.heckel.ntfy"
+
+/** Apre la scheda dell'app nello store installato (F-Droid o altri), altrimenti il sito di F-Droid. */
+private fun openStore(context: Context, pkg: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")))
+    } catch (_: ActivityNotFoundException) {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/$pkg/")))
     }
 }
 

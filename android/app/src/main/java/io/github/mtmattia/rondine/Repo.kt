@@ -19,6 +19,18 @@ import uniffi.rondine_ffi.RondineException
 import uniffi.rondine_ffi.createProfile
 import uniffi.rondine_ffi.openProfile
 
+/** Stato delle notifiche UnifiedPush, per l'avviso nella lista chat. */
+enum class PushState {
+    /** Non ancora controllato (all'avvio). */
+    Unknown,
+    Active,
+    /** Nessuna app distributore (es. ntfy) installata. */
+    NoDistributor,
+    /** C'è un distributore ma non è stato scelto. */
+    NotChosen,
+    Failed,
+}
+
 /** Stato dell'app e accesso al client Rust. Unico punto che parla con `rondine-ffi`. */
 object Repo {
     private lateinit var app: Context
@@ -33,6 +45,7 @@ object Repo {
     /** Cresce a ogni cambiamento: le schermate lo osservano per ricaricare. */
     val revision = MutableStateFlow(0L)
     val pushStatus = MutableStateFlow("Non configurate")
+    val pushState = MutableStateFlow(PushState.Unknown)
     /** Link d'invito arrivato da fuori (rondine:invito/…), in attesa di conferma. */
     val pendingInvite = MutableStateFlow<String?>(null)
     /** Messaggio da mostrare all'utente (errori fuori da una schermata precisa). */
@@ -97,9 +110,9 @@ object Repo {
         scope.launch {
             try {
                 client().setPushEndpoint(url)
-                pushStatus.value = "Attive"
+                setPush(PushState.Active, "Attive")
             } catch (e: Exception) {
-                pushStatus.value = "Errore: ${e.message}"
+                setPush(PushState.Failed, "Errore: ${e.message}")
             }
         }
     }
@@ -108,7 +121,26 @@ object Repo {
         scope.launch { sync() }
     }
 
+    fun setPush(state: PushState, text: String) {
+        pushState.value = state
+        pushStatus.value = text
+    }
+
+    /** "Più tardi" sull'avviso delle notifiche: lo nasconde per qualche giorno. */
+    fun pushBannerHidden(): Boolean =
+        prefs().getLong(PREF_PUSH_LATER, 0) > System.currentTimeMillis()
+
+    fun hidePushBanner() {
+        prefs().edit().putLong(PREF_PUSH_LATER, System.currentTimeMillis() + PUSH_LATER_MS).apply()
+    }
+
+    private fun prefs() = app.getSharedPreferences("rondine", Context.MODE_PRIVATE)
+
+    private const val PREF_PUSH_LATER = "push_banner_later_until"
+    private const val PUSH_LATER_MS = 3L * 24 * 60 * 60 * 1000
+
     fun onPushGone(reason: String) {
+        pushState.value = PushState.Failed
         pushStatus.value = reason
         scope.launch {
             try { client().clearPushEndpoint() } catch (_: Exception) {}

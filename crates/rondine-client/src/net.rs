@@ -41,13 +41,19 @@ impl Net {
             return Ok(bytes);
         }
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+        // Un nodo Rondine risponde sempre con {"error", "message"} (SPEC §11); altrimenti
+        // l'indirizzo è di un altro sito, e la sua pagina non va mostrata all'utente.
+        let (Some(code), Some(message)) = (v["error"].as_str(), v["message"].as_str()) else {
+            return Err(Error::Node {
+                status: status.as_u16(),
+                code: "not_rondine".into(),
+                message: "questo indirizzo non sembra un nodo Rondine".into(),
+            });
+        };
         Err(Error::Node {
             status: status.as_u16(),
-            code: v["error"].as_str().unwrap_or("unknown").to_string(),
-            message: v["message"]
-                .as_str()
-                .map(str::to_string)
-                .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned()),
+            code: code.to_string(),
+            message: message.to_string(),
         })
     }
 

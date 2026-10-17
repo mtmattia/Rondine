@@ -32,7 +32,8 @@ impl From<rondine_client::Error> for RondineError {
     fn from(e: rondine_client::Error) -> Self {
         use rondine_client::Error as E;
         match e {
-            E::Node { .. } => RondineError::Node(e.to_string()),
+            // Nell'app basta il testo del nodo, senza lo stato HTTP.
+            E::Node { message, .. } => RondineError::Node(message),
             E::Http(_) => RondineError::Network(e.to_string()),
             E::NotFound(m) => RondineError::NotFound(m),
             E::Invalid(m) => RondineError::Invalid(m),

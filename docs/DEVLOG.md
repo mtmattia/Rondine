@@ -22,3 +22,7 @@ Una riga per modifica: data, cosa è cambiato.
   l'app inizializza il verificatore con `Tls.init(context)`; il pezzo Kotlin della libreria è
   compilato dal sorgente. `Pusher::new` del nodo ora restituisce un errore invece di poter fare
   panic. Provato sull'emulatore: certificati validi accettati, autofirmati rifiutati.
+- 2026-10-17 — Errori di rete in italiano nel client (certificato non valido, nodo non
+  raggiungibile, indirizzo che non è un nodo Rondine) invece del testo di reqwest o dell'HTML del
+  sito; test di accettazione. App: avviso "Notifiche spente" nella lista chat quando manca un
+  distributore UnifiedPush, con "Installa ntfy" o "Attiva"; riprova a registrarsi al ritorno.

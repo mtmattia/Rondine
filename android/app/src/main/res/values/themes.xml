@@ -4,5 +4,5 @@
         <item name="android:windowBackground">@color/splash_bg</item>
     </style>
     <color name="splash_bg">#FFFFFF</color>
-    <color name="ic_bg">#1D4E89</color>
+    <color name="ic_bg">#A8D5BA</color>
 </resources>

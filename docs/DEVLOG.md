@@ -14,3 +14,6 @@ Una riga per modifica: data, cosa è cambiato.
   (AGP 9.3, Kotlin 2.4, Compose) che compila il core Rust con cargo-ndk. Schermate in stile
   WhatsApp con marchio proprio. Provata su emulatore contro un nodo vero e un utente da CLI.
   Metadati fastlane per F-Droid. Stato di lettura e preferiti nel client.
+- 2026-10-17 — Icona definitiva dell'app (disegno in `android/icona/rondine.svg`, sfondo verde
+  salvia), versione monocromatica e icona delle notifiche. Test di accettazione per lista chat,
+  non lette e preferiti.

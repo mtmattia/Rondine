@@ -228,3 +228,54 @@ async fn sveglia_unifiedpush_dopo_un_deposito() -> R {
     assert_eq!(wakes, [WAKE_BODY], "la sveglia non deve contenere altro");
     Ok(())
 }
+
+#[tokio::test]
+async fn lista_chat_non_lette_e_preferiti() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let mut luca = profile(&tmp, "Luca", &node).await?;
+
+    silvia.add_from_invite(&mattia.invite_link()?).await?;
+    luca.add_from_invite(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+
+    silvia.send_text(&mattia.identity(), "uno").await?;
+    silvia.send_text(&mattia.identity(), "due").await?;
+    mattia.sync().await?;
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    luca.send_text(&mattia.identity(), "ciao").await?;
+    mattia.sync().await?;
+
+    // La conversazione più recente in cima, con l'ultimo messaggio e le non lette.
+    let chats = mattia.chats();
+    let names: Vec<_> = chats
+        .iter()
+        .map(|c| c.contact.display_name.as_str())
+        .collect();
+    assert_eq!(names, ["Luca", "Silvia"]);
+    assert_eq!(chats[1].unread, 2);
+    assert_eq!(chats[1].last.as_ref().map(|m| m.body.as_str()), Some("due"));
+
+    // Aprire la chat azzera le non lette, e lo stato resta salvato su disco.
+    mattia.mark_read(&silvia.identity())?;
+    mattia.set_favorite(&silvia.identity(), true)?;
+    // I messaggi che mando io non contano come non letti.
+    mattia.send_text(&luca.identity(), "eccomi").await?;
+    let mattia = Client::open(&tmp.path().join("Mattia"))?;
+    let chats = mattia.chats();
+    let silvia_row = chats
+        .iter()
+        .find(|c| c.contact.identity == silvia.identity())
+        .ok_or("Silvia manca")?;
+    assert_eq!(silvia_row.unread, 0);
+    assert!(silvia_row.contact.favorite);
+    let luca_row = chats
+        .iter()
+        .find(|c| c.contact.identity == luca.identity())
+        .ok_or("Luca manca")?;
+    assert_eq!(luca_row.unread, 1);
+    assert!(!luca_row.contact.favorite);
+    Ok(())
+}

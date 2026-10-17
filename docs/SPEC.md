@@ -61,10 +61,12 @@ Record (`Signed<NameClaim>`, firmato dall'identità):
 
 `card.signer` deve coincidere con `signer` del record.
 
-**Link al nome:** `rondine:@nome@nodo`. È corto, quindi va bene per un QR leggibile da qualsiasi
-fotocamera; chi lo apre cerca il nome sul nodo e ottiene il biglietto. A differenza del link
-d'invito non si può reimpostare: il nome è pubblico per scelta (per non farsi trovare lo si
-libera). L'app lo mette nel QR quando la persona ha un nome, altrimenti usa il link d'invito.
+**Link al nome:** `<URL del nodo>/@nome` (es. `https://rondine.example/@mattia`). È il link che
+si condivide (SMS, chat, QR): è corto, si clicca ovunque e il nodo risponde con una pagina che
+apre l'app con `rondine:@nome@nodo` (§11). Chi lo apre cerca il nome sul nodo e ottiene il
+biglietto. A differenza del link d'invito non si può reimpostare: il nome è pubblico per scelta
+(per non farsi trovare lo si libera). L'app lo usa quando la persona ha un nome, altrimenti usa il
+link d'invito web (§4.1).
 
 ### 3.3 Numero di telefono
 Formato E.164 (`+393401234567`). Normalizzazione lato client: si tolgono spazi, trattini, punti
@@ -94,7 +96,11 @@ Dice chi sei e come consegnarti messaggi. `Signed<Card>`, firmato dall'identità
 `rondine:invito/<b64 del JSON di Signed<Card>>`
 
 Il link si condivide per altre vie (SMS, di persona con un QR). Chi lo apre ottiene il
-biglietto. Il permesso dentro il biglietto ha etichetta `invito` e si può revocare.
+biglietto.
+
+**Forma web:** `<URL del nodo>/invito#<b64 del JSON di Signed<Card>>`, cliccabile in SMS e chat.
+Il biglietto sta dopo `#`: il browser non lo manda mai al nodo, che serve solo una pagina fissa
+la quale apre l'app con `rondine:invito/<b64>` (§11). Il client accetta tutte e due le forme. Il permesso dentro il biglietto ha etichetta `invito` e si può revocare.
 
 ## 5. Permesso di consegna
 
@@ -236,3 +242,10 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `GET /v1/board/{loc}` | — | `[{owner, blob, expires_at}]` |
 
 Gli errori sono `{"error": "<codice>", "message": "<testo>"}` con lo stato HTTP adatto.
+
+Pagine per i link condivisi (HTML, fuori da `/v1`, nessun dato salvato):
+
+| Metodo e percorso | Cosa fa |
+|---|---|
+| `GET /@{nome}` | pagina con "Apri in Rondine" → `rondine:@nome@nodo`; 404 se il nome non è valido |
+| `GET /invito` | pagina fissa: uno script legge il frammento `#…` e apre `rondine:invito/…` |

@@ -208,6 +208,7 @@ async fn main() -> anyhow::Result<()> {
             );
             println!("Numero:   {}", s.phone.as_deref().unwrap_or("—"));
             println!("Bacheche: {}", s.boards.join(", "));
+            println!("Link:     {}", c.share_link()?);
             println!("Invito:   {}", c.invite_link()?);
         }
         Cmd::Invito { nuovo } => {

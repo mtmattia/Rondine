@@ -371,37 +371,77 @@ async fn errori_di_rete_comprensibili() -> R {
 }
 
 #[tokio::test]
-async fn link_corto_col_nome_e_aggiunta_da_qualsiasi_forma() -> R {
+async fn link_web_da_condividere_e_aggiunta_da_qualsiasi_forma() -> R {
     let node = start_node().await?;
     let tmp = TempDir::new()?;
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
     let mut silvia = profile(&tmp, "Silvia", &node).await?;
     let mut luca = profile(&tmp, "Luca", &node).await?;
 
-    // Senza nome utente il link da condividere è quello d'invito.
-    assert_eq!(mattia.share_link()?, mattia.invite_link()?);
+    // Senza nome utente si condivide l'invito in forma web: cliccabile, e il biglietto sta dopo
+    // `#`, che il browser non manda al nodo.
+    let invite = mattia.invite_link()?;
+    let b64 = invite.strip_prefix("rondine:invito/").ok_or("prefisso")?;
+    assert_eq!(mattia.share_link()?, format!("{node}/invito#{b64}"));
 
-    // Con il nome diventa corto: va bene per un QR leggibile.
+    // Con il nome il link è corto: <nodo>/@nome.
     let handle = mattia.claim_username("mattia").await?;
     let link = mattia.share_link()?;
-    assert_eq!(link, format!("rondine:@{handle}"));
-    assert!(link.len() < 60, "{link}");
+    assert_eq!(link, format!("{node}/@mattia"));
 
-    // Una sola funzione per aggiungere: link corto, link d'invito o nome scritto a mano.
-    let c = silvia.add(&format!("  {link}\n")).await?;
+    // Una sola funzione per aggiungere: link web al nome, invito web, link rondine:, nome a mano.
+    let c = silvia
+        .add(&format!("  Scrivimi su Rondine: {link}\n"))
+        .await?;
     assert_eq!(c.username.as_deref(), Some(handle.as_str()));
-    let c = luca.add(&mattia.invite_link()?).await?;
+    let c = luca.add(&format!("{node}/invito#{b64}")).await?;
     assert_eq!(c.display_name, "Mattia");
     let mut anna = profile(&tmp, "Anna", &node).await?;
-    let c = anna.add(&format!("@{handle}")).await?;
+    let c = anna.add(&format!("rondine:@{handle}")).await?;
+    assert_eq!(c.display_name, "Mattia");
+    let mut bruno = profile(&tmp, "Bruno", &node).await?;
+    let c = bruno.add(&format!("@{handle}")).await?;
+    assert_eq!(c.display_name, "Mattia");
+    let mut carla = profile(&tmp, "Carla", &node).await?;
+    let c = carla.add(&invite).await?;
     assert_eq!(c.display_name, "Mattia");
 
     // Testo che non è niente di tutto questo: errore chiaro.
-    let err = anna
+    let err = carla
         .add("ciao come stai")
         .await
         .err()
         .ok_or("doveva fallire")?;
     assert!(err.to_string().contains("non riconosciuto"), "{err}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn pagine_web_dei_link_condivisi() -> R {
+    let node = start_node().await?;
+    let host = node.trim_start_matches("http://");
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let http = reqwest::Client::new();
+
+    // /@nome: pagina che apre l'app sul nome di questo nodo.
+    let res = http.get(format!("{node}/@mattia")).send().await?;
+    assert_eq!(res.status(), 200);
+    assert!(
+        res.headers()["content-type"]
+            .to_str()?
+            .starts_with("text/html")
+    );
+    let page = res.text().await?;
+    assert!(page.contains(&format!("rondine:@mattia@{host}")), "{page}");
+
+    // Un nome non valido non finisce nella pagina (niente HTML iniettato).
+    let res = http.get(format!("{node}/@%3Cscript%3E")).send().await?;
+    assert_eq!(res.status(), 404);
+
+    // /invito: pagina fissa, il biglietto lo legge lo script dal frammento.
+    let res = http.get(format!("{node}/invito")).send().await?;
+    assert_eq!(res.status(), 200);
+    let page = res.text().await?;
+    assert!(page.contains("rondine:invito/"), "{page}");
     Ok(())
 }

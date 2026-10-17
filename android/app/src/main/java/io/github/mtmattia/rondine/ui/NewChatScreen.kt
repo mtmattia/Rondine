@@ -160,7 +160,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
                 }
             }
             item {
-                ActionRow(Icons.Filled.Link, "Incolla link d'invito", "rondine:invito/…") { dialog = AddDialog.Invite }
+                ActionRow(Icons.Filled.Link, "Incolla un link", "Il link che ti hanno mandato in un messaggio") { dialog = AddDialog.Invite }
             }
             item {
                 ActionRow(Icons.Filled.Contacts, "Trova dalla rubrica", "Chi ha il tuo numero e usa Rondine") {
@@ -173,7 +173,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
             }
             item {
                 ActionRow(Icons.Filled.Sms, "Invita via SMS", "Manda il tuo link a chi non usa ancora Rondine") {
-                    val link = profile?.inviteLink ?: return@ActionRow
+                    val link = profile?.shareLink ?: return@ActionRow
                     val sms = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:"))
                         .putExtra("sms_body", inviteText(link))
                     try {
@@ -244,9 +244,9 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
             }
         }
         AddDialog.Invite -> TextDialog(
-            title = "Link d'invito",
+            title = "Incolla un link",
             label = "Link",
-            placeholder = "rondine:invito/…",
+            placeholder = "https://…",
             initial = clipboardInvite(context),
             onDismiss = { dialog = null },
         ) { value ->
@@ -333,8 +333,7 @@ fun TextDialog(
     )
 }
 
-fun inviteText(link: String) =
-    "Scrivimi su Rondine, il messenger senza centralino. Apri questo link nell'app:\n$link"
+fun inviteText(link: String) = "Scrivimi su Rondine: $link"
 
 fun shareIntent(link: String): Intent = Intent.createChooser(
     Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, inviteText(link)),
@@ -344,7 +343,8 @@ fun shareIntent(link: String): Intent = Intent.createChooser(
 private fun clipboardInvite(context: Context): String {
     val cm = context.getSystemService(ClipboardManager::class.java) ?: return ""
     val text = cm.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return ""
-    return Regex("rondine:invito/[A-Za-z0-9_-]+").find(text)?.value ?: ""
+    // Il link d'invito o al nome, anche dentro un messaggio incollato per intero.
+    return Regex("""(rondine:\S+|https?://\S+/(@[a-z0-9._]+|invito#[A-Za-z0-9_-]+))""").find(text)?.value ?: ""
 }
 
 /** Tutti i numeri della rubrica (restano sul telefono: al nodo vanno solo voci cifrate). */

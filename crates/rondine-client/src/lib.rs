@@ -10,9 +10,7 @@ use reqwest::Method;
 use rondine_core::card::{INVITE_PREFIX, invite_link, parse_invite, verify_card};
 use rondine_core::discovery::{self, BoardEntry, DiscoveryRecord};
 use rondine_core::envelope::{AppMessage, Envelope};
-use rondine_core::username::{
-    Handle, NAME_LINK_PREFIX, NameClaim, name_link, node_host, normalize_name,
-};
+use rondine_core::username::{Handle, NAME_LINK_PREFIX, NameClaim, node_host, normalize_name};
 use rondine_core::{
     Card, Identity, PublicKey, Signed, SignedCard, SignedPermit, b64, check_version, now, phone,
     random_id, safety,
@@ -185,11 +183,22 @@ impl Client {
         Ok(invite_link(&self.card_with(&self.state.invite_permit)?)?)
     }
 
-    /// Link da mettere nel QR: quello corto col nome utente se c'è, altrimenti il link d'invito.
+    /// Link da condividere (SMS, chat, QR), cliccabile ovunque: `<nodo>/@nome` se c'è un nome
+    /// utente, altrimenti l'invito web `<nodo>/invito#…` (SPEC §3.2, §4.1).
     pub fn share_link(&self) -> Result<String> {
         match &self.state.username {
-            Some(handle) => Ok(name_link(handle)),
-            None => self.invite_link(),
+            Some(handle) => {
+                let h = Handle::parse(handle)?;
+                Ok(format!("{}/@{}", h.node_url(), h.name))
+            }
+            None => {
+                let invite = self.invite_link()?;
+                let b64 = invite.strip_prefix(INVITE_PREFIX).unwrap_or(&invite);
+                Ok(format!(
+                    "{}/invito#{b64}",
+                    self.state.node.trim_end_matches('/')
+                ))
+            }
         }
     }
 
@@ -331,16 +340,17 @@ impl Client {
         self.connect(card, Source::Nome).await
     }
 
-    /// Aggiunge un contatto da quello che l'utente ha in mano: link d'invito, link corto
-    /// `rondine:@nome@nodo` (dal QR) o nome utente scritto a mano.
+    /// Aggiunge un contatto da quello che l'utente ha in mano: link web (`<nodo>/@nome`,
+    /// `<nodo>/invito#…`), link `rondine:` o nome utente scritto a mano, anche dentro un
+    /// messaggio incollato per intero.
     pub async fn add(&mut self, input: &str) -> Result<Contact> {
-        let s = input.trim();
-        if s.starts_with(INVITE_PREFIX) {
-            return self.add_from_invite(s).await;
-        }
-        let handle = s.strip_prefix(NAME_LINK_PREFIX).unwrap_or(s);
-        if Handle::parse(handle).is_ok() {
-            return self.add_by_username(handle).await;
+        for token in input.split_whitespace() {
+            let t = token.trim_matches(|c: char| "<>\"'(),;".contains(c) || c == '.');
+            match parse_target(t) {
+                Some(Target::Invite(link)) => return self.add_from_invite(&link).await,
+                Some(Target::Name(handle)) => return self.add_by_username(&handle).await,
+                None => {}
+            }
         }
         Err(Error::Invalid(
             "testo non riconosciuto: serve un link d'invito o un nome come @nome@nodo".into(),
@@ -1040,4 +1050,40 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     std::fs::rename(tmp, path)?;
     Ok(())
+}
+
+/// Cosa indica un link condiviso.
+enum Target {
+    Invite(String),
+    Name(String),
+}
+
+fn parse_target(t: &str) -> Option<Target> {
+    if t.starts_with(INVITE_PREFIX) {
+        return Some(Target::Invite(t.to_string()));
+    }
+    if let Some(h) = t.strip_prefix(NAME_LINK_PREFIX) {
+        return Handle::parse(h).ok().map(|_| Target::Name(h.to_string()));
+    }
+    if t.starts_with("https://") || t.starts_with("http://") {
+        let url = reqwest::Url::parse(t).ok()?;
+        let host = match (url.host_str()?, url.port()) {
+            (h, Some(p)) => format!("{h}:{p}"),
+            (h, None) => h.to_string(),
+        };
+        if let Some(name) = url.path().strip_prefix("/@") {
+            let handle = format!("{name}@{host}");
+            return Handle::parse(&handle).ok().map(|_| Target::Name(handle));
+        }
+        if url.path() == "/invito" {
+            return url
+                .fragment()
+                .map(|b64| Target::Invite(format!("{INVITE_PREFIX}{b64}")));
+        }
+        return None;
+    }
+    if t.contains('@') && Handle::parse(t).is_ok() {
+        return Some(Target::Name(t.to_string()));
+    }
+    None
 }

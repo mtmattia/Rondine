@@ -43,3 +43,8 @@ Una riga per modifica: data, cosa è cambiato.
   thread che chiama. Corretto: eccezioni http per i server CRL (elenco di
   rustls-platform-verifier, issue #221) e operazioni di rete del ponte eseguite sui thread di
   tokio. Nelle build di prova gli errori di rete mostrano anche il dettaglio tecnico.
+- 2026-10-17 — Link da condividere cliccabili: `<nodo>/@nome` o `<nodo>/invito#…` (il biglietto
+  dopo `#` non arriva al nodo) al posto del lungo `rondine:invito/…`; il nodo serve le pagine
+  `GET /@{nome}` e `GET /invito` che aprono l'app (SPEC §3.2, §4.1, §11). `Client::add` trova il
+  link anche dentro un messaggio incollato. App: SMS, Condividi, Copia e QR usano il link web;
+  CLI `rondine io` stampa il link. Provato sull'emulatore da Chrome fino al contatto aggiunto.

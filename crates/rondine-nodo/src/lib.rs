@@ -2,6 +2,7 @@
 
 mod push;
 mod store;
+mod web;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -101,6 +102,8 @@ pub fn router(state: AppState) -> Router {
             put(put_name).get(get_name).delete(delete_name),
         )
         .route("/v1/board/{loc}", put(put_board).get(get_board))
+        .route("/invito", get(web::invite_page))
+        .route("/{at_name}", get(web::name_page))
         .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES * 2))
         .with_state(state)
 }

@@ -130,8 +130,7 @@ fun MyQrScreen(onBack: () -> Unit) {
             }
             Text(
                 if (p.username != null) {
-                    "Chi inquadra questo codice ti trova con il tuo nome utente e ti può scrivere. " +
-                        "Il link d'invito (Condividi, Copia) si può reimpostare se finisce in mani sbagliate."
+                    "Chi inquadra questo codice o apre il tuo link ti trova con il tuo nome utente e ti può scrivere."
                 } else {
                     "Chi inquadra questo codice o apre il tuo link ti può scrivere. Se il link finisce in mani sbagliate, reimpostalo."
                 },
@@ -140,14 +139,14 @@ fun MyQrScreen(onBack: () -> Unit) {
                 fontSize = 14.sp,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { context.startActivity(shareIntent(p.inviteLink)) }) {
+                Button(onClick = { context.startActivity(shareIntent(p.shareLink)) }) {
                     Icon(Icons.Filled.Share, null)
                     Spacer(Modifier.width(8.dp))
                     Text("Condividi")
                 }
                 OutlinedButton(onClick = {
                     context.getSystemService(ClipboardManager::class.java)
-                        ?.setPrimaryClip(ClipData.newPlainText("Link d'invito Rondine", p.inviteLink))
+                        ?.setPrimaryClip(ClipData.newPlainText("Link Rondine", p.shareLink))
                     scope.launch { snackbar.showSnackbar("Link copiato") }
                 }) {
                     Icon(Icons.Filled.ContentCopy, null)
@@ -155,10 +154,13 @@ fun MyQrScreen(onBack: () -> Unit) {
                     Text("Copia")
                 }
             }
-            TextButton(onClick = { confirmReset = true }) {
-                Icon(Icons.Filled.Refresh, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Reimposta il link")
+            // Col nome utente si condivide il link al nome, che non si reimposta (si libera il nome).
+            if (p.username == null) {
+                TextButton(onClick = { confirmReset = true }) {
+                    Icon(Icons.Filled.Refresh, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Reimposta il link")
+                }
             }
         }
     }

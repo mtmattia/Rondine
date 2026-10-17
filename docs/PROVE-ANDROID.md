@@ -40,3 +40,21 @@ niente apostrofi).
 - La fotocamera posteriore dell'AVD è `virtualscene` (`hw.camera.back` in `config.ini`) e
   `adb emu virtualscene-image wall <png>` appende un'immagine al muro della stanza virtuale; per
   inquadrarla serve muovere la fotocamera (gRPC dell'emulatore), non ancora automatizzato.
+
+## Telefono vero con un nodo su Tailscale (senza dominio)
+
+Il nodo gira sul computer come servizio dell'utente e `tailscale serve` gli dà un indirizzo
+HTTPS con certificato valido, raggiungibile solo dai dispositivi della propria tailnet
+(`tailscale funnel` lo apre a internet):
+
+```sh
+cargo build --release -p rondine-nodo && install -m755 target/release/rondine-nodo ~/.local/bin/
+# ~/.config/systemd/user/rondine-nodo.service: RONDINE_BIND=127.0.0.1:8340,
+# RONDINE_PUBLIC_URL=https://<macchina>.<tailnet>.ts.net, RONDINE_DATA=~/.local/share/rondine/nodo
+systemctl --user enable --now rondine-nodo
+sudo tailscale set --operator=$USER   # una volta sola
+tailscale serve --bg --https=443 http://127.0.0.1:8340
+```
+
+Con `rondine.nodo=https://<macchina>.<tailnet>.ts.net` in `~/.gradle/gradle.properties` l'APK
+propone quel nodo al primo avvio sui telefoni veri (sull'emulatore resta `127.0.0.1:8330`).

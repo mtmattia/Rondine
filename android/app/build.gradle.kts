@@ -23,6 +23,11 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+
+        // Nodo proposto al primo avvio sui telefoni veri, da `rondine.nodo` in
+        // ~/.gradle/gradle.properties (fuori dal repository). Vuoto: si scrive a mano.
+        val defaultNode = (findProperty("rondine.nodo") as String?).orEmpty()
+        buildConfigField("String", "DEFAULT_NODE", "\"$defaultNode\"")
     }
 
     buildTypes {
@@ -43,6 +48,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     sourceSets {

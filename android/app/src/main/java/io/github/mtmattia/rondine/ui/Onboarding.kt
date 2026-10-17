@@ -1,5 +1,6 @@
 package io.github.mtmattia.rondine.ui
 
+import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mtmattia.rondine.R
+import io.github.mtmattia.rondine.BuildConfig
 import io.github.mtmattia.rondine.Repo
 import kotlinx.coroutines.launch
 import uniffi.rondine_ffi.RondineException
@@ -48,7 +50,7 @@ fun Onboarding() {
     val scope = rememberCoroutineScope()
     var started by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
-    var node by rememberSaveable { mutableStateOf(if (Repo.isDebug) "http://127.0.0.1:8330" else "https://") }
+    var node by rememberSaveable { mutableStateOf(defaultNode()) }
     var phone by rememberSaveable { mutableStateOf("") }
     var busy by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
@@ -117,3 +119,14 @@ fun Onboarding() {
         }
     }
 }
+
+/** Nodo proposto: quello locale sull'emulatore (prove con adb reverse), altrimenti quello
+ *  configurato in fase di build, altrimenti si scrive a mano. */
+private fun defaultNode(): String = when {
+    Repo.isDebug && isEmulator() -> "http://127.0.0.1:8330"
+    BuildConfig.DEFAULT_NODE.isNotEmpty() -> BuildConfig.DEFAULT_NODE
+    else -> "https://"
+}
+
+private fun isEmulator(): Boolean =
+    Build.HARDWARE == "ranchu" || Build.HARDWARE == "goldfish" || Build.FINGERPRINT.contains("generic")

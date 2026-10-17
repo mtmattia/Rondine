@@ -20,6 +20,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Numero di sicurezza | ✅ | SPEC §10 |
 | Notifiche push (UnifiedPush) | ✅ | provate sull'emulatore con ntfy e un server ntfy locale, anche ad app chiusa |
 | Notifiche iPhone (APNs) | ⬜ | dopo Android |
+| Notifiche via Google (FCM), versione Play | ⬜ | facoltativo: distributore FCM incorporato di UnifiedPush + gateway; serve un progetto Firebase; la versione F-Droid resta senza Google |
 | Gruppi | ⬜ | MLS li supporta già |
 | Foto, file, messaggi vocali | ⬜ | come blob cifrati |
 | Conferme di lettura, "sta scrivendo" | ⬜ | |

@@ -321,3 +321,23 @@ impl Rondine {
         Ok(self.client.lock().await.clear_push_endpoint().await?)
     }
 }
+
+/// Inizializzazione del TLS su Android: `Tls.init(context)` in Kotlin, prima di ogni chiamata
+/// di rete. Senza, le connessioni HTTPS ai nodi falliscono (ma senza panic).
+#[cfg(target_os = "android")]
+mod android_tls {
+    use jni::EnvUnowned;
+    use jni::errors::ThrowRuntimeExAndDefault;
+    use jni::objects::JObject;
+
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_io_github_mtmattia_rondine_Tls_init<'caller>(
+        mut unowned_env: EnvUnowned<'caller>,
+        _this: JObject<'caller>,
+        context: JObject<'caller>,
+    ) {
+        unowned_env
+            .with_env(|env| rustls_platform_verifier::android::init_with_env(env, context))
+            .resolve::<ThrowRuntimeExAndDefault>()
+    }
+}

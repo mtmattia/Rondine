@@ -2,10 +2,21 @@
 
 use reqwest::Method;
 use rondine_core::{Identity, auth, now};
+use rustls_platform_verifier::BuilderVerifierExt;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::{Error, Result};
+
+/// rustls con la crittografia di ring e i certificati di cui si fida il sistema operativo
+/// (su Android l'archivio di sistema, inizializzato dall'app con `rondine-ffi`).
+fn tls_config() -> Result<rustls::ClientConfig> {
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    Ok(rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()?
+        .with_platform_verifier()?
+        .with_no_client_auth())
+}
 
 #[derive(Clone)]
 pub struct Net {
@@ -15,6 +26,7 @@ pub struct Net {
 impl Net {
     pub fn new() -> Result<Self> {
         let http = reqwest::Client::builder()
+            .tls_backend_preconfigured(tls_config()?)
             .timeout(std::time::Duration::from_secs(30))
             .user_agent(concat!("rondine-client/", env!("CARGO_PKG_VERSION")))
             .build()?;

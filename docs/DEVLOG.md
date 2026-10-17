@@ -17,3 +17,8 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-17 — Icona definitiva dell'app (disegno in `android/icona/rondine.svg`, sfondo verde
   salvia), versione monocromatica e icona delle notifiche. Test di accettazione per lista chat,
   non lette e preferiti.
+- 2026-10-17 — TLS con i certificati del sistema operativo: `reqwest` 0.13 con rustls + ring e
+  `rustls-platform-verifier` al posto di `webpki-roots` (licenza CDLA, fuori elenco). Su Android
+  l'app inizializza il verificatore con `Tls.init(context)`; il pezzo Kotlin della libreria è
+  compilato dal sorgente. `Pusher::new` del nodo ora restituisce un errore invece di poter fare
+  panic. Provato sull'emulatore: certificati validi accettati, autofirmati rifiutati.

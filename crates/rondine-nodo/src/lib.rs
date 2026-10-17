@@ -62,7 +62,7 @@ impl AppState {
             host,
             node: cfg.node_key,
             store: Mutex::new(cfg.store),
-            pusher: Pusher::new(cfg.allow_local_push),
+            pusher: Pusher::new(cfg.allow_local_push)?,
             rate: Mutex::new(HashMap::new()),
             last_wake: Mutex::new(HashMap::new()),
         })))

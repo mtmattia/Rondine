@@ -2,6 +2,8 @@
 pub enum Error {
     #[error("rete: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("TLS: {0}")]
+    Tls(#[from] rustls::Error),
     #[error("il nodo ha risposto {status}: {message}")]
     Node {
         status: u16,

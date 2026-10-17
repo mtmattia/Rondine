@@ -2,6 +2,8 @@
 
 use std::net::IpAddr;
 
+use rustls_platform_verifier::BuilderVerifierExt;
+
 /// Esito di un invio.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PushOutcome {
@@ -13,6 +15,15 @@ pub enum PushOutcome {
 
 pub const WAKE_BODY: &str = r#"{"v":1,"t":"wake"}"#;
 
+/// rustls con ring e i certificati del sistema operativo.
+fn tls_config() -> Result<rustls::ClientConfig, rustls::Error> {
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    Ok(rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()?
+        .with_platform_verifier()?
+        .with_no_client_auth())
+}
+
 #[derive(Clone)]
 pub struct Pusher {
     http: reqwest::Client,
@@ -21,13 +32,13 @@ pub struct Pusher {
 
 impl Pusher {
     /// `allow_local` permette endpoint su indirizzi locali: solo per test e sviluppo.
-    pub fn new(allow_local: bool) -> Self {
+    pub fn new(allow_local: bool) -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
+            .tls_backend_preconfigured(tls_config()?)
             .timeout(std::time::Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap_or_default();
-        Self { http, allow_local }
+            .build()?;
+        Ok(Self { http, allow_local })
     }
 
     /// Controlla che un endpoint UnifiedPush sia accettabile prima di salvarlo.
@@ -148,11 +159,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn endpoint_non_https_o_privati_rifiutati() {
-        let p = Pusher::new(false);
+    async fn endpoint_non_https_o_privati_rifiutati() -> anyhow::Result<()> {
+        let p = Pusher::new(false)?;
         assert!(p.check_endpoint("http://ntfy.sh/x").await.is_err());
         assert!(p.check_endpoint("https://127.0.0.1/x").await.is_err());
         assert!(p.check_endpoint("https://192.168.1.254/x").await.is_err());
         assert!(p.check_endpoint("non un url").await.is_err());
+        Ok(())
     }
 }

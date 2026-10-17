@@ -49,6 +49,20 @@ pub struct ChatMessage {
     /// I messaggi in uscita nascono letti; quelli in arrivo finché non si apre la chat.
     #[serde(default)]
     pub read: bool,
+    /// Solo per i messaggi in uscita: le spunte (SPEC §7.2).
+    #[serde(default)]
+    pub status: Delivery,
+}
+
+/// Stato di un messaggio inviato: inviato al nodo, consegnato al telefono, letto.
+/// L'ordine conta: lo stato può solo avanzare.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum Delivery {
+    #[default]
+    Sent,
+    Delivered,
+    Read,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

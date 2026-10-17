@@ -124,7 +124,8 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
             contact = r.contact(contactId)
             messages = r.messages(contactId)
             if (messages.any { !it.outgoing && !it.read }) {
-                r.markRead(contactId)
+                // La conferma di lettura è un di più: senza rete non è un errore da mostrare.
+                try { r.markRead(contactId) } catch (_: RondineException) {}
                 Repo.refresh()
             }
         } catch (e: RondineException) {
@@ -368,7 +369,7 @@ private fun Bubble(m: Message, firstOfRun: Boolean) {
                     Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
                     if (m.outgoing) {
                         Spacer(Modifier.width(3.dp))
-                        Icon(Icons.Filled.Done, "Consegnato al nodo", Modifier.size(15.dp), tint = colors.bubbleMeta)
+                        MessageTicks(m.status, colors.bubbleMeta, 15.dp)
                     }
                 }
             }

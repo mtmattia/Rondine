@@ -115,8 +115,10 @@ object Repo {
         val r = rondine ?: return Result.success(Unit)
         try {
             val res = r.sync()
-            if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty()) {
+            if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty() || res.receipts > 0u) {
                 refresh()
+            }
+            if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty()) {
                 val foreground = ProcessLifecycleOwner.get().lifecycle.currentState
                     .isAtLeast(Lifecycle.State.STARTED)
                 Notifier.show(app, res.messages, chats.value, if (foreground) openChat else null, foreground)

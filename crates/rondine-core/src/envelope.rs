@@ -31,12 +31,27 @@ pub enum AppMessage {
         ts: u64,
         body: String,
     },
+    /// Conferma di consegna o di lettura di messaggi ricevuti (SPEC §7.2).
+    Receipt {
+        v: u32,
+        status: ReceiptStatus,
+        ids: Vec<String>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ReceiptStatus {
+    Delivered,
+    Read,
 }
 
 impl AppMessage {
     pub fn version(&self) -> u32 {
         match self {
-            AppMessage::Hello { v, .. } | AppMessage::Text { v, .. } => *v,
+            AppMessage::Hello { v, .. }
+            | AppMessage::Text { v, .. }
+            | AppMessage::Receipt { v, .. } => *v,
         }
     }
 }

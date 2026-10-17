@@ -422,10 +422,7 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val last = row.last
                     if (last?.outgoing == true) {
-                        Icon(
-                            Icons.Filled.Done, "Inviato", Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        MessageTicks(last.status, MaterialTheme.colorScheme.onSurfaceVariant, 16.dp)
                         Spacer(Modifier.width(3.dp))
                     }
                     Text(

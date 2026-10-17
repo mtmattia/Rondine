@@ -157,7 +157,15 @@ Chi riceve controlla che le due coincidano.
 ```json
 { "v": 1, "type": "hello", "card": <Signed<Card>> }
 { "v": 1, "type": "text", "id": "<b64 16 byte>", "ts": 1792240000, "body": "ciao" }
+{ "v": 1, "type": "receipt", "status": "delivered", "ids": ["<id di un text>", "…"] }
 ```
+
+### 7.2 Conferme (spunte)
+Chi ritira dei `text` risponde con un `receipt` `delivered` per contatto; quando la persona apre
+la chat, un `receipt` `read` con gli id appena letti. Viaggiano dentro MLS come i messaggi, quindi
+il nodo non le distingue da un testo. Chi le riceve fa solo avanzare lo stato dei propri messaggi
+(inviato → consegnato → letto), mai all'indietro. Non si mandano ai contatti bloccati. Sono un di
+più: se una conferma non parte (per esempio senza rete) non si ritenta.
 
 ### 7.1 Avvio di una chat 1:1
 1. A ha il biglietto di B (da invito, nome utente o rubrica).

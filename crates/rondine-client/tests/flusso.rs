@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use rondine_client::{Client, Event, Source};
+use rondine_client::{Client, Delivery, Event, Source};
 use rondine_core::Identity;
 use rondine_nodo::{AppState, Config, Store, WAKE_BODY};
 use tempfile::TempDir;
@@ -301,7 +301,7 @@ async fn lista_chat_non_lette_e_preferiti() -> R {
     assert_eq!(chats[1].last.as_ref().map(|m| m.body.as_str()), Some("due"));
 
     // Aprire la chat azzera le non lette, e lo stato resta salvato su disco.
-    mattia.mark_read(&silvia.identity())?;
+    mattia.mark_read(&silvia.identity()).await?;
     mattia.set_favorite(&silvia.identity(), true)?;
     // I messaggi che mando io non contano come non letti.
     mattia.send_text(&luca.identity(), "eccomi").await?;
@@ -443,5 +443,48 @@ async fn pagine_web_dei_link_condivisi() -> R {
     assert_eq!(res.status(), 200);
     let page = res.text().await?;
     assert!(page.contains("rondine:invito/"), "{page}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn conferme_di_consegna_e_di_lettura() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+
+    let status = |c: &Client, id: &str| {
+        c.messages_with(&silvia_id(c))
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.status)
+    };
+    fn silvia_id(c: &Client) -> rondine_core::PublicKey {
+        c.contacts()[0].identity
+    }
+
+    // Appena mandato: una spunta.
+    let m = mattia.send_text(&silvia.identity(), "ci sei?").await?;
+    assert_eq!(status(&mattia, &m.id), Some(Delivery::Sent));
+
+    // Silvia lo ritira: il suo telefono conferma la consegna, due spunte.
+    assert_eq!(texts(&silvia.sync().await?), ["ci sei?"]);
+    let ev = mattia.sync().await?;
+    assert!(texts(&ev).is_empty(), "una conferma non è un messaggio");
+    assert_eq!(status(&mattia, &m.id), Some(Delivery::Delivered));
+
+    // Silvia apre la chat: conferma di lettura, spunte verdi. Resta salvato su disco.
+    silvia.mark_read(&mattia.identity()).await?;
+    mattia.sync().await?;
+    let mattia = Client::open(&tmp.path().join("Mattia"))?;
+    assert_eq!(status(&mattia, &m.id), Some(Delivery::Read));
+
+    assert_eq!(
+        mattia.chats()[0].unread,
+        0,
+        "le conferme non contano come non lette"
+    );
     Ok(())
 }

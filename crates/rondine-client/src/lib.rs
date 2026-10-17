@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use reqwest::Method;
 use rondine_core::card::{INVITE_PREFIX, invite_link, parse_invite, verify_card};
 use rondine_core::discovery::{self, BoardEntry, DiscoveryRecord};
-use rondine_core::envelope::{AppMessage, Envelope};
+use rondine_core::envelope::{AppMessage, Envelope, ReceiptStatus};
 use rondine_core::username::{Handle, NAME_LINK_PREFIX, NameClaim, node_host, normalize_name};
 use rondine_core::{
     Card, Identity, PublicKey, Signed, SignedCard, SignedPermit, b64, check_version, now, phone,
@@ -19,7 +19,7 @@ use rondine_mls::{Device, Received};
 use serde_json::json;
 
 pub use error::{Error, Result};
-pub use state::{ChatMessage, Contact, GroupRef, Source, State};
+pub use state::{ChatMessage, Contact, Delivery, GroupRef, Source, State};
 
 use net::{Net, parse};
 
@@ -38,6 +38,12 @@ pub enum Event {
         name: String,
     },
     Message(ChatMessage),
+    /// I messaggi `ids` inviati a `contact` sono avanzati a `status` (spunte).
+    Receipt {
+        contact: PublicKey,
+        status: Delivery,
+        ids: Vec<String>,
+    },
     /// Un messaggio arrivato non è stato accettato; il motivo è nel testo.
     Rejected(String),
 }
@@ -404,9 +410,9 @@ impl Client {
             .collect()
     }
 
-    /// Segna come letti i messaggi di un contatto.
-    pub fn mark_read(&mut self, id: &PublicKey) -> Result<()> {
-        let mut changed = false;
+    /// Segna come letti i messaggi di un contatto e glielo conferma (spunte verdi).
+    pub async fn mark_read(&mut self, id: &PublicKey) -> Result<()> {
+        let mut ids = Vec::new();
         for m in self
             .state
             .messages
@@ -414,12 +420,13 @@ impl Client {
             .filter(|m| &m.contact == id && !m.read)
         {
             m.read = true;
-            changed = true;
+            ids.push(m.id.clone());
         }
-        if changed {
-            self.save()?;
+        if ids.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        self.save()?;
+        self.send_receipt(id, ReceiptStatus::Read, ids).await
     }
 
     pub fn set_favorite(&mut self, id: &PublicKey, favorite: bool) -> Result<()> {
@@ -641,9 +648,6 @@ impl Client {
             .find(|c| &c.identity == to)
             .cloned()
             .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
-        let group = self
-            .preferred_group(&contact)
-            .ok_or_else(|| Error::Invalid("nessuna chat con questo contatto".into()))?;
         let msg = ChatMessage {
             id: random_id(),
             contact: *to,
@@ -651,14 +655,26 @@ impl Client {
             body: body.to_string(),
             ts: now(),
             read: true,
+            status: Delivery::Sent,
         };
-        let app = serde_json::to_vec(&AppMessage::Text {
+        let app = AppMessage::Text {
             v: 1,
             id: msg.id.clone(),
             ts: msg.ts,
             body: msg.body.clone(),
-        })?;
-        let ct = self.device.encrypt(&group, &app)?;
+        };
+        self.send_app(&contact, &app).await?;
+        self.state.messages.push(msg.clone());
+        self.save()?;
+        Ok(msg)
+    }
+
+    /// Cifra un messaggio applicativo nella chat con il contatto e lo deposita nella sua casella.
+    async fn send_app(&mut self, contact: &Contact, app: &AppMessage) -> Result<()> {
+        let group = self
+            .preferred_group(contact)
+            .ok_or_else(|| Error::Invalid("nessuna chat con questo contatto".into()))?;
+        let ct = self.device.encrypt(&group, &serde_json::to_vec(app)?)?;
         // L'archivio MLS va salvato subito: il messaggio ha fatto avanzare le chiavi.
         self.save()?;
         self.deposit(
@@ -668,10 +684,27 @@ impl Client {
                 msg: b64::encode(ct),
             },
         )
-        .await?;
-        self.state.messages.push(msg.clone());
-        self.save()?;
-        Ok(msg)
+        .await
+    }
+
+    /// Conferma di consegna o di lettura (SPEC §7.2). Mai ai bloccati né senza una chat aperta.
+    async fn send_receipt(
+        &mut self,
+        to: &PublicKey,
+        status: ReceiptStatus,
+        ids: Vec<String>,
+    ) -> Result<()> {
+        let Some(contact) = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == to && !c.blocked && !c.groups.is_empty())
+            .cloned()
+        else {
+            return Ok(());
+        };
+        self.send_app(&contact, &AppMessage::Receipt { v: 1, status, ids })
+            .await
     }
 
     /// Ritira i messaggi dalla casella, li elabora e li conferma al nodo.
@@ -706,6 +739,27 @@ impl Client {
                     Some(&json!({ "ids": ids })),
                 )
                 .await?;
+        }
+        // Conferme di consegna, una per contatto. Sono un di più: se non partono, i messaggi
+        // restano comunque ritirati.
+        let mut delivered: Vec<(PublicKey, Vec<String>)> = Vec::new();
+        for e in &events {
+            if let Event::Message(m) = e {
+                match delivered.iter_mut().find(|(c, _)| *c == m.contact) {
+                    Some((_, ids)) => ids.push(m.id.clone()),
+                    None => delivered.push((m.contact, vec![m.id.clone()])),
+                }
+            }
+        }
+        for (contact, ids) in delivered {
+            if let Err(e) = self
+                .send_receipt(&contact, ReceiptStatus::Delivered, ids)
+                .await
+            {
+                events.push(Event::Rejected(format!(
+                    "conferma di consegna non inviata: {e}"
+                )));
+            }
         }
         Ok(events)
     }
@@ -820,9 +874,37 @@ impl Client {
                     body,
                     ts,
                     read: false,
+                    status: Delivery::Sent,
                 };
                 self.state.messages.push(m.clone());
                 Ok(vec![Event::Message(m)])
+            }
+            AppMessage::Receipt { status, ids, .. } => {
+                let new = match status {
+                    ReceiptStatus::Delivered => Delivery::Delivered,
+                    ReceiptStatus::Read => Delivery::Read,
+                };
+                let mut changed = Vec::new();
+                for m in self
+                    .state
+                    .messages
+                    .iter_mut()
+                    .filter(|m| m.outgoing && m.contact == sender && ids.contains(&m.id))
+                {
+                    // Lo stato solo avanza: una consegna arrivata dopo la lettura non conta.
+                    if m.status < new {
+                        m.status = new;
+                        changed.push(m.id.clone());
+                    }
+                }
+                if changed.is_empty() {
+                    return Ok(Vec::new());
+                }
+                Ok(vec![Event::Receipt {
+                    contact: sender,
+                    status: new,
+                    ids: changed,
+                }])
             }
             AppMessage::Hello { card, .. } => {
                 let info = verify_card(&card)?;

@@ -80,9 +80,17 @@ val cargoBuild = tasks.register<Exec>("cargoBuild") {
     outputs.dir(rustJniDir)
 }
 
+// La libreria del computer da cui si leggono i metadati UniFFI: va ricompilata sempre, se no i
+// binding Kotlin restano quelli della versione precedente.
+val cargoBuildHost = tasks.register<Exec>("cargoBuildHost") {
+    description = "Compila rondine-ffi per il computer (metadati dei binding)"
+    workingDir = repoRoot
+    commandLine("cargo", "build", "-p", "rondine-ffi", "--lib")
+}
+
 val uniffiBindgen = tasks.register<Exec>("uniffiBindgen") {
     description = "Genera i binding Kotlin di rondine-ffi"
-    dependsOn(cargoBuild)
+    dependsOn(cargoBuild, cargoBuildHost)
     workingDir = repoRoot
     // I metadati UniFFI si leggono dalla libreria di debug del computer: quella per Android
     // è compilata con `strip` e non li contiene più.
@@ -94,6 +102,8 @@ val uniffiBindgen = tasks.register<Exec>("uniffiBindgen") {
         "--out-dir", uniffiDir.get().asFile.path,
     )
     inputs.dir(File(repoRoot, "crates/rondine-ffi/src"))
+    // I binding dipendono dalla libreria compilata, non solo dai sorgenti di rondine-ffi.
+    inputs.file(lib)
     outputs.dir(uniffiDir)
 }
 

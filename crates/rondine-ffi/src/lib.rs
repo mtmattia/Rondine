@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rondine_client::{ChatMessage, Client, Contact, Event, Source};
+use rondine_client::{ChatMessage, Client, Contact, Delivery, Event, Source};
 use rondine_core::PublicKey;
 use tokio::sync::Mutex;
 
@@ -87,6 +87,25 @@ pub struct Message {
     pub body: String,
     pub ts: u64,
     pub read: bool,
+    /// Spunte dei messaggi in uscita.
+    pub status: MessageStatus,
+}
+
+#[derive(uniffi::Enum, Clone, Copy, PartialEq, Eq)]
+pub enum MessageStatus {
+    Sent,
+    Delivered,
+    Read,
+}
+
+impl From<Delivery> for MessageStatus {
+    fn from(d: Delivery) -> Self {
+        match d {
+            Delivery::Sent => MessageStatus::Sent,
+            Delivery::Delivered => MessageStatus::Delivered,
+            Delivery::Read => MessageStatus::Read,
+        }
+    }
 }
 
 #[derive(uniffi::Record)]
@@ -102,6 +121,8 @@ pub struct SyncResult {
     pub new_contacts: Vec<String>,
     pub messages: Vec<Message>,
     pub rejected: Vec<String>,
+    /// Quanti messaggi inviati hanno cambiato spunte.
+    pub receipts: u32,
 }
 
 fn contact_info(c: &Contact) -> ContactInfo {
@@ -132,6 +153,7 @@ fn message(m: &ChatMessage) -> Message {
         body: m.body.clone(),
         ts: m.ts,
         read: m.read,
+        status: m.status.into(),
     }
 }
 
@@ -264,7 +286,8 @@ impl Rondine {
 
     pub async fn mark_read(&self, contact_id: String) -> Result<()> {
         let k = key(&contact_id)?;
-        Ok(self.client.lock().await.mark_read(&k)?)
+        self.run(move |c| Box::pin(async move { Ok(c.mark_read(&k).await?) }))
+            .await
     }
 
     pub async fn set_favorite(&self, contact_id: String, favorite: bool) -> Result<()> {
@@ -286,12 +309,18 @@ impl Rondine {
             new_contacts: Vec::new(),
             messages: Vec::new(),
             rejected: Vec::new(),
+            receipts: 0,
         };
         for e in events {
             match e {
                 Event::NewContact { identity, .. } => out.new_contacts.push(identity.to_b64()),
                 Event::Message(m) => out.messages.push(message(&m)),
                 Event::Rejected(why) => out.rejected.push(why),
+                Event::Receipt { ids, .. } => {
+                    out.receipts = out
+                        .receipts
+                        .saturating_add(u32::try_from(ids.len()).unwrap_or(u32::MAX));
+                }
             }
         }
         Ok(out)

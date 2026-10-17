@@ -48,3 +48,7 @@ Una riga per modifica: data, cosa è cambiato.
   `GET /@{nome}` e `GET /invito` che aprono l'app (SPEC §3.2, §4.1, §11). `Client::add` trova il
   link anche dentro un messaggio incollato. App: SMS, Condividi, Copia e QR usano il link web;
   CLI `rondine io` stampa il link. Provato sull'emulatore da Chrome fino al contatto aggiunto.
+- 2026-10-17 — Spunte come WhatsApp: ✓ inviato, ✓✓ consegnato, ✓✓ verdi letto. Nuovo messaggio
+  MLS `receipt` (SPEC §7.2), mandato al ritiro e all'apertura della chat; lo stato avanza e basta.
+  CLI: `leggi` mostra le spunte e segna come letto, `sincronizza` stampa le conferme. Gradle:
+  i binding UniFFI si rigenerano sempre dalla libreria appena compilata.

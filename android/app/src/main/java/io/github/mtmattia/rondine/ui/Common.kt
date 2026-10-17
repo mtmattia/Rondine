@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,6 +30,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import uniffi.rondine_ffi.MessageStatus
 
 @Composable
 fun Avatar(name: String, id: String, size: Dp = 52.dp) {
@@ -92,5 +96,16 @@ fun dayLabel(d: LocalDate): String {
         d.isAfter(today.minusDays(7)) -> d.dayOfWeek.getDisplayName(TextStyle.FULL, italian)
             .replaceFirstChar { it.uppercase() }
         else -> d.format(DateTimeFormatter.ofPattern("d MMMM yyyy", italian))
+    }
+}
+
+/** Spunte di un messaggio inviato: ✓ inviato, ✓✓ consegnato, ✓✓ verdi letto. */
+@Composable
+fun MessageTicks(status: MessageStatus, tint: Color, size: Dp) {
+    when (status) {
+        MessageStatus.SENT -> Icon(Icons.Filled.Done, "Inviato", Modifier.size(size), tint = tint)
+        MessageStatus.DELIVERED -> Icon(Icons.Filled.DoneAll, "Consegnato", Modifier.size(size), tint = tint)
+        MessageStatus.READ ->
+            Icon(Icons.Filled.DoneAll, "Letto", Modifier.size(size), tint = LocalChatColors.current.tickRead)
     }
 }

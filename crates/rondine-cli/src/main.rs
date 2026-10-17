@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
-use rondine_client::{Client, Contact, Event};
+use rondine_client::{Client, Contact, Delivery, Event};
 
 #[derive(Parser)]
 #[command(name = "rondine", version, about = "Messenger senza centralino")]
@@ -148,6 +148,15 @@ fn describe(c: &Contact) -> String {
     format!("{s}  [{stato}]  {}", c.identity.short())
 }
 
+/// Spunte come nell'app: ✓ inviato, ✓✓ consegnato, ✓✓ letto (verdi nell'app).
+fn ticks(status: Delivery) -> &'static str {
+    match status {
+        Delivery::Sent => "✓",
+        Delivery::Delivered => "✓✓",
+        Delivery::Read => "✓✓ letto",
+    }
+}
+
 fn print_events(events: &[Event], client: &Client) {
     if events.is_empty() {
         println!("Nessun messaggio nuovo.");
@@ -163,6 +172,23 @@ fn print_events(events: &[Event], client: &Client) {
                     .map(|c| c.display_name.as_str())
                     .unwrap_or("?");
                 println!("{from}: {}", m.body);
+            }
+            Event::Receipt {
+                contact,
+                status,
+                ids,
+            } => {
+                let to = client
+                    .contacts()
+                    .iter()
+                    .find(|c| c.identity == *contact)
+                    .map(|c| c.display_name.as_str())
+                    .unwrap_or("?");
+                let what = match status {
+                    Delivery::Read => "letti da",
+                    _ => "consegnati a",
+                };
+                println!("{} {} messaggi {what} {to}", ticks(*status), ids.len());
             }
             Event::Rejected(why) => eprintln!("! messaggio scartato: {why}"),
         }
@@ -273,13 +299,14 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Leggi { contatto } => {
             let contact = c.find_contact(&contatto)?.clone();
             for m in c.messages_with(&contact.identity) {
-                let who = if m.outgoing {
-                    "io"
+                if m.outgoing {
+                    println!("io: {}  {}", m.body, ticks(m.status));
                 } else {
-                    contact.display_name.as_str()
-                };
-                println!("{who}: {}", m.body);
+                    println!("{}: {}", contact.display_name, m.body);
+                }
             }
+            // Leggere la conversazione la segna come letta (e lo conferma al contatto).
+            c.mark_read(&contact.identity).await?;
         }
         Cmd::Sicurezza { contatto } => {
             let contact = c.find_contact(&contatto)?;

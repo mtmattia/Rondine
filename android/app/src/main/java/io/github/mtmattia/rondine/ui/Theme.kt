@@ -67,6 +67,8 @@ data class ChatColors(
     val bubbleMeta: Color,
     val notice: Color,
     val noticeText: Color,
+    /** Spunte di un messaggio letto. */
+    val tickRead: Color,
 )
 
 private val LightChat = ChatColors(
@@ -78,6 +80,7 @@ private val LightChat = ChatColors(
     bubbleMeta = Color(0xFF63766C),
     notice = Color(0xFFFFF5DC),
     noticeText = Color(0xFF55655D),
+    tickRead = Color(0xFF1F8A4C),
 )
 
 private val DarkChat = ChatColors(
@@ -89,6 +92,7 @@ private val DarkChat = ChatColors(
     bubbleMeta = Color(0xFF95A69E),
     notice = Color(0xFF1E2A26),
     noticeText = Color(0xFFB5C4BC),
+    tickRead = Color(0xFF7FCF9F),
 )
 
 val LocalChatColors = staticCompositionLocalOf { LightChat }

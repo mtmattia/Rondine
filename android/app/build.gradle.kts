@@ -108,4 +108,6 @@ dependencies {
     implementation(libs.jna) { artifact { type = "aar" } }
     implementation(libs.unifiedpush.connector)
     implementation(libs.zxing.core)
+    // Lettore QR con la fotocamera (Apache-2.0, nessun servizio Google).
+    implementation(libs.zxing.embedded)
 }

@@ -327,3 +327,39 @@ async fn errori_di_rete_comprensibili() -> R {
     assert!(!err.contains("error sending request"), "{err}");
     Ok(())
 }
+
+#[tokio::test]
+async fn link_corto_col_nome_e_aggiunta_da_qualsiasi_forma() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let mut luca = profile(&tmp, "Luca", &node).await?;
+
+    // Senza nome utente il link da condividere è quello d'invito.
+    assert_eq!(mattia.share_link()?, mattia.invite_link()?);
+
+    // Con il nome diventa corto: va bene per un QR leggibile.
+    let handle = mattia.claim_username("mattia").await?;
+    let link = mattia.share_link()?;
+    assert_eq!(link, format!("rondine:@{handle}"));
+    assert!(link.len() < 60, "{link}");
+
+    // Una sola funzione per aggiungere: link corto, link d'invito o nome scritto a mano.
+    let c = silvia.add(&format!("  {link}\n")).await?;
+    assert_eq!(c.username.as_deref(), Some(handle.as_str()));
+    let c = luca.add(&mattia.invite_link()?).await?;
+    assert_eq!(c.display_name, "Mattia");
+    let mut anna = profile(&tmp, "Anna", &node).await?;
+    let c = anna.add(&format!("@{handle}")).await?;
+    assert_eq!(c.display_name, "Mattia");
+
+    // Testo che non è niente di tutto questo: errore chiaro.
+    let err = anna
+        .add("ciao come stai")
+        .await
+        .err()
+        .ok_or("doveva fallire")?;
+    assert!(err.to_string().contains("non riconosciuto"), "{err}");
+    Ok(())
+}

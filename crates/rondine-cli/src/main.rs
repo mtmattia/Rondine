@@ -219,11 +219,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{link}");
         }
         Cmd::Aggiungi { chi } => {
-            let contact = if chi.starts_with("rondine:") {
-                c.add_from_invite(&chi).await?
-            } else {
-                c.add_by_username(&chi).await?
-            };
+            let contact = c.add(&chi).await?;
             println!("Aggiunto: {}", describe(&contact));
         }
         Cmd::Nome(NomeCmd::Prendi { nome }) => {

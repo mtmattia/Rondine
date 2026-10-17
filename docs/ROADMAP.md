@@ -57,7 +57,9 @@ QR.
 - [x] avviso quando mancano le notifiche (nessun distributore UnifiedPush)
 - [x] errori di rete comprensibili (certificato, nodo irraggiungibile, indirizzo sbagliato)
 - [x] colori dell'app presi dall'icona
-- [ ] lettura del QR con la fotocamera
+- [x] lettura del QR con la fotocamera (zxing-android-embedded) e QR corto `rondine:@nome@nodo`
+      per chi ha un nome utente; sull'emulatore provati lettore, link corto e decodifica del QR
+      mostrato, non l'inquadratura vera (la scena virtuale non si orienta senza gRPC)
 - [ ] pagina https per aprire i link d'invito da SMS e browser
 - [ ] prova di UnifiedPush con ntfy su telefono vero
 - [ ] nodo pubblico sul Mac (Cloudflare Tunnel)

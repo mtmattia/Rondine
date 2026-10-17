@@ -7,10 +7,12 @@ mod state;
 use std::path::{Path, PathBuf};
 
 use reqwest::Method;
-use rondine_core::card::{invite_link, parse_invite, verify_card};
+use rondine_core::card::{INVITE_PREFIX, invite_link, parse_invite, verify_card};
 use rondine_core::discovery::{self, BoardEntry, DiscoveryRecord};
 use rondine_core::envelope::{AppMessage, Envelope};
-use rondine_core::username::{Handle, NameClaim, node_host, normalize_name};
+use rondine_core::username::{
+    Handle, NAME_LINK_PREFIX, NameClaim, name_link, node_host, normalize_name,
+};
 use rondine_core::{
     Card, Identity, PublicKey, Signed, SignedCard, SignedPermit, b64, check_version, now, phone,
     random_id, safety,
@@ -183,6 +185,14 @@ impl Client {
         Ok(invite_link(&self.card_with(&self.state.invite_permit)?)?)
     }
 
+    /// Link da mettere nel QR: quello corto col nome utente se c'è, altrimenti il link d'invito.
+    pub fn share_link(&self) -> Result<String> {
+        match &self.state.username {
+            Some(handle) => Ok(name_link(handle)),
+            None => self.invite_link(),
+        }
+    }
+
     /// Revoca il link d'invito attuale e ne crea uno nuovo.
     pub async fn reset_invite(&mut self) -> Result<String> {
         self.revoke_permit(&self.state.invite_permit.verify()?.id)
@@ -319,6 +329,22 @@ impl Client {
     pub async fn add_by_username(&mut self, handle: &str) -> Result<Contact> {
         let card = self.lookup_username(handle).await?;
         self.connect(card, Source::Nome).await
+    }
+
+    /// Aggiunge un contatto da quello che l'utente ha in mano: link d'invito, link corto
+    /// `rondine:@nome@nodo` (dal QR) o nome utente scritto a mano.
+    pub async fn add(&mut self, input: &str) -> Result<Contact> {
+        let s = input.trim();
+        if s.starts_with(INVITE_PREFIX) {
+            return self.add_from_invite(s).await;
+        }
+        let handle = s.strip_prefix(NAME_LINK_PREFIX).unwrap_or(s);
+        if Handle::parse(handle).is_ok() {
+            return self.add_by_username(handle).await;
+        }
+        Err(Error::Invalid(
+            "testo non riconosciuto: serve un link d'invito o un nome come @nome@nodo".into(),
+        ))
     }
 
     pub async fn add_from_invite(&mut self, link: &str) -> Result<Contact> {

@@ -108,7 +108,8 @@ fun MyQrScreen(onBack: () -> Unit) {
     val profile by Repo.profile.collectAsState()
     var confirmReset by remember { mutableStateOf(false) }
     val p = profile ?: return
-    val qr = remember(p.inviteLink) { qrBitmap(p.inviteLink).asImageBitmap() }
+    // Col nome utente il QR contiene il link corto: molto meno fitto, si legge al volo.
+    val qr = remember(p.shareLink) { qrBitmap(p.shareLink).asImageBitmap() }
 
     BackScaffold("Il mio codice QR", onBack, snackbar) { m ->
         Column(
@@ -123,11 +124,16 @@ fun MyQrScreen(onBack: () -> Unit) {
                     Text(p.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     p.username?.let { Text("@$it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     Spacer(Modifier.height(16.dp))
-                    Image(qr, "Codice QR del link d'invito", Modifier.size(240.dp))
+                    Image(qr, "Il mio codice QR", Modifier.size(240.dp))
                 }
             }
             Text(
-                "Chi inquadra questo codice o apre il tuo link ti può scrivere. Se il link finisce in mani sbagliate, reimpostalo.",
+                if (p.username != null) {
+                    "Chi inquadra questo codice ti trova con il tuo nome utente e ti può scrivere. " +
+                        "Il link d'invito (Condividi, Copia) si può reimpostare se finisce in mani sbagliate."
+                } else {
+                    "Chi inquadra questo codice o apre il tuo link ti può scrivere. Se il link finisce in mani sbagliate, reimpostalo."
+                },
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,

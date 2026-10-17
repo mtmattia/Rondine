@@ -60,6 +60,8 @@ pub struct Profile {
     pub username: Option<String>,
     pub phone: Option<String>,
     pub invite_link: String,
+    /// Da mettere nel QR: link corto col nome utente se c'è, altrimenti il link d'invito.
+    pub share_link: String,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -184,6 +186,7 @@ impl Rondine {
             username: s.username.clone(),
             phone: s.phone.clone(),
             invite_link: c.invite_link()?,
+            share_link: c.share_link()?,
         })
     }
 
@@ -254,6 +257,13 @@ impl Rondine {
             }
         }
         Ok(out)
+    }
+
+    /// Link d'invito, link corto `rondine:@nome@nodo` o nome utente: quello che arriva da QR,
+    /// link aperti o testo incollato.
+    pub async fn add(&self, input: String) -> Result<ContactInfo> {
+        let c = self.client.lock().await.add(&input).await?;
+        Ok(contact_info(&c))
     }
 
     pub async fn add_from_invite(&self, link: String) -> Result<ContactInfo> {

@@ -61,6 +61,11 @@ Record (`Signed<NameClaim>`, firmato dall'identità):
 
 `card.signer` deve coincidere con `signer` del record.
 
+**Link al nome:** `rondine:@nome@nodo`. È corto, quindi va bene per un QR leggibile da qualsiasi
+fotocamera; chi lo apre cerca il nome sul nodo e ottiene il biglietto. A differenza del link
+d'invito non si può reimpostare: il nome è pubblico per scelta (per non farsi trovare lo si
+libera). L'app lo mette nel QR quando la persona ha un nome, altrimenti usa il link d'invito.
+
 ### 3.3 Numero di telefono
 Formato E.164 (`+393401234567`). Normalizzazione lato client: si tolgono spazi, trattini, punti
 e parentesi; `00` iniziale diventa `+`; senza prefisso si aggiunge quello predefinito (`+39`).

@@ -28,3 +28,7 @@ Una riga per modifica: data, cosa è cambiato.
   distributore UnifiedPush, con "Installa ntfy" o "Attiva"; riprova a registrarsi al ritorno.
 - 2026-10-17 — App: colori presi dall'icona (verde bosco, verde ala, crema) al posto del blu,
   in tema chiaro e scuro; sfondo crema della chat e bolle verdi; cerchio del benvenuto in verde salvia.
+- 2026-10-17 — QR: link corto `rondine:@nome@nodo` (SPEC §3.2) nel QR di chi ha un nome utente;
+  `Client::add` accetta link d'invito, link corto o nome scritto a mano (usato da CLI e app).
+  App: "Scansiona codice QR" con zxing-android-embedded (Apache-2.0) e apertura dei link
+  `rondine:@…`. AVD di prova con fotocamera posteriore "virtualscene".

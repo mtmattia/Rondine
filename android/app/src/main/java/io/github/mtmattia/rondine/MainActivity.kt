@@ -95,7 +95,8 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         intent?.getStringExtra(EXTRA_CHAT)?.let { openChatRequest.value = it }
         val data = intent?.dataString
-        if (data != null && data.startsWith("rondine:invito/")) Repo.pendingInvite.value = data
+        // rondine:invito/… (link d'invito) o rondine:@nome@nodo (link al nome, dai QR).
+        if (data != null && data.startsWith("rondine:")) Repo.pendingInvite.value = data
     }
 
     /** Registra le notifiche UnifiedPush con il distributore installato (es. ntfy). */
@@ -189,14 +190,19 @@ class MainActivity : ComponentActivity() {
         invite?.let { link ->
             AlertDialog(
                 onDismissRequest = { Repo.pendingInvite.value = null },
-                title = { Text("Link d'invito") },
-                text = { Text("Vuoi aggiungere questo contatto e avviare una chat?") },
+                title = { Text("Nuovo contatto") },
+                text = {
+                    Text(
+                        if (link.startsWith("rondine:@")) "Vuoi aggiungere ${link.removePrefix("rondine:")} e avviare una chat?"
+                        else "Vuoi aggiungere questo contatto e avviare una chat?",
+                    )
+                },
                 confirmButton = {
                     TextButton(onClick = {
                         Repo.pendingInvite.value = null
                         scope.launch {
                             try {
-                                val c = Repo.client().addFromInvite(link)
+                                val c = Repo.client().add(link)
                                 Repo.refresh()
                                 nav.navigate("chat/${c.id}")
                             } catch (e: RondineException) {

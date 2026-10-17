@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +58,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import io.github.mtmattia.rondine.Repo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -105,6 +108,17 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
         }
     }
 
+    // Lettore QR di zxing-android-embedded: chiede da solo il permesso della fotocamera.
+    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val text = result.contents ?: return@rememberLauncherForActivityResult
+        run("Aggiungo il contatto…") {
+            val c = Repo.client().add(text)
+            Repo.refresh()
+            onOpenChat(c.id)
+            null
+        }
+    }
+
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) scanAddressBook() else scope.launch { snackbar.showSnackbar("Serve il permesso per leggere la rubrica") }
     }
@@ -128,6 +142,17 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
         },
     ) { padding ->
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+            item {
+                ActionRow(Icons.Filled.QrCodeScanner, "Scansiona codice QR", "Inquadra il codice di chi vuoi aggiungere") {
+                    scanner.launch(
+                        ScanOptions()
+                            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                            .setPrompt("Inquadra il codice QR di Rondine")
+                            .setBeepEnabled(false)
+                            .setOrientationLocked(false),
+                    )
+                }
+            }
             item {
                 ActionRow(Icons.Filled.AlternateEmail, "Nuovo contatto", "Con il nome utente, es. @mattia@nodo") {
                     dialog = AddDialog.Username
@@ -211,7 +236,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
         ) { value ->
             dialog = null
             run("Cerco $value…") {
-                val c = Repo.client().addByUsername(value.trim())
+                val c = Repo.client().add(value)
                 Repo.refresh()
                 onOpenChat(c.id)
                 null
@@ -226,7 +251,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
         ) { value ->
             dialog = null
             run("Aggiungo…") {
-                val c = Repo.client().addFromInvite(value.trim())
+                val c = Repo.client().add(value)
                 Repo.refresh()
                 onOpenChat(c.id)
                 null

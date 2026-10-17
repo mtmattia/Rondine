@@ -33,6 +33,16 @@ pub fn normalize_name(input: &str) -> Result<String> {
     Ok(name)
 }
 
+/// Link corto al nome utente (SPEC §3.2), adatto a un QR: `rondine:@nome@nodo`.
+pub const NAME_LINK_PREFIX: &str = "rondine:@";
+
+pub fn name_link(handle: &str) -> String {
+    format!(
+        "{NAME_LINK_PREFIX}{}",
+        handle.trim().trim_start_matches('@')
+    )
+}
+
 /// `nome@nodo`, dove `nodo` è host[:porta].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Handle {

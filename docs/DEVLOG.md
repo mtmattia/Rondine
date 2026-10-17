@@ -76,3 +76,10 @@ Una riga per modifica: data, cosa è cambiato.
   anche quando nasce una chat, dai due lati, e non è più effimero (il nodo lo buttava dopo 30 s
   se non eri connesso); resta senza coda né mesh (SPEC §12.3). Due test che lo riproducono;
   `forget_addrs` per simulare nei test un contatto dietro NAT.
+- 2026-10-18 — Gruppi (SPEC §7.4): `rondine-mls` crea gruppi, aggiunge e toglie membri, tiene 5
+  epoche passate e controlla credenziale = chiave di firma su ogni foglia dei commit ricevuti.
+  `rondine-client` con consegna a ogni membro, permesso `gruppo` per membro, amministratore unico,
+  uscita su richiesta; `sync_all()` aggiunge gli eventi dei gruppi senza cambiare `sync()`. CLI
+  `rondine gruppi` e `rondine gruppo …`. Corretto il mittente dei messaggi di un'epoca passata
+  (con test) e il biglietto `gruppo` che a parità di secondo perdeva contro quello prestato
+  dall'amministratore (con test). 4 test MLS, 1 unitario e 3 di accettazione.

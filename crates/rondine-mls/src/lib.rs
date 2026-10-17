@@ -1,4 +1,4 @@
-//! MLS per Rondine (SPEC §7): un dispositivo, key package, chat 1:1, cifratura.
+//! MLS per Rondine (SPEC §7): un dispositivo, key package, chat 1:1, gruppi, cifratura.
 //!
 //! La chiave di firma MLS è la chiave dell'identità e la credenziale `Basic` contiene la
 //! stessa chiave pubblica: chi riceve controlla che coincidano, così il mittente di ogni
@@ -16,6 +16,8 @@ use openmls_rust_crypto::RustCrypto;
 use rondine_core::{Identity, PublicKey};
 
 pub const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+/// Epoche passate di cui si tengono le chiavi, per i messaggi che incrociano un commit (SPEC §7.2).
+pub const MAX_PAST_EPOCHS: usize = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -29,6 +31,10 @@ pub enum Error {
     BadSender,
     #[error("il key package non appartiene all'identità attesa")]
     WrongKeyPackage,
+    #[error("commit da un membro che non può modificare il gruppo")]
+    CommitNotAllowed,
+    #[error("membro sconosciuto")]
+    UnknownMember,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -127,7 +133,10 @@ pub enum Received {
         plaintext: Vec<u8>,
     },
     /// Messaggio di gestione del gruppo già applicato (commit, proposta).
-    Control { group_id: Vec<u8> },
+    Control {
+        group_id: Vec<u8>,
+        sender: PublicKey,
+    },
 }
 
 /// Gruppo appena raggiunto da un Welcome.
@@ -212,25 +221,51 @@ impl Device {
     fn join_config() -> MlsGroupJoinConfig {
         MlsGroupJoinConfig::builder()
             .use_ratchet_tree_extension(true)
+            .wire_format_policy(PURE_CIPHERTEXT_WIRE_FORMAT_POLICY)
+            .max_past_epochs(MAX_PAST_EPOCHS)
             .build()
     }
 
-    /// Avvia una chat 1:1 con il proprietario di `key_package`, che deve essere `peer`.
-    /// Restituisce l'id del gruppo e il Welcome da consegnare.
-    pub fn start_dm(&self, key_package: &[u8], peer: &PublicKey) -> Result<(Vec<u8>, Vec<u8>)> {
+    /// Controlla che un key package sia valido e appartenga a `owner`.
+    fn validated(&self, key_package: &[u8], owner: &PublicKey) -> Result<KeyPackage> {
         let kp = KeyPackageIn::tls_deserialize_exact(key_package)
             .map_err(mls)?
             .validate(self.provider.crypto(), ProtocolVersion::Mls10)
             .map_err(mls)?;
         let leaf = kp.leaf_node();
-        if leaf.signature_key().as_slice() != peer.0
-            || leaf.credential().serialized_content() != peer.0
+        if leaf.signature_key().as_slice() != owner.0
+            || leaf.credential().serialized_content() != owner.0
         {
             return Err(Error::WrongKeyPackage);
         }
+        Ok(kp)
+    }
+
+    fn validated_all(&self, key_packages: &[(Vec<u8>, PublicKey)]) -> Result<Vec<KeyPackage>> {
+        key_packages
+            .iter()
+            .map(|(kp, owner)| self.validated(kp, owner))
+            .collect()
+    }
+
+    /// Avvia una chat 1:1 con il proprietario di `key_package`, che deve essere `peer`.
+    /// Restituisce l'id del gruppo e il Welcome da consegnare.
+    pub fn start_dm(&self, key_package: &[u8], peer: &PublicKey) -> Result<(Vec<u8>, Vec<u8>)> {
+        self.create_group(&[(key_package.to_vec(), *peer)])
+    }
+
+    /// Crea un gruppo con i proprietari dei key package (coppie key package, identità attesa).
+    /// Restituisce l'id del gruppo e il Welcome da consegnare a tutti.
+    pub fn create_group(
+        &self,
+        key_packages: &[(Vec<u8>, PublicKey)],
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        let kps = self.validated_all(key_packages)?;
         let config = MlsGroupCreateConfig::builder()
             .ciphersuite(CIPHERSUITE)
             .use_ratchet_tree_extension(true)
+            .wire_format_policy(PURE_CIPHERTEXT_WIRE_FORMAT_POLICY)
+            .max_past_epochs(MAX_PAST_EPOCHS)
             .build();
         let mut group = MlsGroup::new(
             &self.provider,
@@ -240,11 +275,52 @@ impl Device {
         )
         .map_err(mls)?;
         let (_commit, welcome, _info) = group
-            .add_members(&self.provider, &self.signer, std::slice::from_ref(&kp))
+            .add_members(&self.provider, &self.signer, &kps)
             .map_err(mls)?;
         group.merge_pending_commit(&self.provider).map_err(mls)?;
         let welcome = welcome.to_bytes().map_err(mls)?;
         Ok((group.group_id().as_slice().to_vec(), welcome))
+    }
+
+    /// Aggiunge membri: restituisce il commit per i membri attuali e il Welcome per i nuovi.
+    pub fn add_members(
+        &self,
+        group_id: &[u8],
+        key_packages: &[(Vec<u8>, PublicKey)],
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        let kps = self.validated_all(key_packages)?;
+        let mut group = self.load(group_id)?;
+        let (commit, welcome, _info) = group
+            .add_members(&self.provider, &self.signer, &kps)
+            .map_err(mls)?;
+        group.merge_pending_commit(&self.provider).map_err(mls)?;
+        Ok((
+            commit.to_bytes().map_err(mls)?,
+            welcome.to_bytes().map_err(mls)?,
+        ))
+    }
+
+    /// Toglie membri: restituisce il commit da consegnare a tutti, tolti compresi.
+    pub fn remove_members(&self, group_id: &[u8], who: &[PublicKey]) -> Result<Vec<u8>> {
+        let mut group = self.load(group_id)?;
+        let mut leaves = Vec::new();
+        for id in who {
+            let m = group
+                .members()
+                .find(|m| m.credential.serialized_content() == id.0)
+                .ok_or(Error::UnknownMember)?;
+            leaves.push(m.index);
+        }
+        let (commit, _welcome, _info) = group
+            .remove_members(&self.provider, &self.signer, &leaves)
+            .map_err(mls)?;
+        group.merge_pending_commit(&self.provider).map_err(mls)?;
+        commit.to_bytes().map_err(mls)
+    }
+
+    /// Vero finché si fa parte del gruppo (falso dopo essere stati tolti).
+    pub fn is_member(&self, group_id: &[u8]) -> Result<bool> {
+        Ok(self.load(group_id)?.is_active())
     }
 
     pub fn join(&self, welcome: &[u8]) -> Result<Joined> {
@@ -282,7 +358,12 @@ impl Device {
             .map_err(mls)
     }
 
-    pub fn decrypt(&self, message: &[u8]) -> Result<Received> {
+    /// Decifra un messaggio. Un commit si applica solo se `allow_commit(id gruppo, autore)`.
+    pub fn decrypt(
+        &self,
+        message: &[u8],
+        allow_commit: impl Fn(&[u8], &PublicKey) -> bool,
+    ) -> Result<Received> {
         let msg = MlsMessageIn::tls_deserialize_exact(message).map_err(mls)?;
         let protocol = msg.try_into_protocol_message().map_err(mls)?;
         let group_id = protocol.group_id().as_slice().to_vec();
@@ -290,14 +371,15 @@ impl Device {
         let processed = group
             .process_message(&self.provider, protocol)
             .map_err(mls)?;
-        let sender = match processed.sender() {
-            Sender::Member(index) => group.member_at(*index).ok_or(Error::BadSender)?,
-            _ => return Err(Error::BadSender),
-        };
-        let sender = member_identity(&sender)?;
-        if processed.credential().serialized_content() != sender.0 {
+        if !matches!(processed.sender(), Sender::Member(_)) {
             return Err(Error::BadSender);
         }
+        // Ogni foglia entrata nel gruppo ha credenziale = chiave di firma (controllo in `join`,
+        // `validated` e qui sotto sui commit), e openmls ha verificato la firma con la chiave
+        // della foglia nell'epoca del messaggio: la credenziale identifica il mittente anche se
+        // nel frattempo è stato tolto.
+        let sender = PublicKey::from_bytes(processed.credential().serialized_content())
+            .map_err(|_| Error::BadSender)?;
         match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(app) => Ok(Received::Application {
                 group_id,
@@ -305,12 +387,17 @@ impl Device {
                 plaintext: app.into_bytes(),
             }),
             ProcessedMessageContent::StagedCommitMessage(commit) => {
+                if !allow_commit(&group_id, &sender) {
+                    return Err(Error::CommitNotAllowed);
+                }
+                check_commit_leaves(&commit)?;
                 group
                     .merge_staged_commit(&self.provider, *commit)
                     .map_err(mls)?;
-                Ok(Received::Control { group_id })
+                Ok(Received::Control { group_id, sender })
             }
-            _ => Ok(Received::Control { group_id }),
+            // Le proposte da sole non si accettano: cambia il gruppo solo un commit permesso.
+            _ => Err(Error::CommitNotAllowed),
         }
     }
 
@@ -321,6 +408,28 @@ impl Device {
             .map(|m| member_identity(&m))
             .collect()
     }
+}
+
+/// Una foglia è accettabile solo se la credenziale contiene la sua stessa chiave di firma.
+fn check_leaf(leaf: &LeafNode) -> Result<()> {
+    if leaf.credential().serialized_content() != leaf.signature_key().as_slice() {
+        return Err(Error::BadSender);
+    }
+    Ok(())
+}
+
+/// Controlla tutte le foglie nuove o cambiate da un commit, prima di applicarlo.
+fn check_commit_leaves(commit: &StagedCommit) -> Result<()> {
+    for add in commit.add_proposals() {
+        check_leaf(add.add_proposal().key_package().leaf_node())?;
+    }
+    for update in commit.update_proposals() {
+        check_leaf(update.update_proposal().leaf_node())?;
+    }
+    if let Some(leaf) = commit.update_path_leaf_node() {
+        check_leaf(leaf)?;
+    }
+    Ok(())
 }
 
 /// Identità di un membro, solo se credenziale e chiave di firma coincidono.
@@ -358,7 +467,7 @@ mod tests {
         assert!(joined.members.contains(&alice_id.public()));
 
         let bob = Device::restore(&bob_id, &bob.export()?)?;
-        match bob.decrypt(&first)? {
+        match bob.decrypt(&first, |_, _| false)? {
             Received::Application {
                 sender, plaintext, ..
             } => {
@@ -370,7 +479,7 @@ mod tests {
 
         let reply = bob.encrypt(&gid, b"ciao Alice")?;
         let alice = Device::restore(&alice_id, &alice.export()?)?;
-        match alice.decrypt(&reply)? {
+        match alice.decrypt(&reply, |_, _| false)? {
             Received::Application {
                 sender, plaintext, ..
             } => {
@@ -392,6 +501,131 @@ mod tests {
             let (_, welcome) = alice.start_dm(&kps[0], &bob_id.public())?;
             bob.join(&welcome)?;
         }
+        Ok(())
+    }
+
+    fn app(r: Received) -> Result<(PublicKey, Vec<u8>)> {
+        match r {
+            Received::Application {
+                sender, plaintext, ..
+            } => Ok((sender, plaintext)),
+            other => Err(Error::Mls(format!(
+                "atteso messaggio applicativo: {other:?}"
+            ))),
+        }
+    }
+
+    #[test]
+    fn gruppo_aggiunte_rimozioni_e_solo_admin() -> Result<()> {
+        let ids: Vec<Identity> = (0..4).map(|_| Identity::generate()).collect();
+        let devs: Vec<Device> = ids.iter().map(Device::new).collect();
+        let (a, b, c, d) = (&devs[0], &devs[1], &devs[2], &devs[3]);
+        let pk = |i: usize| ids[i].public();
+        let kp = |i: usize| -> Result<(Vec<u8>, PublicKey)> {
+            Ok((devs[i].key_packages(1)?.remove(0), pk(i)))
+        };
+        let admin = pk(0);
+        let only_admin = |_: &[u8], s: &PublicKey| *s == admin;
+
+        // A crea il gruppo con B e C.
+        let (gid, welcome) = a.create_group(&[kp(1)?, kp(2)?])?;
+        for dev in [b, c] {
+            let j = dev.join(&welcome)?;
+            assert_eq!(j.group_id, gid);
+            assert_eq!(j.members.len(), 3);
+        }
+
+        // B scrive: lo leggono A e C.
+        let m = b.encrypt(&gid, b"ciao a tutti")?;
+        assert_eq!(
+            app(a.decrypt(&m, only_admin)?)?,
+            (pk(1), b"ciao a tutti".to_vec())
+        );
+        assert_eq!(
+            app(c.decrypt(&m, only_admin)?)?,
+            (pk(1), b"ciao a tutti".to_vec())
+        );
+
+        // C scrive prima di vedere l'aggiunta di D: A lo legge lo stesso (epoca passata).
+        let late = c.encrypt(&gid, b"sono in ritardo")?;
+        let (commit, welcome) = a.add_members(&gid, &[kp(3)?])?;
+        assert_eq!(app(a.decrypt(&late, only_admin)?)?.1, b"sono in ritardo");
+        for dev in [b, c] {
+            assert!(matches!(
+                dev.decrypt(&commit, only_admin)?,
+                Received::Control { .. }
+            ));
+        }
+        d.join(&welcome)?;
+        assert_eq!(a.members(&gid)?.len(), 4);
+        let m = d.encrypt(&gid, b"eccomi")?;
+        assert_eq!(app(b.decrypt(&m, only_admin)?)?.1, b"eccomi");
+
+        // Un commit di B (non admin) viene scartato senza cambiare il gruppo.
+        let rogue = b.remove_members(&gid, &[pk(2)])?;
+        assert!(matches!(
+            c.decrypt(&rogue, only_admin),
+            Err(Error::CommitNotAllowed)
+        ));
+        assert_eq!(c.members(&gid)?.len(), 4);
+
+        // C scrive e poi A lo toglie: il messaggio, arrivato dopo, resta leggibile e di C.
+        let before_removal = c.encrypt(&gid, b"ultimo messaggio")?;
+        // A toglie C: gli altri lo vedono sparire, C sa di essere fuori.
+        let commit = a.remove_members(&gid, &[pk(2)])?;
+        assert_eq!(
+            app(a.decrypt(&before_removal, only_admin)?)?,
+            (pk(2), b"ultimo messaggio".to_vec())
+        );
+        d.decrypt(&commit, only_admin)?;
+        c.decrypt(&commit, only_admin)?;
+        assert!(!d.members(&gid)?.contains(&pk(2)));
+        assert!(!c.is_member(&gid)?);
+        assert!(d.is_member(&gid)?);
+        let m = a.encrypt(&gid, b"senza C")?;
+        assert_eq!(app(d.decrypt(&m, only_admin)?)?.1, b"senza C");
+        assert!(c.decrypt(&m, only_admin).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn commit_con_credenziale_falsa_respinto() -> Result<()> {
+        let (a_id, b_id, mallory_id, victim) = (
+            Identity::generate(),
+            Identity::generate(),
+            Identity::generate(),
+            Identity::generate().public(),
+        );
+        let (a, b) = (Device::new(&a_id), Device::new(&b_id));
+        let (gid, welcome) = a.create_group(&[(b.key_packages(1)?.remove(0), b_id.public())])?;
+        b.join(&welcome)?;
+
+        // A, senza passare dai controlli, aggiunge una foglia che dice di essere `victim`
+        // ma firma con la chiave di Mallory.
+        let mallory = Device::new(&mallory_id);
+        let forged = KeyPackage::builder()
+            .build(
+                CIPHERSUITE,
+                &mallory.provider,
+                &mallory.signer,
+                CredentialWithKey {
+                    credential: BasicCredential::new(victim.0.to_vec()).into(),
+                    signature_key: mallory_id.public().0.to_vec().into(),
+                },
+            )
+            .map_err(mls)?;
+        let mut group = a.load(&gid)?;
+        let (commit, _, _) = group
+            .add_members(&a.provider, &a.signer, &[forged.key_package().clone()])
+            .map_err(mls)?;
+        let commit = commit.to_bytes().map_err(mls)?;
+
+        let admin = a_id.public();
+        assert!(matches!(
+            b.decrypt(&commit, |_, s| *s == admin),
+            Err(Error::BadSender)
+        ));
+        assert_eq!(b.members(&gid)?.len(), 2);
         Ok(())
     }
 }

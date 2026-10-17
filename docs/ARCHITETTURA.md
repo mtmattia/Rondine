@@ -37,6 +37,7 @@
 
 | Scelta | Motivo |
 |---|---|
+| Gruppi senza server di smistamento | chi scrive deposita in ogni casella; un solo amministratore fa commit, così non nascono rami MLS concorrenti |
 | MLS invece di Signal Protocol | standard IETF, gruppi nativi, libreria Rust MIT; libsignal è AGPL |
 | Una chiave per identità e firma MLS | meno stato da tenere coerente; più dispositivi in roadmap |
 | Nomi `nome@nodo` | univocità senza registro globale, come l'email |

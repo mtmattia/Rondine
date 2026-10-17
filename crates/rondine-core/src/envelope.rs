@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::SignedCard;
+use crate::{PublicKey, SignedCard};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -37,7 +37,7 @@ pub enum AppMessage {
         active: bool,
         ts: u64,
     },
-    /// "Sono collegato": indirizzi per la consegna diretta (SPEC §12.3), in deposito effimero.
+    /// "Sono collegato": indirizzi per la consegna diretta (SPEC §12.3).
     Online {
         v: u32,
         addrs: Vec<String>,
@@ -58,6 +58,17 @@ pub enum AppMessage {
         status: ReceiptStatus,
         ids: Vec<String>,
     },
+    /// Nome, amministratore e biglietti noti di un gruppo (SPEC §7.4).
+    Group {
+        v: u32,
+        name: String,
+        admin: PublicKey,
+        cards: Vec<SignedCard>,
+    },
+    /// Richiesta di uscire da un gruppo (SPEC §7.4).
+    Leave {
+        v: u32,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,7 +86,9 @@ impl AppMessage {
             | AppMessage::Receipt { v, .. }
             | AppMessage::Typing { v, .. }
             | AppMessage::Online { v, .. }
-            | AppMessage::Relay { v, .. } => *v,
+            | AppMessage::Relay { v, .. }
+            | AppMessage::Group { v, .. }
+            | AppMessage::Leave { v } => *v,
         }
     }
 }
@@ -105,6 +118,10 @@ mod tests {
         let t: AppMessage =
             serde_json::from_str(r#"{"type":"text","v":1,"id":"x","ts":5,"body":"ciao"}"#)?;
         assert!(matches!(t, AppMessage::Text { ref body, .. } if body == "ciao"));
+        assert_eq!(
+            serde_json::to_string(&AppMessage::Leave { v: 1 })?,
+            r#"{"type":"leave","v":1}"#
+        );
         Ok(())
     }
 }

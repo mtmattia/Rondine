@@ -21,7 +21,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Notifiche push (UnifiedPush) | ✅ | provate sull'emulatore con ntfy e un server ntfy locale, anche ad app chiusa |
 | Notifiche iPhone (APNs) | ⬜ | dopo Android |
 | Notifiche via Google (FCM), versione Play | ⬜ | facoltativo: distributore FCM incorporato di UnifiedPush + gateway; serve un progetto Firebase; la versione F-Droid resta senza Google |
-| Gruppi | ⬜ | MLS li supporta già |
+| Gruppi | 🟡 | client e CLI (SPEC §7.4); manca nell'app; l'amministratore non può ancora uscire né passare il ruolo |
 | Foto, file, messaggi vocali | ⬜ | come blob cifrati |
 | Conferme di lettura, "sta scrivendo" | ✅ | spunte ✓ / ✓✓ / ✓✓ verdi (SPEC §7.2), "sta scrivendo" effimero senza sveglia (§7.3) |
 | Più dispositivi per persona | ⬜ | ogni dispositivo membro MLS |
@@ -85,4 +85,4 @@ Mesh Bluetooth e Wi-Fi Direct, consegna differita.
 
 ### Dopo
 iPhone (APNs con push relay e Notification Service Extension), chiamate (WebRTC, TURN federato),
-gruppi, media, più dispositivi.
+media, più dispositivi, sigillo per destinatario nei gruppi (SPEC §7.4, limite noto).

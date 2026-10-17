@@ -52,7 +52,7 @@ pub struct ChatMessage {
     /// I messaggi in uscita nascono letti; quelli in arrivo finché non si apre la chat.
     #[serde(default)]
     pub read: bool,
-    /// Solo per i messaggi in uscita: le spunte (SPEC §7.2).
+    /// Solo per i messaggi in uscita: le spunte (SPEC §7.4).
     #[serde(default)]
     pub status: Delivery,
 }
@@ -68,6 +68,43 @@ pub enum Delivery {
     Sent,
     Delivered,
     Read,
+}
+
+/// Un altro membro di un gruppo; può non essere tra i contatti.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct GroupMember {
+    pub identity: PublicKey,
+    pub display_name: String,
+    /// Biglietto più recente: dice dove consegnare i messaggi del gruppo.
+    pub card: SignedCard,
+}
+
+/// Una chat di gruppo (SPEC §7.4).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct GroupChat {
+    /// Id del gruppo MLS in base64url.
+    pub id: String,
+    pub name: String,
+    pub admin: PublicKey,
+    /// Gli altri membri, io escluso.
+    pub members: Vec<GroupMember>,
+    /// Falso dopo essere usciti o essere stati tolti.
+    pub active: bool,
+    /// Permesso `gruppo` che il mio nodo ha emesso per questo gruppo.
+    pub my_permit: Option<SignedPermit>,
+    pub created_at: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GroupMessage {
+    pub id: String,
+    /// Id del gruppo in base64url.
+    pub group: String,
+    pub sender: PublicKey,
+    pub outgoing: bool,
+    pub body: String,
+    pub ts: u64,
+    pub read: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -106,6 +143,10 @@ pub struct State {
     /// Id dei `relay` della mesh già visti (SPEC §12.5).
     #[serde(default)]
     pub seen_relays: Vec<String>,
+    #[serde(default)]
+    pub group_chats: Vec<GroupChat>,
+    #[serde(default)]
+    pub group_messages: Vec<GroupMessage>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

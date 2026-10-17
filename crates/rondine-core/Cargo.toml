@@ -1,0 +1,20 @@
+[package]
+name = "rondine-core"
+description = "Tipi del protocollo Rondine: identità, firme, permessi, nomi, scoperta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ed25519-dalek.workspace = true
+rand.workspace = true
+blake3.workspace = true
+argon2.workspace = true
+chacha20poly1305.workspace = true
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

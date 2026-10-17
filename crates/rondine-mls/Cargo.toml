@@ -1,0 +1,18 @@
+[package]
+name = "rondine-mls"
+description = "Involucro sottile su openmls per Rondine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rondine-core.workspace = true
+openmls.workspace = true
+openmls_rust_crypto.workspace = true
+openmls_basic_credential.workspace = true
+openmls_traits.workspace = true
+openmls_memory_storage.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

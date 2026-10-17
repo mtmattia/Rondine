@@ -26,3 +26,5 @@ Una riga per modifica: data, cosa è cambiato.
   raggiungibile, indirizzo che non è un nodo Rondine) invece del testo di reqwest o dell'HTML del
   sito; test di accettazione. App: avviso "Notifiche spente" nella lista chat quando manca un
   distributore UnifiedPush, con "Installa ntfy" o "Attiva"; riprova a registrarsi al ritorno.
+- 2026-10-17 — App: colori presi dall'icona (verde bosco, verde ala, crema) al posto del blu,
+  in tema chiaro e scuro; sfondo crema della chat e bolle verdi; cerchio del benvenuto in verde salvia.

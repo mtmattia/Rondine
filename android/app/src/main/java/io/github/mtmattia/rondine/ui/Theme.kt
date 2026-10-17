@@ -11,49 +11,49 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /*
- * Palette della rondine: blu notte del dorso, ruggine della gola, bianco del petto.
+ * Palette dell'icona: verde bosco del dorso, verde dell'ala, crema del petto e del fumetto.
  * Struttura dell'interfaccia simile a WhatsApp, colori e marchio nostri.
  */
-private val Blu = Color(0xFF1D4E89)
-private val BluChiaro = Color(0xFF7FB0F0)
-private val Ruggine = Color(0xFFC4532F)
+private val Bosco = Color(0xFF0D4F3C)
+private val Ala = Color(0xFF2E9858)
+private val VerdeChiaro = Color(0xFF7FCF9F)
 
 private val Light = lightColorScheme(
-    primary = Blu,
+    primary = Bosco,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFD6E4F8),
-    onPrimaryContainer = Color(0xFF0B2A4F),
-    secondary = Ruggine,
+    primaryContainer = Color(0xFFD3EBDC),
+    onPrimaryContainer = Color(0xFF072E23),
+    secondary = Ala,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE3ECF8),
-    onSecondaryContainer = Color(0xFF0B2A4F),
+    secondaryContainer = Color(0xFFE6F2EA),
+    onSecondaryContainer = Color(0xFF0B3A2C),
     background = Color.White,
-    onBackground = Color(0xFF111B21),
+    onBackground = Color(0xFF111B17),
     surface = Color.White,
-    onSurface = Color(0xFF111B21),
-    surfaceVariant = Color(0xFFF0F3F7),
-    onSurfaceVariant = Color(0xFF5B6773),
+    onSurface = Color(0xFF111B17),
+    surfaceVariant = Color(0xFFF0F4F1),
+    onSurfaceVariant = Color(0xFF5A6B63),
     surfaceContainer = Color.White,
-    outlineVariant = Color(0xFFE2E7ED),
+    outlineVariant = Color(0xFFE1E8E3),
 )
 
 private val Dark = darkColorScheme(
-    primary = BluChiaro,
-    onPrimary = Color(0xFF06213F),
-    primaryContainer = Color(0xFF1F3C63),
-    onPrimaryContainer = Color(0xFFD6E4F8),
-    secondary = Color(0xFFE9876A),
-    onSecondary = Color(0xFF3A1206),
-    secondaryContainer = Color(0xFF1F3C63),
-    onSecondaryContainer = Color(0xFFD6E4F8),
-    background = Color(0xFF10151B),
-    onBackground = Color(0xFFE6EBF0),
-    surface = Color(0xFF10151B),
-    onSurface = Color(0xFFE6EBF0),
-    surfaceVariant = Color(0xFF1D252E),
-    onSurfaceVariant = Color(0xFF94A1AE),
-    surfaceContainer = Color(0xFF10151B),
-    outlineVariant = Color(0xFF26303A),
+    primary = VerdeChiaro,
+    onPrimary = Color(0xFF00382A),
+    primaryContainer = Color(0xFF1E4A3A),
+    onPrimaryContainer = Color(0xFFCDEFD9),
+    secondary = Color(0xFF8FD9A8),
+    onSecondary = Color(0xFF00391F),
+    secondaryContainer = Color(0xFF1E3A30),
+    onSecondaryContainer = Color(0xFFCDEFD9),
+    background = Color(0xFF0F1513),
+    onBackground = Color(0xFFE4EBE7),
+    surface = Color(0xFF0F1513),
+    onSurface = Color(0xFFE4EBE7),
+    surfaceVariant = Color(0xFF1C2622),
+    onSurfaceVariant = Color(0xFF95A69E),
+    surfaceContainer = Color(0xFF0F1513),
+    outlineVariant = Color(0xFF26322D),
 )
 
 /** Colori della chat che Material non prevede. */
@@ -70,25 +70,25 @@ data class ChatColors(
 )
 
 private val LightChat = ChatColors(
-    wallpaper = Color(0xFFEAEFF5),
-    wallpaperDot = Color(0xFFDCE3EC),
-    bubbleOut = Color(0xFFD4E4FA),
+    wallpaper = Color(0xFFF7F4E4),
+    wallpaperDot = Color(0xFFEDE8D2),
+    bubbleOut = Color(0xFFD6EEDD),
     bubbleIn = Color.White,
-    bubbleText = Color(0xFF111B21),
-    bubbleMeta = Color(0xFF667781),
+    bubbleText = Color(0xFF111B17),
+    bubbleMeta = Color(0xFF63766C),
     notice = Color(0xFFFFF5DC),
-    noticeText = Color(0xFF54656F),
+    noticeText = Color(0xFF55655D),
 )
 
 private val DarkChat = ChatColors(
-    wallpaper = Color(0xFF0B1015),
-    wallpaperDot = Color(0xFF141B22),
-    bubbleOut = Color(0xFF1F3C63),
-    bubbleIn = Color(0xFF1D252E),
-    bubbleText = Color(0xFFE6EBF0),
-    bubbleMeta = Color(0xFF94A1AE),
-    notice = Color(0xFF1E2A33),
-    noticeText = Color(0xFFB5C1CB),
+    wallpaper = Color(0xFF0B110F),
+    wallpaperDot = Color(0xFF141C19),
+    bubbleOut = Color(0xFF1E4A3A),
+    bubbleIn = Color(0xFF1C2622),
+    bubbleText = Color(0xFFE4EBE7),
+    bubbleMeta = Color(0xFF95A69E),
+    notice = Color(0xFF1E2A26),
+    noticeText = Color(0xFFB5C4BC),
 )
 
 val LocalChatColors = staticCompositionLocalOf { LightChat }
@@ -103,6 +103,6 @@ fun RondineTheme(content: @Composable () -> Unit) {
 
 /** Colori degli avatar, scelti in modo stabile dalla chiave del contatto. */
 val AvatarColors = listOf(
-    Color(0xFF1D4E89), Color(0xFFC4532F), Color(0xFF2E7D6B), Color(0xFF7B5EA7),
+    Color(0xFF0D4F3C), Color(0xFFC4532F), Color(0xFF1D4E89), Color(0xFF7B5EA7),
     Color(0xFFB0476B), Color(0xFF3C7DBF), Color(0xFF9A6B1F), Color(0xFF4A6572),
 )

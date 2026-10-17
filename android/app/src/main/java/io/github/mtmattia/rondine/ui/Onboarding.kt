@@ -4,7 +4,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +30,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -61,7 +61,7 @@ fun Onboarding() {
         ) {
             Spacer(Modifier.height(24.dp))
             Box(
-                Modifier.size(112.dp).background(Color(0xFF1D4E89), CircleShape),
+                Modifier.size(112.dp).background(colorResource(R.color.ic_bg), CircleShape),
                 contentAlignment = Alignment.Center,
             ) { Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.size(112.dp)) }
             Text("Benvenuto su Rondine", fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)

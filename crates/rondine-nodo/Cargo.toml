@@ -1,0 +1,27 @@
+[package]
+name = "rondine-nodo"
+description = "Nodo Rondine: casella postale, permessi, sveglia push, nomi utente, bacheca di scoperta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rondine-nodo"
+path = "src/main.rs"
+
+[dependencies]
+rondine-core.workspace = true
+axum.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

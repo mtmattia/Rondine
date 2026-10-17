@@ -186,7 +186,9 @@ Due persone che hanno l'una il numero dell'altra si trovano da sole.
    ```
 
    dove `phone` è il numero di chi pubblica.
-5. Si pubblica nella bacheca: `PUT /v1/board/{b64 loc}`. Ogni voce ha una chiave proprietaria
+5. Si pubblica su **ogni bacheca dell'elenco del client**: `PUT /v1/board/{b64 loc}`. L'elenco
+   contiene il proprio nodo e le bacheche predefinite dell'app. Due persone su nodi diversi si
+   trovano se hanno almeno una bacheca in comune. Ogni voce ha una chiave proprietaria
    Ed25519 derivata per luogo, `seed = blake3_keyed(seme_identità, "rondine/v1/board-owner" || loc)`,
    così le voci della stessa persona non si collegano tra loro.
 6. Chi cerca calcola gli stessi `loc` e `key`, legge le voci, decifra, scarta le proprie, controlla

@@ -1,0 +1,23 @@
+[package]
+name = "rondine-client"
+description = "Logica e stato del client Rondine, usati da CLI e app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rondine-core.workspace = true
+rondine-mls.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+rondine-nodo.workspace = true
+tempfile.workspace = true
+axum.workspace = true
+
+[lints]
+workspace = true

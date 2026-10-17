@@ -1,0 +1,230 @@
+//! Test di accettazione: nodi veri in-process e più client, come in produzione.
+
+use std::sync::{Arc, Mutex};
+
+use rondine_client::{Client, Event, Source};
+use rondine_core::Identity;
+use rondine_nodo::{AppState, Config, Store, WAKE_BODY};
+use tempfile::TempDir;
+
+type R = Result<(), Box<dyn std::error::Error>>;
+
+async fn start_node() -> Result<String, Box<dyn std::error::Error>> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: url.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+    })?;
+    tokio::spawn(rondine_nodo::serve(listener, state));
+    Ok(url)
+}
+
+async fn profile(
+    dir: &TempDir,
+    name: &str,
+    node: &str,
+) -> Result<Client, Box<dyn std::error::Error>> {
+    Ok(Client::create(&dir.path().join(name), name, node).await?)
+}
+
+fn texts(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Message(m) => Some(m.body.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn invito_e_messaggi_tra_nodi_diversi() -> R {
+    let (n1, n2) = (start_node().await?, start_node().await?);
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut silvia = profile(&tmp, "Silvia", &n2).await?;
+
+    // Silvia apre il link d'invito di Mattia.
+    let link = mattia.invite_link()?;
+    let c = silvia.add_from_invite(&link).await?;
+    assert_eq!(c.display_name, "Mattia");
+    assert_eq!(c.source, Source::Invito);
+    assert!(!c.verified);
+
+    // Mattia riceve il saluto: Silvia diventa un suo contatto.
+    let ev = mattia.sync().await?;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::NewContact { name, .. } if name == "Silvia"))
+    );
+
+    // Messaggi nei due versi, anche dopo aver riaperto il profilo da disco.
+    mattia.send_text(&silvia.identity(), "ciao Silvia!").await?;
+    let mut silvia = Client::open(&tmp.path().join("Silvia"))?;
+    assert_eq!(texts(&silvia.sync().await?), ["ciao Silvia!"]);
+    silvia
+        .send_text(&mattia.identity(), "ciao! tutto bene")
+        .await?;
+    silvia.send_text(&mattia.identity(), "a stasera").await?;
+    let mut mattia = Client::open(&tmp.path().join("Mattia"))?;
+    assert_eq!(
+        texts(&mattia.sync().await?),
+        ["ciao! tutto bene", "a stasera"]
+    );
+
+    // La casella è stata svuotata: una seconda sincronizzazione non porta niente.
+    assert!(mattia.sync().await?.is_empty());
+
+    // Numero di sicurezza uguale sui due telefoni.
+    assert_eq!(
+        mattia.safety_number(&silvia.identity()),
+        silvia.safety_number(&mattia.identity())
+    );
+    assert_eq!(mattia.messages_with(&silvia.identity()).len(), 3);
+    Ok(())
+}
+
+#[tokio::test]
+async fn nome_utente_univoco_per_nodo() -> R {
+    let n1 = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut luca = profile(&tmp, "Luca", &n1).await?;
+
+    let handle = mattia.claim_username("Mattia").await?;
+    assert!(handle.starts_with("mattia@127.0.0.1:"));
+
+    // Lo stesso nome non può prenderlo un altro.
+    let err = luca
+        .claim_username("mattia")
+        .await
+        .err()
+        .ok_or("doveva fallire")?;
+    assert_eq!(err.node_code(), Some("name_taken"));
+    assert_eq!(luca.state().username, None);
+
+    // Luca trova Mattia col nome e gli scrive.
+    let c = luca.add_by_username(&format!("@{handle}")).await?;
+    assert_eq!(c.username.as_deref(), Some(handle.as_str()));
+    mattia.sync().await?;
+    luca.send_text(&mattia.identity(), "trovato col nome!")
+        .await?;
+    assert_eq!(texts(&mattia.sync().await?), ["trovato col nome!"]);
+
+    // Liberato, il nome torna disponibile.
+    mattia.release_username().await?;
+    luca.claim_username("mattia").await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rubrica_reciproca_su_nodi_diversi() -> R {
+    let (n1, n2) = (start_node().await?, start_node().await?);
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut silvia = profile(&tmp, "Silvia", &n2).await?;
+    let mut estraneo = profile(&tmp, "Estraneo", &n1).await?;
+    // Una bacheca in comune basta per trovarsi.
+    silvia.add_board(&n1)?;
+
+    mattia.set_phone("340 111 1111")?;
+    silvia.set_phone("+39 340 222 2222")?;
+    estraneo.set_phone("340 333 3333")?;
+
+    // Mattia e Silvia si hanno a vicenda in rubrica; l'estraneo ha Mattia ma non viceversa.
+    assert_eq!(mattia.publish_contacts(&["3402222222".into()]).await?, 1);
+    silvia.publish_contacts(&["3401111111".into()]).await?;
+    estraneo.publish_contacts(&["3401111111".into()]).await?;
+
+    let found = estraneo.discover(&["3401111111".into()]).await?;
+    assert!(
+        found.is_empty(),
+        "chi non è nella rubrica di Mattia non deve trovarlo"
+    );
+
+    let a = mattia.discover(&["340 222 2222".into()]).await?;
+    let b = silvia.discover(&["3401111111".into()]).await?;
+    assert_eq!(a.len(), 1);
+    assert_eq!(b.len(), 1);
+    assert_eq!(a[0].display_name, "Silvia");
+    assert_eq!(a[0].phone.as_deref(), Some("+393402222222"));
+    assert_eq!(b[0].source, Source::Rubrica);
+
+    // Un solo dei due ha avviato la chat; dopo la sincronizzazione scrivono entrambi.
+    mattia.sync().await?;
+    silvia.sync().await?;
+    mattia
+        .send_text(&silvia.identity(), "ti ho trovata in rubrica")
+        .await?;
+    silvia.send_text(&mattia.identity(), "anch'io!").await?;
+    assert_eq!(texts(&silvia.sync().await?), ["ti ho trovata in rubrica"]);
+    assert_eq!(texts(&mattia.sync().await?), ["anch'io!"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn bloccare_un_contatto_ferma_i_suoi_messaggi() -> R {
+    let n1 = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut molesto = profile(&tmp, "Molesto", &n1).await?;
+
+    molesto.add_from_invite(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    // Mattia risponde: così il molesto riceve il permesso emesso apposta per lui.
+    mattia.send_text(&molesto.identity(), "chi sei?").await?;
+    molesto.sync().await?;
+
+    mattia.block(&molesto.identity()).await?;
+    // Revocato anche l'invito originale, il molesto non ha più permessi validi.
+    mattia.reset_invite().await?;
+    let err = molesto
+        .send_text(&mattia.identity(), "ancora io")
+        .await
+        .err()
+        .ok_or("il nodo doveva rifiutare")?;
+    assert_eq!(err.node_code(), Some("forbidden"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn sveglia_unifiedpush_dopo_un_deposito() -> R {
+    // Un finto distributore UnifiedPush che registra le sveglie ricevute.
+    let got: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = got.clone();
+    let app = axum::Router::new().route(
+        "/up/{token}",
+        axum::routing::post(move |body: String| {
+            let sink = sink.clone();
+            async move {
+                if let Ok(mut v) = sink.lock() {
+                    v.push(body);
+                }
+                "ok"
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let push_url = format!("http://{}/up/telefono-mattia", listener.local_addr()?);
+    tokio::spawn(async move { axum::serve(listener, app).await });
+
+    let n1 = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut silvia = profile(&tmp, "Silvia", &n1).await?;
+    mattia.set_push_endpoint(&push_url).await?;
+
+    silvia.add_from_invite(&mattia.invite_link()?).await?;
+    for _ in 0..50 {
+        if !got.lock().map_err(|_| "lock")?.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let wakes = got.lock().map_err(|_| "lock")?.clone();
+    assert_eq!(wakes, [WAKE_BODY], "la sveglia non deve contenere altro");
+    Ok(())
+}

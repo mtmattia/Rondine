@@ -11,14 +11,14 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 |---|---|---|
 | Identità sul telefono, senza account | ✅ | `rondine-core::Identity` |
 | Biglietto firmato e link d'invito | ✅ | SPEC §4 |
-| Chat 1:1 cifrata end-to-end | 🟡 | MLS pronto in `rondine-mls`; da collegare al client |
-| Casella postale sul nodo (messaggi offline) | ⬜ | M0 |
-| Permessi di consegna revocabili (blocco contatto) | 🟡 | formato pronto; manca il nodo |
-| Nome utente univoco `nome@nodo` | 🟡 | regole pronte; manca il registro sul nodo |
-| Scoperta dalla rubrica a coppie | 🟡 | derivazioni e cifratura pronte; manca la bacheca |
+| Chat 1:1 cifrata end-to-end | ✅ | MLS, anche tra nodi diversi |
+| Casella postale sul nodo (messaggi offline) | ✅ | 30 giorni o fino alla conferma |
+| Permessi di consegna revocabili (blocco contatto) | ✅ | |
+| Nome utente univoco `nome@nodo` | ✅ | |
+| Scoperta dalla rubrica a coppie | ✅ | bacheche comuni tra nodi diversi |
 | Invito via SMS | ⬜ | M1, lato app Android |
 | Numero di sicurezza | ✅ | SPEC §10 |
-| Notifiche push (UnifiedPush) | ⬜ | M0 lato nodo, M1 lato app |
+| Notifiche push (UnifiedPush) | 🟡 | nodo fatto; manca l'app |
 | Notifiche iPhone (APNs) | ⬜ | dopo Android |
 | Gruppi | ⬜ | MLS li supporta già |
 | Foto, file, messaggi vocali | ⬜ | come blob cifrati |
@@ -33,7 +33,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 
 ## Traguardi
 
-### M0 — Fondamenta (in corso)
+### M0 — Fondamenta ✅
 Due client da riga di comando, sullo stesso nodo o su nodi diversi, si trovano (invito, nome
 utente o rubrica) e si scambiano messaggi cifrati, anche se uno dei due è offline. Il nodo sveglia
 il destinatario con UnifiedPush.
@@ -41,11 +41,11 @@ il destinatario con UnifiedPush.
 - [x] `rondine-core`: identità, firme, biglietti, inviti, permessi, nomi, numeri, scoperta,
       numero di sicurezza
 - [x] `rondine-mls`: dispositivo, key package (con quello di riserva), chat 1:1, salvataggio su disco
-- [ ] `rondine-nodo`: caselle, permessi, key package, sveglia, nomi, bacheca
-- [ ] `rondine-client` + CLI `rondine`
-- [ ] test di accettazione con nodo vero e più client
+- [x] `rondine-nodo`: caselle, permessi, key package, sveglia, nomi, bacheca
+- [x] `rondine-client` + CLI `rondine`
+- [x] test di accettazione con nodo vero e più client
 
-### M1 — App Android
+### M1 — App Android (in corso)
 Interfaccia Kotlin/Compose sopra `rondine-client` (UniFFI), UnifiedPush, rubrica, invito via SMS,
 QR.
 

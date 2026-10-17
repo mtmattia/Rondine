@@ -37,3 +37,9 @@ Una riga per modifica: data, cosa è cambiato.
   (notifica persa ad app chiusa), e il nodo scartava le sveglie entro 10 s invece di rimandarle
   (SPEC §8, test di accettazione). Notifica col cerchio verde. Guida `docs/PROVE-ANDROID.md`.
 - 2026-10-17 — Benvenuto essenziale: solo "Messaggi cifrati da telefono a telefono." e il pulsante "Inizia".
+- 2026-10-17 — Certificati Let's Encrypt rifiutati su Android (trovato col telefono vero su un nodo
+  Tailscale Serve): il controllo di revoca scarica le CRL in http, vietato dalla nostra
+  `network_security_config`, e lo faceva sul thread principale perché UniFFI esegue i futuri sul
+  thread che chiama. Corretto: eccezioni http per i server CRL (elenco di
+  rustls-platform-verifier, issue #221) e operazioni di rete del ponte eseguite sui thread di
+  tokio. Nelle build di prova gli errori di rete mostrano anche il dettaglio tecnico.

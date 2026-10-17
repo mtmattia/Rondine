@@ -20,6 +20,14 @@ import uniffi.rondine_ffi.RondineException
 import uniffi.rondine_ffi.createProfile
 import uniffi.rondine_ffi.openProfile
 
+/** Messaggio d'errore per l'utente. Il core Rust mette in seconda riga il dettaglio tecnico:
+ *  si mostra solo nella versione di prova, per capire i problemi sui telefoni veri. */
+val Throwable.userMessage: String
+    get() {
+        val m = message ?: "Errore"
+        return if (Repo.isDebug) m else m.substringBefore('\n')
+    }
+
 /** Stato delle notifiche UnifiedPush, per l'avviso nella lista chat. */
 enum class PushState {
     /** Non ancora controllato (all'avvio). */
@@ -125,7 +133,7 @@ object Repo {
                 client().setPushEndpoint(url)
                 setPush(PushState.Active, "Attive")
             } catch (e: Exception) {
-                setPush(PushState.Failed, "Errore: ${e.message}")
+                setPush(PushState.Failed, "Errore: ${e.userMessage}")
             }
         }
     }

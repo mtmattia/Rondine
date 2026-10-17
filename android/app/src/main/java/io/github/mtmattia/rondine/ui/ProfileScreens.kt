@@ -70,6 +70,7 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import io.github.mtmattia.rondine.Repo
+import io.github.mtmattia.rondine.userMessage
 import kotlinx.coroutines.launch
 import uniffi.rondine_ffi.ContactInfo
 import uniffi.rondine_ffi.RondineException
@@ -176,7 +177,7 @@ fun MyQrScreen(onBack: () -> Unit) {
                             Repo.refresh()
                             snackbar.showSnackbar("Nuovo link creato")
                         } catch (e: RondineException) {
-                            snackbar.showSnackbar(e.message ?: "Errore")
+                            snackbar.showSnackbar(e.userMessage)
                         }
                     }
                 }) { Text("Reimposta") }
@@ -258,7 +259,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             try {
                 snackbar.showSnackbar(block())
             } catch (e: RondineException) {
-                snackbar.showSnackbar(e.message ?: "Errore")
+                snackbar.showSnackbar(e.userMessage)
             }
         }
     }

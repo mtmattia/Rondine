@@ -34,7 +34,8 @@ impl From<rondine_client::Error> for RondineError {
         match e {
             // Nell'app basta il testo del nodo, senza lo stato HTTP.
             E::Node { message, .. } => RondineError::Node(message),
-            E::Http(_) => RondineError::Network(e.to_string()),
+            // Seconda riga: dettaglio tecnico, che l'app mostra solo nella versione di prova.
+            E::Http(_) => RondineError::Network(format!("{e}\n{}", e.detail())),
             E::NotFound(m) => RondineError::NotFound(m),
             E::Invalid(m) => RondineError::Invalid(m),
             E::Core(_) => RondineError::Invalid(e.to_string()),
@@ -145,18 +146,16 @@ pub fn open_profile(dir: String) -> Result<Option<Arc<Rondine>>> {
     if !Client::exists(&dir) {
         return Ok(None);
     }
-    Ok(Some(Arc::new(Rondine {
-        client: Mutex::new(Client::open(&dir)?),
-    })))
+    Ok(Some(Rondine::new(Client::open(&dir)?)))
 }
 
 /// Crea un profilo nuovo: identità, casella sul nodo, key package.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn create_profile(dir: String, name: String, node: String) -> Result<Arc<Rondine>> {
-    let client = Client::create(&PathBuf::from(dir), &name, &node).await?;
-    Ok(Arc::new(Rondine {
-        client: Mutex::new(client),
-    }))
+    let client =
+        on_runtime(async move { Ok(Client::create(&PathBuf::from(dir), &name, &node).await?) })
+            .await?;
+    Ok(Rondine::new(client))
 }
 
 /// Numero in formato E.164 (prefisso predefinito +39).
@@ -170,8 +169,45 @@ pub fn normalize_phone(input: String) -> Result<String> {
 
 #[derive(uniffi::Object)]
 pub struct Rondine {
-    client: Mutex<Client>,
+    client: Arc<Mutex<Client>>,
 }
+
+/// Esegue un'operazione sui thread del runtime tokio. UniFFI fa girare il futuro sul thread che
+/// chiama da Kotlin, spesso quello principale di Android: lì la rete è vietata (il verificatore
+/// dei certificati scarica le liste di revoca) e ogni calcolo blocca l'interfaccia.
+async fn on_runtime<T, F>(fut: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T>> + Send + 'static,
+{
+    tokio::spawn(fut)
+        .await
+        .map_err(|e| RondineError::Internal(format!("operazione interrotta: {e}")))?
+}
+
+impl Rondine {
+    fn new(client: Client) -> Arc<Self> {
+        Arc::new(Self {
+            client: Arc::new(Mutex::new(client)),
+        })
+    }
+
+    /// Operazione di rete sul client, fuori dal thread del chiamante.
+    async fn run<T, F>(&self, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: for<'a> FnOnce(&'a mut Client) -> BoxFuture<'a, Result<T>> + Send + 'static,
+    {
+        let client = self.client.clone();
+        on_runtime(async move {
+            let mut c = client.lock().await;
+            f(&mut c).await
+        })
+        .await
+    }
+}
+
+type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 #[uniffi::export(async_runtime = "tokio")]
 impl Rondine {
@@ -238,12 +274,14 @@ impl Rondine {
 
     pub async fn send_text(&self, contact_id: String, body: String) -> Result<Message> {
         let k = key(&contact_id)?;
-        let m = self.client.lock().await.send_text(&k, &body).await?;
-        Ok(message(&m))
+        self.run(move |c| Box::pin(async move { Ok(message(&c.send_text(&k, &body).await?)) }))
+            .await
     }
 
     pub async fn sync(&self) -> Result<SyncResult> {
-        let events = self.client.lock().await.sync().await?;
+        let events = self
+            .run(|c| Box::pin(async move { Ok(c.sync().await?) }))
+            .await?;
         let mut out = SyncResult {
             new_contacts: Vec::new(),
             messages: Vec::new(),
@@ -262,30 +300,37 @@ impl Rondine {
     /// Link d'invito, link corto `rondine:@nome@nodo` o nome utente: quello che arriva da QR,
     /// link aperti o testo incollato.
     pub async fn add(&self, input: String) -> Result<ContactInfo> {
-        let c = self.client.lock().await.add(&input).await?;
-        Ok(contact_info(&c))
+        self.run(move |c| Box::pin(async move { Ok(contact_info(&c.add(&input).await?)) }))
+            .await
     }
 
     pub async fn add_from_invite(&self, link: String) -> Result<ContactInfo> {
-        let c = self.client.lock().await.add_from_invite(&link).await?;
-        Ok(contact_info(&c))
+        self.run(move |c| {
+            Box::pin(async move { Ok(contact_info(&c.add_from_invite(&link).await?)) })
+        })
+        .await
     }
 
     pub async fn add_by_username(&self, handle: String) -> Result<ContactInfo> {
-        let c = self.client.lock().await.add_by_username(&handle).await?;
-        Ok(contact_info(&c))
+        self.run(move |c| {
+            Box::pin(async move { Ok(contact_info(&c.add_by_username(&handle).await?)) })
+        })
+        .await
     }
 
     pub async fn claim_username(&self, name: String) -> Result<String> {
-        Ok(self.client.lock().await.claim_username(&name).await?)
+        self.run(move |c| Box::pin(async move { Ok(c.claim_username(&name).await?) }))
+            .await
     }
 
     pub async fn release_username(&self) -> Result<()> {
-        Ok(self.client.lock().await.release_username().await?)
+        self.run(|c| Box::pin(async move { Ok(c.release_username().await?) }))
+            .await
     }
 
     pub async fn reset_invite(&self) -> Result<String> {
-        Ok(self.client.lock().await.reset_invite().await?)
+        self.run(|c| Box::pin(async move { Ok(c.reset_invite().await?) }))
+            .await
     }
 
     pub async fn set_phone(&self, number: String) -> Result<String> {
@@ -298,15 +343,20 @@ impl Rondine {
 
     /// Pubblica e cerca in un colpo solo: è ciò che fa l'app quando legge la rubrica.
     pub async fn find_in_address_book(&self, numbers: Vec<String>) -> Result<Vec<ContactInfo>> {
-        let mut c = self.client.lock().await;
-        c.publish_contacts(&numbers).await?;
-        let found = c.discover(&numbers).await?;
-        Ok(found.iter().map(contact_info).collect())
+        self.run(move |c| {
+            Box::pin(async move {
+                c.publish_contacts(&numbers).await?;
+                let found = c.discover(&numbers).await?;
+                Ok(found.iter().map(contact_info).collect())
+            })
+        })
+        .await
     }
 
     pub async fn block(&self, contact_id: String) -> Result<()> {
         let k = key(&contact_id)?;
-        Ok(self.client.lock().await.block(&k).await?)
+        self.run(move |c| Box::pin(async move { Ok(c.block(&k).await?) }))
+            .await
     }
 
     pub async fn mark_verified(&self, contact_id: String) -> Result<()> {
@@ -320,16 +370,13 @@ impl Rondine {
     }
 
     pub async fn set_push_endpoint(&self, endpoint: String) -> Result<()> {
-        Ok(self
-            .client
-            .lock()
+        self.run(move |c| Box::pin(async move { Ok(c.set_push_endpoint(&endpoint).await?) }))
             .await
-            .set_push_endpoint(&endpoint)
-            .await?)
     }
 
     pub async fn clear_push_endpoint(&self) -> Result<()> {
-        Ok(self.client.lock().await.clear_push_endpoint().await?)
+        self.run(|c| Box::pin(async move { Ok(c.clear_push_endpoint().await?) }))
+            .await
     }
 }
 

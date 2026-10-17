@@ -25,6 +25,30 @@ pub enum Error {
 }
 
 impl Error {
+    /// Catena tecnica delle cause, per la diagnosi (non per l'utente).
+    pub fn detail(&self) -> String {
+        let mut parts = Vec::new();
+        let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(err) = cur {
+            match err
+                .downcast_ref::<std::io::Error>()
+                .and_then(|io| io.get_ref())
+            {
+                // Gli io::Error avvolti nascondono la causa vera: si scende dentro.
+                Some(inner) => {
+                    parts.push(inner.to_string());
+                    cur = inner.source();
+                }
+                None => {
+                    parts.push(err.to_string());
+                    cur = err.source();
+                }
+            }
+        }
+        parts.dedup();
+        parts.join(" ← ")
+    }
+
     /// Codice di errore restituito dal nodo, se c'è.
     pub fn node_code(&self) -> Option<&str> {
         match self {

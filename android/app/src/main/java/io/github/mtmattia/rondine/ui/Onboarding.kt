@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import io.github.mtmattia.rondine.R
 import io.github.mtmattia.rondine.BuildConfig
 import io.github.mtmattia.rondine.Repo
+import io.github.mtmattia.rondine.userMessage
 import kotlinx.coroutines.launch
 import uniffi.rondine_ffi.RondineException
 
@@ -104,7 +105,7 @@ fun Onboarding() {
                             try {
                                 Repo.create(name.trim(), node.trim(), phone.trim().ifEmpty { null })
                             } catch (e: RondineException) {
-                                error = e.message
+                                error = e.userMessage
                             } finally {
                                 busy = false
                             }

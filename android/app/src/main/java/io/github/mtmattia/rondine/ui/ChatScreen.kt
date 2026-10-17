@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mtmattia.rondine.Notifier
 import io.github.mtmattia.rondine.Repo
+import io.github.mtmattia.rondine.userMessage
 import kotlinx.coroutines.launch
 import uniffi.rondine_ffi.ContactInfo
 import uniffi.rondine_ffi.Message
@@ -127,7 +128,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                 Repo.refresh()
             }
         } catch (e: RondineException) {
-            snackbar.showSnackbar(e.message ?: "Errore")
+            snackbar.showSnackbar(e.userMessage)
         }
     }
 
@@ -210,7 +211,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                                                 Repo.refresh()
                                                 snackbar.showSnackbar("${c.name} è bloccato")
                                             } catch (e: RondineException) {
-                                                snackbar.showSnackbar(e.message ?: "Errore")
+                                                snackbar.showSnackbar(e.userMessage)
                                             }
                                         }
                                     },
@@ -276,7 +277,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                                 text = ""
                                 Repo.refresh()
                             } catch (e: RondineException) {
-                                snackbar.showSnackbar("Non inviato: ${e.message}")
+                                snackbar.showSnackbar("Non inviato: ${e.userMessage}")
                             } finally {
                                 sending = false
                             }

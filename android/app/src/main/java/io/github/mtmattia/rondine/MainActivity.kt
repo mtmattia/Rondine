@@ -206,7 +206,7 @@ class MainActivity : ComponentActivity() {
                                 Repo.refresh()
                                 nav.navigate("chat/${c.id}")
                             } catch (e: RondineException) {
-                                Repo.notice.value = "Link non valido: ${e.message}"
+                                Repo.notice.value = "Link non valido: ${e.userMessage}"
                             }
                         }
                     }) { Text("Aggiungi") }

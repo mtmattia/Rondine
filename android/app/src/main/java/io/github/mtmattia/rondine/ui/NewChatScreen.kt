@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import io.github.mtmattia.rondine.Repo
+import io.github.mtmattia.rondine.userMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,7 +90,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
             try {
                 block()?.let { snackbar.showSnackbar(it) }
             } catch (e: RondineException) {
-                snackbar.showSnackbar(e.message ?: "Errore")
+                snackbar.showSnackbar(e.userMessage)
             } finally {
                 busy = null
             }

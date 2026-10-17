@@ -36,3 +36,4 @@ Una riga per modifica: data, cosa è cambiato.
   due difetti: l'app avviata da una sveglia ritirava la casella prima di aver aperto il profilo
   (notifica persa ad app chiusa), e il nodo scartava le sveglie entro 10 s invece di rimandarle
   (SPEC §8, test di accettazione). Notifica col cerchio verde. Guida `docs/PROVE-ANDROID.md`.
+- 2026-10-17 — Benvenuto essenziale: solo "Messaggi cifrati da telefono a telefono." e il pulsante "Inizia".

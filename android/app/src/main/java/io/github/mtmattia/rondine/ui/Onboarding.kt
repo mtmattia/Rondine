@@ -67,19 +67,12 @@ fun Onboarding() {
             Text("Benvenuto su Rondine", fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             if (!started) {
                 Text(
-                    "Messaggi cifrati da telefono a telefono, senza un centralino che li legga. " +
-                        "Ti trovano con il tuo nome utente, un link d'invito o dalla rubrica.",
+                    "Messaggi cifrati da telefono a telefono.",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(24.dp))
-                Text(
-                    "Rondine è open source e non raccoglie dati. Il numero di telefono resta sul tuo telefono.",
-                    textAlign = TextAlign.Center,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(onClick = { started = true }, Modifier.fillMaxWidth()) { Text("Accetta e continua") }
+                Button(onClick = { started = true }, Modifier.fillMaxWidth()) { Text("Inizia") }
             } else {
                 Text("Come vuoi farti chiamare?", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(

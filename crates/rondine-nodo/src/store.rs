@@ -92,6 +92,13 @@ impl Store {
     fn init(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.execute_batch(SCHEMA)?;
+        // Migrazione: scadenza dei messaggi effimeri (SPEC §6), assente negli archivi vecchi.
+        let has_expiry = conn
+            .prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name = 'expires_at'")?
+            .exists([])?;
+        if !has_expiry {
+            conn.execute("ALTER TABLE messages ADD COLUMN expires_at INTEGER", [])?;
+        }
         Ok(Self { conn })
     }
 
@@ -168,10 +175,19 @@ impl Store {
 
     // --- messaggi ---
 
-    pub fn put_message(&self, id: &str, inbox: &str, blob: &[u8], now: u64) -> Result<()> {
+    /// `expires_at`: solo per i messaggi effimeri, che spariscono anche se nessuno li ritira.
+    pub fn put_message(
+        &self,
+        id: &str,
+        inbox: &str,
+        blob: &[u8],
+        now: u64,
+        expires_at: Option<u64>,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO messages (id, inbox, blob, received_at) VALUES (?1, ?2, ?3, ?4)",
-            params![id, inbox, blob, to_i64(now)],
+            "INSERT INTO messages (id, inbox, blob, received_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, inbox, blob, to_i64(now), expires_at.map(to_i64)],
         )?;
         Ok(())
     }
@@ -186,12 +202,13 @@ impl Store {
             .map(to_u64)
     }
 
-    pub fn messages(&self, inbox: &str, limit: u32) -> Result<Vec<StoredMessage>> {
+    pub fn messages(&self, inbox: &str, limit: u32, now: u64) -> Result<Vec<StoredMessage>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, blob, received_at FROM messages WHERE inbox = ?1
+            "SELECT id, blob, received_at FROM messages
+             WHERE inbox = ?1 AND (expires_at IS NULL OR expires_at > ?3)
              ORDER BY received_at, rowid LIMIT ?2",
         )?;
-        stmt.query_map(params![inbox, limit], |r| {
+        stmt.query_map(params![inbox, limit, to_i64(now)], |r| {
             Ok(StoredMessage {
                 id: r.get(0)?,
                 blob: r.get(1)?,
@@ -332,6 +349,10 @@ impl Store {
         self.conn.execute(
             "DELETE FROM messages WHERE received_at < ?1",
             [to_i64(now.saturating_sub(message_ttl))],
+        )?;
+        self.conn.execute(
+            "DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?1",
+            [to_i64(now)],
         )?;
         self.conn
             .execute("DELETE FROM board WHERE expires_at <= ?1", [to_i64(now)])?;

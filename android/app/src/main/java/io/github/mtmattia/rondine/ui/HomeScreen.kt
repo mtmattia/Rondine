@@ -421,17 +421,20 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
                 Spacer(Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val last = row.last
-                    if (last?.outgoing == true) {
+                    if (last?.outgoing == true && !row.typing) {
                         MessageTicks(last.status, MaterialTheme.colorScheme.onSurfaceVariant, 16.dp)
                         Spacer(Modifier.width(3.dp))
                     }
                     Text(
-                        last?.body ?: when (row.contact.source) {
-                            "rubrica" -> "Trovato nella rubrica"
+                        when {
+                            row.typing -> "sta scrivendo…"
+                            last != null -> last.body
+                            row.contact.source == "rubrica" -> "Trovato nella rubrica"
                             else -> "Nuovo contatto: scrivi il primo messaggio"
                         },
                         Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (row.typing) LocalChatColors.current.tickRead
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 14.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

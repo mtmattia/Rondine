@@ -47,6 +47,12 @@ enum Cmd {
     Rubrica(RubricaCmd),
     /// Elenca i contatti.
     Contatti,
+    /// Fa vedere "sta scrivendo…" a un contatto (con --fine lo toglie).
+    Scrive {
+        contatto: String,
+        #[arg(long)]
+        fine: bool,
+    },
     /// Scrive a un contatto.
     Scrivi {
         contatto: String,
@@ -190,6 +196,17 @@ fn print_events(events: &[Event], client: &Client) {
                 };
                 println!("{} {} messaggi {what} {to}", ticks(*status), ids.len());
             }
+            Event::Typing { contact, active } => {
+                if *active {
+                    let who = client
+                        .contacts()
+                        .iter()
+                        .find(|c| c.identity == *contact)
+                        .map(|c| c.display_name.as_str())
+                        .unwrap_or("?");
+                    println!("… {who} sta scrivendo");
+                }
+            }
             Event::Rejected(why) => eprintln!("! messaggio scartato: {why}"),
         }
     }
@@ -286,6 +303,11 @@ async fn main() -> anyhow::Result<()> {
             for contact in c.contacts() {
                 println!("{}", describe(contact));
             }
+        }
+        Cmd::Scrive { contatto, fine } => {
+            let id = c.find_contact(&contatto)?.identity;
+            c.set_typing(&id, !fine).await?;
+            println!("{}", if fine { "Fatto." } else { "Sta scrivendo…" });
         }
         Cmd::Scrivi { contatto, testo } => {
             let id = c.find_contact(&contatto)?.identity;

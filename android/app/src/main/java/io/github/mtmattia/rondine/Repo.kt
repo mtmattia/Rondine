@@ -115,7 +115,10 @@ object Repo {
         val r = rondine ?: return Result.success(Unit)
         try {
             val res = r.sync()
-            if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty() || res.receipts > 0u) {
+            // Anche finché qualcuno "sta scrivendo": lo stato scade da solo e va ridisegnato.
+            if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty() || res.receipts > 0u ||
+                res.typingChanged || chats.value.any { it.typing }
+            ) {
                 refresh()
             }
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty()) {
@@ -137,6 +140,13 @@ object Repo {
             } catch (e: Exception) {
                 setPush(PushState.Failed, "Errore: ${e.userMessage}")
             }
+        }
+    }
+
+    /** "Sta scrivendo" verso un contatto: errori ignorati, è solo un'indicazione. */
+    fun typing(contactId: String, active: Boolean) {
+        scope.launch {
+            try { client().setTyping(contactId, active) } catch (_: RondineException) {}
         }
     }
 

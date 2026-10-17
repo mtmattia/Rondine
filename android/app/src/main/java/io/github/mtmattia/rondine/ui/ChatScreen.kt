@@ -111,11 +111,16 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    val chats by Repo.chats.collectAsState()
+    val typing = chats.any { it.contact.id == contactId && it.typing }
 
     DisposableEffect(contactId) {
         Repo.openChat = contactId
         Notifier.cancel(context, contactId)
-        onDispose { if (Repo.openChat == contactId) Repo.openChat = null }
+        onDispose {
+            if (Repo.openChat == contactId) Repo.openChat = null
+            Repo.typing(contactId, false)
+        }
     }
 
     LaunchedEffect(contactId, revision) {
@@ -172,13 +177,15 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                             Text(
                                 when {
                                     c == null -> ""
+                                    typing -> "sta scrivendo…"
                                     c.blocked -> "Bloccato"
                                     c.username != null -> "@${c.username}"
                                     !c.verified -> "Tocca per verificare"
                                     else -> c.shortId
                                 },
                                 fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (typing) LocalChatColors.current.tickRead
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -265,7 +272,10 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
             } else {
                 InputBar(
                     text = text,
-                    onText = { text = it },
+                    onText = {
+                        text = it
+                        Repo.typing(contactId, it.isNotBlank())
+                    },
                     sending = sending,
                     onAttach = { comingSoon("Foto e file") },
                     onSend = {

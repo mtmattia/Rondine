@@ -31,6 +31,12 @@ pub enum AppMessage {
         ts: u64,
         body: String,
     },
+    /// "Sta scrivendo" (SPEC §7.3): viaggia in un deposito effimero.
+    Typing {
+        v: u32,
+        active: bool,
+        ts: u64,
+    },
     /// Conferma di consegna o di lettura di messaggi ricevuti (SPEC §7.2).
     Receipt {
         v: u32,
@@ -51,7 +57,8 @@ impl AppMessage {
         match self {
             AppMessage::Hello { v, .. }
             | AppMessage::Text { v, .. }
-            | AppMessage::Receipt { v, .. } => *v,
+            | AppMessage::Receipt { v, .. }
+            | AppMessage::Typing { v, .. } => *v,
         }
     }
 }

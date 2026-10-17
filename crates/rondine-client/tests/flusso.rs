@@ -488,3 +488,60 @@ async fn conferme_di_consegna_e_di_lettura() -> R {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn sta_scrivendo_effimero_e_senza_sveglia() -> R {
+    let (push_url, got) = fake_distributor().await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let node = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: node.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+    })?;
+    // Scadenza breve per provare un "sta scrivendo" che nessuno ritira.
+    state.set_ephemeral_ttl(1);
+    tokio::spawn(rondine_nodo::serve(listener, state));
+
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    silvia.sync().await?;
+    silvia.set_push_endpoint(&push_url).await?;
+    let wakes_before = wait_wakes(&got, 0, 0).await?.len();
+
+    // Mattia scrive: Silvia lo vede, e il suo telefono non viene svegliato per questo.
+    mattia.set_typing(&silvia.identity(), true).await?;
+    let ev = silvia.sync().await?;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::Typing { active: true, .. }))
+    );
+    assert!(silvia.is_typing(&mattia.identity()));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(
+        got.lock().map_err(|_| "lock")?.len(),
+        wakes_before,
+        "sveglia per un sta scrivendo"
+    );
+
+    // Smette: sparisce subito.
+    mattia.set_typing(&silvia.identity(), false).await?;
+    silvia.sync().await?;
+    assert!(!silvia.is_typing(&mattia.identity()));
+
+    // Un "sta scrivendo" che scade prima di essere ritirato lascia un buco nella sequenza MLS:
+    // il messaggio dopo deve arrivare lo stesso.
+    mattia.set_typing(&silvia.identity(), true).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    mattia.send_text(&silvia.identity(), "eccomi").await?;
+    assert_eq!(texts(&silvia.sync().await?), ["eccomi"]);
+    assert!(
+        !silvia.is_typing(&mattia.identity()),
+        "il messaggio arrivato chiude lo stato"
+    );
+    Ok(())
+}

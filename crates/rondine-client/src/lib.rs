@@ -4,6 +4,7 @@ mod error;
 mod net;
 mod state;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use reqwest::Method;
@@ -44,6 +45,11 @@ pub enum Event {
         status: Delivery,
         ids: Vec<String>,
     },
+    /// Il contatto ha iniziato o smesso di scrivere.
+    Typing {
+        contact: PublicKey,
+        active: bool,
+    },
     /// Un messaggio arrivato non è stato accettato; il motivo è nel testo.
     Rejected(String),
 }
@@ -63,7 +69,15 @@ pub struct Client {
     identity: Identity,
     device: Device,
     net: Net,
+    /// "Sta scrivendo" dei contatti, fino a quando (secondi). Solo in memoria.
+    typing: HashMap<PublicKey, u64>,
+    /// Ultimo "sta scrivendo" mandato a ciascun contatto: (attivo, quando).
+    typing_sent: HashMap<PublicKey, (bool, u64)>,
 }
+
+/// Ogni quanto si ripete "sta scrivendo" mentre si scrive, e per quanto lo si mostra.
+const TYPING_RESEND_SECS: u64 = 4;
+const TYPING_SHOW_SECS: u64 = 6;
 
 impl Client {
     /// Crea un'identità nuova, una casella sul nodo e i key package.
@@ -121,6 +135,8 @@ impl Client {
             identity,
             device,
             net,
+            typing: HashMap::new(),
+            typing_sent: HashMap::new(),
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
         client.save()?;
@@ -145,6 +161,8 @@ impl Client {
             identity,
             device,
             net: Net::new()?,
+            typing: HashMap::new(),
+            typing_sent: HashMap::new(),
         })
     }
 
@@ -598,6 +616,16 @@ impl Client {
     }
 
     async fn deposit(&self, card: &SignedCard, envelope: &Envelope) -> Result<()> {
+        self.deposit_with(card, envelope, false).await
+    }
+
+    /// `ephemeral`: niente sveglia, e il nodo lo butta se non viene ritirato presto (SPEC §6).
+    async fn deposit_with(
+        &self,
+        card: &SignedCard,
+        envelope: &Envelope,
+        ephemeral: bool,
+    ) -> Result<()> {
         let info = verify_card(card)?;
         self.net
             .call(
@@ -607,6 +635,7 @@ impl Client {
                 &json!({
                     "permit": info.permit,
                     "blob": b64::encode(serde_json::to_vec(envelope)?),
+                    "ephemeral": ephemeral,
                 }),
             )
             .await?;
@@ -664,6 +693,8 @@ impl Client {
             body: msg.body.clone(),
         };
         self.send_app(&contact, &app).await?;
+        // Chi riceve il messaggio smette da solo di mostrare "sta scrivendo".
+        self.typing_sent.remove(to);
         self.state.messages.push(msg.clone());
         self.save()?;
         Ok(msg)
@@ -671,20 +702,67 @@ impl Client {
 
     /// Cifra un messaggio applicativo nella chat con il contatto e lo deposita nella sua casella.
     async fn send_app(&mut self, contact: &Contact, app: &AppMessage) -> Result<()> {
+        self.send_app_with(contact, app, false).await
+    }
+
+    async fn send_app_with(
+        &mut self,
+        contact: &Contact,
+        app: &AppMessage,
+        ephemeral: bool,
+    ) -> Result<()> {
         let group = self
             .preferred_group(contact)
             .ok_or_else(|| Error::Invalid("nessuna chat con questo contatto".into()))?;
         let ct = self.device.encrypt(&group, &serde_json::to_vec(app)?)?;
         // L'archivio MLS va salvato subito: il messaggio ha fatto avanzare le chiavi.
         self.save()?;
-        self.deposit(
+        self.deposit_with(
             &contact.card,
             &Envelope::Mls {
                 v: 1,
                 msg: b64::encode(ct),
             },
+            ephemeral,
         )
         .await
+    }
+
+    /// "Sta scrivendo" verso un contatto (SPEC §7.3). Si può chiamare a ogni tasto: parte al
+    /// massimo una volta ogni pochi secondi, e la fine solo se prima era partito l'inizio.
+    pub async fn set_typing(&mut self, to: &PublicKey, active: bool) -> Result<()> {
+        let t = now();
+        let last = self.typing_sent.get(to).copied();
+        let due = match (active, last) {
+            (true, Some((true, at))) => t >= at + TYPING_RESEND_SECS,
+            (true, _) => true,
+            (false, Some((true, _))) => true,
+            (false, _) => false,
+        };
+        if !due {
+            return Ok(());
+        }
+        let Some(contact) = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == to && !c.blocked && !c.groups.is_empty())
+            .cloned()
+        else {
+            return Ok(());
+        };
+        self.typing_sent.insert(*to, (active, t));
+        let app = AppMessage::Typing {
+            v: 1,
+            active,
+            ts: t,
+        };
+        self.send_app_with(&contact, &app, true).await
+    }
+
+    /// Il contatto sta scrivendo adesso?
+    pub fn is_typing(&self, id: &PublicKey) -> bool {
+        self.typing.get(id).is_some_and(|&until| now() < until)
     }
 
     /// Conferma di consegna o di lettura (SPEC §7.2). Mai ai bloccati né senza una chat aperta.
@@ -876,8 +954,22 @@ impl Client {
                     read: false,
                     status: Delivery::Sent,
                 };
+                self.typing.remove(&sender);
                 self.state.messages.push(m.clone());
                 Ok(vec![Event::Message(m)])
+            }
+            AppMessage::Typing { active, ts, .. } => {
+                // Uno vecchio (ritirato tardi) non vale più.
+                let fresh = ts + TYPING_SHOW_SECS > now();
+                if active && fresh {
+                    self.typing.insert(sender, now() + TYPING_SHOW_SECS);
+                } else {
+                    self.typing.remove(&sender);
+                }
+                Ok(vec![Event::Typing {
+                    contact: sender,
+                    active: active && fresh,
+                }])
             }
             AppMessage::Receipt { status, ids, .. } => {
                 let new = match status {

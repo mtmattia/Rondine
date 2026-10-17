@@ -136,6 +136,8 @@ per `id`. Un permesso revocato non funziona più; per bloccare un contatto basta
   La firma copre (contesto `rondine/v1/auth`) la stringa
   `METODO\nPERCORSO\nts\n<b64 blake3(corpo)>`. Il nodo accetta `ts` entro ±300 s.
 - Dimensione massima di un messaggio: 256 KiB. Conservazione: 30 giorni o fino alla conferma.
+- Deposito **effimero** (`"ephemeral": true`): niente sveglia, e il nodo lo cancella dopo 30 s
+  se nessuno lo ritira. Serve per "sta scrivendo" (§7.3); il nodo vede solo che è effimero.
 
 ### 6.1 Contenuto depositato (busta)
 Il nodo vede solo `blob`. Dentro, dopo la decodifica b64, c'è una busta JSON:
@@ -158,6 +160,7 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "hello", "card": <Signed<Card>> }
 { "v": 1, "type": "text", "id": "<b64 16 byte>", "ts": 1792240000, "body": "ciao" }
 { "v": 1, "type": "receipt", "status": "delivered", "ids": ["<id di un text>", "…"] }
+{ "v": 1, "type": "typing", "active": true, "ts": 1792240000 }
 ```
 
 ### 7.2 Conferme (spunte)
@@ -166,6 +169,14 @@ la chat, un `receipt` `read` con gli id appena letti. Viaggiano dentro MLS come 
 il nodo non le distingue da un testo. Chi le riceve fa solo avanzare lo stato dei propri messaggi
 (inviato → consegnato → letto), mai all'indietro. Non si mandano ai contatti bloccati. Sono un di
 più: se una conferma non parte (per esempio senza rete) non si ritenta.
+
+### 7.3 Sta scrivendo
+Mentre si scrive, un `typing` `active: true` al massimo ogni 4 s; quando il campo si svuota,
+`active: false`. Chi lo riceve mostra "sta scrivendo…" per 6 s dall'arrivo, e lo toglie subito
+all'arrivo di un `text` dello stesso contatto o di un `typing` vecchio di oltre 6 s. Si deposita
+come **effimero** (§6): niente sveglia, e se il destinatario non è connesso il nodo lo butta. Il
+messaggio MLS perso lascia un buco nella sequenza del mittente, che MLS tollera (fino a 1000
+messaggi saltati).
 
 ### 7.1 Avvio di una chat 1:1
 1. A ha il biglietto di B (da invito, nome utente o rubrica).
@@ -237,7 +248,7 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `POST /v1/inboxes/{inbox}/permits/revoke` | proprietario | `{id}` |
 | `PUT /v1/inboxes/{inbox}/push` | proprietario | registra il bersaglio della sveglia |
 | `DELETE /v1/inboxes/{inbox}/push` | proprietario | rimuove il bersaglio |
-| `POST /v1/inboxes/{inbox}/messages` | permesso | `{permit, blob}` → `{id}` |
+| `POST /v1/inboxes/{inbox}/messages` | permesso | `{permit, blob, ephemeral?}` → `{id}` |
 | `GET /v1/inboxes/{inbox}/messages` | proprietario | `[{id, blob, received_at}]` |
 | `POST /v1/inboxes/{inbox}/messages/ack` | proprietario | `{ids}` |
 | `POST /v1/inboxes/{inbox}/keypackages` | proprietario | `{items: [b64]}` |

@@ -50,7 +50,12 @@ struct Inner {
     pusher: Pusher,
     rate: Mutex<HashMap<String, (u64, u32)>>,
     last_wake: Mutex<HashMap<String, WakeSlot>>,
+    /// Durata dei depositi effimeri ("sta scrivendo"), in secondi.
+    ephemeral_ttl: std::sync::atomic::AtomicU64,
 }
+
+/// Quanto resta un deposito effimero se nessuno lo ritira (SPEC §6).
+pub const EPHEMERAL_TTL_SECS: u64 = 30;
 
 #[derive(Clone)]
 pub struct AppState(Arc<Inner>);
@@ -66,7 +71,15 @@ impl AppState {
             pusher: Pusher::new(cfg.allow_local_push)?,
             rate: Mutex::new(HashMap::new()),
             last_wake: Mutex::new(HashMap::new()),
+            ephemeral_ttl: std::sync::atomic::AtomicU64::new(EPHEMERAL_TTL_SECS),
         })))
+    }
+
+    /// Cambia la durata dei depositi effimeri: serve ai test.
+    pub fn set_ephemeral_ttl(&self, secs: u64) {
+        self.0
+            .ephemeral_ttl
+            .store(secs, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn db(&self) -> Result<MutexGuard<'_, Store>, ApiError> {
@@ -470,6 +483,9 @@ async fn clear_push(
 pub struct DepositRequest {
     pub permit: SignedPermit,
     pub blob: String,
+    /// Effimero ("sta scrivendo"): niente sveglia, sparisce dopo poco se non ritirato.
+    #[serde(default)]
+    pub ephemeral: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -504,9 +520,14 @@ async fn deposit(
                 "la casella è piena",
             ));
         }
-        db.put_message(&id, &inbox, &blob, now())?;
+        let expires_at = req
+            .ephemeral
+            .then(|| now() + s.0.ephemeral_ttl.load(std::sync::atomic::Ordering::Relaxed));
+        db.put_message(&id, &inbox, &blob, now(), expires_at)?;
     }
-    s.schedule_wake(&inbox)?;
+    if !req.ephemeral {
+        s.schedule_wake(&inbox)?;
+    }
     Ok((StatusCode::CREATED, Json(Deposited { id })))
 }
 
@@ -526,7 +547,7 @@ async fn fetch_messages(
     body: Bytes,
 ) -> ApiResult<Json<Vec<MessageOut>>> {
     s.owner_of(&inbox, &headers, &method, &uri, &body)?;
-    let msgs = s.db()?.messages(&inbox, 500)?;
+    let msgs = s.db()?.messages(&inbox, 500, now())?;
     Ok(Json(
         msgs.into_iter()
             .map(|m| MessageOut {

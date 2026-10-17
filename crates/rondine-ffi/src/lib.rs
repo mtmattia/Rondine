@@ -114,6 +114,8 @@ pub struct ChatRow {
     pub last: Option<Message>,
     pub last_ts: u64,
     pub unread: u32,
+    /// Il contatto sta scrivendo adesso.
+    pub typing: bool,
 }
 
 #[derive(uniffi::Record)]
@@ -123,6 +125,8 @@ pub struct SyncResult {
     pub rejected: Vec<String>,
     /// Quanti messaggi inviati hanno cambiato spunte.
     pub receipts: u32,
+    /// Qualcuno ha iniziato o smesso di scrivere.
+    pub typing_changed: bool,
 }
 
 fn contact_info(c: &Contact) -> ContactInfo {
@@ -257,6 +261,7 @@ impl Rondine {
                 last: r.last.as_ref().map(message),
                 last_ts: r.last_ts,
                 unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
+                typing: c.is_typing(&r.contact.identity),
             })
             .collect()
     }
@@ -282,6 +287,13 @@ impl Rondine {
         let k = key(&contact_id)?;
         let c = self.client.lock().await;
         Ok(c.messages_with(&k).into_iter().map(message).collect())
+    }
+
+    /// "Sta scrivendo": si può chiamare a ogni tasto, il client limita la frequenza.
+    pub async fn set_typing(&self, contact_id: String, active: bool) -> Result<()> {
+        let k = key(&contact_id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.set_typing(&k, active).await?) }))
+            .await
     }
 
     pub async fn mark_read(&self, contact_id: String) -> Result<()> {
@@ -310,12 +322,14 @@ impl Rondine {
             messages: Vec::new(),
             rejected: Vec::new(),
             receipts: 0,
+            typing_changed: false,
         };
         for e in events {
             match e {
                 Event::NewContact { identity, .. } => out.new_contacts.push(identity.to_b64()),
                 Event::Message(m) => out.messages.push(message(&m)),
                 Event::Rejected(why) => out.rejected.push(why),
+                Event::Typing { .. } => out.typing_changed = true,
                 Event::Receipt { ids, .. } => {
                     out.receipts = out
                         .receipts

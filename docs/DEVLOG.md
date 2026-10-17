@@ -52,3 +52,7 @@ Una riga per modifica: data, cosa è cambiato.
   MLS `receipt` (SPEC §7.2), mandato al ritiro e all'apertura della chat; lo stato avanza e basta.
   CLI: `leggi` mostra le spunte e segna come letto, `sincronizza` stampa le conferme. Gradle:
   i binding UniFFI si rigenerano sempre dalla libreria appena compilata.
+- 2026-10-17 — "Sta scrivendo…": messaggio MLS `typing` (SPEC §7.3) in un deposito effimero del
+  nodo (niente sveglia, scade dopo 30 s; colonna `expires_at` con migrazione automatica). Il
+  client limita a uno ogni 4 s e lo mostra per 6 s; test anche del buco MLS lasciato da un
+  `typing` scaduto. App: in verde nell'intestazione della chat e nella lista. CLI `rondine scrive`.

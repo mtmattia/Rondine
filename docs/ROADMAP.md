@@ -23,7 +23,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Notifiche via Google (FCM), versione Play | ⬜ | facoltativo: distributore FCM incorporato di UnifiedPush + gateway; serve un progetto Firebase; la versione F-Droid resta senza Google |
 | Gruppi | ⬜ | MLS li supporta già |
 | Foto, file, messaggi vocali | ⬜ | come blob cifrati |
-| Conferme di lettura, "sta scrivendo" | 🟡 | spunte ✓ / ✓✓ / ✓✓ verdi fatte (SPEC §7.2); manca "sta scrivendo" |
+| Conferme di lettura, "sta scrivendo" | ✅ | spunte ✓ / ✓✓ / ✓✓ verdi (SPEC §7.2), "sta scrivendo" effimero senza sveglia (§7.3) |
 | Più dispositivi per persona | ⬜ | ogni dispositivo membro MLS |
 | Recupero dell'identità | ⬜ | frase di 24 parole o backup cifrato |
 | Collegamento diretto P2P | ⬜ | libp2p, M2 |

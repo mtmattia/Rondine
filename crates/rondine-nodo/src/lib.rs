@@ -1,5 +1,6 @@
 //! Nodo Rondine: API HTTP descritta in `docs/SPEC.md` §11.
 
+mod fcm;
 mod files;
 mod phone;
 mod push;
@@ -24,6 +25,7 @@ use rondine_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+pub use fcm::FcmConfig;
 pub use push::{PushOutcome, Pusher, WAKE_BODY};
 pub use store::Store;
 
@@ -42,6 +44,8 @@ pub struct Config {
     pub store: Store,
     /// Endpoint push su indirizzi locali: solo per test e sviluppo.
     pub allow_local_push: bool,
+    /// Credenziali Firebase: con queste il nodo fa da ripetitore FCM (SPEC §8.1).
+    pub fcm: Option<FcmConfig>,
 }
 
 struct Inner {
@@ -50,6 +54,7 @@ struct Inner {
     node: Identity,
     store: Mutex<Store>,
     pusher: Pusher,
+    fcm: Option<fcm::Fcm>,
     rate: Mutex<HashMap<String, (u64, u32)>>,
     last_wake: Mutex<HashMap<String, WakeSlot>>,
     /// SMS "in prova" (SPEC §13.4): finiscono qui e nel log invece che sul telefono.
@@ -73,6 +78,10 @@ impl AppState {
             node: cfg.node_key,
             store: Mutex::new(cfg.store),
             pusher: Pusher::new(cfg.allow_local_push)?,
+            fcm: match cfg.fcm {
+                Some(f) => Some(fcm::Fcm::new(f, push::http_client()?)),
+                None => None,
+            },
             rate: Mutex::new(HashMap::new()),
             last_wake: Mutex::new(HashMap::new()),
             ephemeral_ttl: std::sync::atomic::AtomicU64::new(EPHEMERAL_TTL_SECS),
@@ -150,6 +159,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/inboxes/{inbox}/phone/confirm", post(phone::confirm))
         .route("/v1/phone/{phone_hash}", get(phone::lookup))
+        .route("/v1/fcm/{token}", post(fcm::relay))
         .route("/invito", get(web::invite_page))
         .route("/{at_name}", get(web::name_page))
         .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES * 2))

@@ -313,6 +313,24 @@ Il nodo sveglia dopo ogni deposito, al massimo una volta ogni 10 s per casella, 
 `POST /v1/wake`. Una sveglia chiesta prima dei 10 s non si scarta: si manda alla fine
 dell'intervallo (al massimo una in attesa per casella). La sveglia non contiene mai mittente né contenuto.
 
+### 8.1 Ripetitore FCM (versione Google Play)
+
+Solo chi possiede il progetto Firebase dell'app può mandare notifiche FCM, quindi un nodo
+qualsiasi non può farlo. La versione Play dell'app usa un **ripetitore**: un nodo con le
+credenziali del progetto (`--fcm-credenziali`, il file JSON del service account) espone
+
+- `POST /v1/fcm/{token}`: il corpo è ignorato; manda all'app con quel token FCM un messaggio dati
+  `{"t": "wake"}` ad alta priorità. Risponde `202` se FCM l'ha accettato, `410` se il token non
+  vale più (il nodo che sveglia toglie il bersaglio), `429` oltre una sveglia ogni 2 s per token,
+  `503` se il ripetitore non è attivo su questo nodo.
+
+L'app Play registra sul proprio nodo un bersaglio `unifiedpush` con endpoint
+`<ripetitore>/v1/fcm/<token>`: per i nodi è una sveglia UnifiedPush come le altre. Il ripetitore
+vede il token, l'ora della sveglia e il nodo che la manda, mai mittente né contenuto; Google vede
+che l'app ha ricevuto una sveglia. Per chiamare FCM (API HTTP v1) il ripetitore firma con RS256
+(libreria `ring`) un JWT per `https://oauth2.googleapis.com/token`, con lo scope
+`https://www.googleapis.com/auth/firebase.messaging`. Lo stesso schema servirà per APNs (iPhone).
+
 ## 9. Scoperta dalla rubrica, senza centralino
 
 Due persone che hanno l'una il numero dell'altra si trovano da sole.

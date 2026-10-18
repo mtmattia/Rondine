@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::Parser;
 use rondine_core::{Identity, b64};
-use rondine_nodo::{AppState, Config, Store, serve};
+use rondine_nodo::{AppState, Config, FcmConfig, Store, serve};
 
 /// Nodo Rondine: casella postale, permessi, sveglia push, nomi utente, bacheca di scoperta.
 #[derive(Parser)]
@@ -21,6 +21,10 @@ struct Args {
     /// Accetta endpoint push su indirizzi locali (solo sviluppo).
     #[arg(long)]
     allow_local_push: bool,
+    /// File JSON del service account Firebase: il nodo fa da ripetitore FCM per la versione
+    /// Google Play dell'app (SPEC §8.1).
+    #[arg(long, env = "RONDINE_FCM_CREDENZIALI")]
+    fcm_credenziali: Option<PathBuf>,
 }
 
 fn load_or_create_key(path: &std::path::Path) -> anyhow::Result<Identity> {
@@ -50,11 +54,21 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.data).context("creazione della cartella dati")?;
     let node_key = load_or_create_key(&args.data.join("chiave-nodo"))?;
     let store = Store::open(&args.data.join("nodo.db")).context("apertura dell'archivio")?;
+    let fcm = match &args.fcm_credenziali {
+        Some(path) => {
+            let json = std::fs::read_to_string(path).context("lettura delle credenziali FCM")?;
+            let cfg = FcmConfig::from_service_account(&json).context("credenziali FCM")?;
+            tracing::info!(progetto = %cfg.project_id, "ripetitore FCM attivo");
+            Some(cfg)
+        }
+        None => None,
+    };
     let state = AppState::new(Config {
         public_url: args.public_url.clone(),
         node_key: node_key.clone(),
         store,
         allow_local_push: args.allow_local_push,
+        fcm,
     })?;
     let listener = tokio::net::TcpListener::bind(&args.bind)
         .await

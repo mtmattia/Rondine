@@ -128,3 +128,7 @@ Una riga per modifica: data, cosa è cambiato.
   vicenda: Rust fissato in `rust-toolchain.toml` (1.99.0) e cargo-ndk nella Action; build
   release riproducibile (due cartelle diverse, stesso sha256); la Action firma con la chiave dai
   segreti a ogni tag `v*` (APK e AAB nella Release); guida aggiornata in `docs/PUBBLICAZIONE.md`.
+- 2026-10-18 — Ripetitore FCM nel nodo (SPEC §8.1) per la versione Google Play:
+  `--fcm-credenziali <service account>`, `POST /v1/fcm/{token}` che i nodi chiamano come un
+  endpoint UnifiedPush; JWT RS256 firmato con `ring`. 1 test di accettazione con un finto Google
+  che verifica la firma.

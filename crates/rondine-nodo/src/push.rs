@@ -24,6 +24,15 @@ fn tls_config() -> Result<rustls::ClientConfig, rustls::Error> {
         .with_no_client_auth())
 }
 
+/// Client HTTPS verso servizi esterni (sveglie, FCM): niente redirect, tempi brevi.
+pub(crate) fn http_client() -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .tls_backend_preconfigured(tls_config()?)
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?)
+}
+
 #[derive(Clone)]
 pub struct Pusher {
     http: reqwest::Client,
@@ -33,12 +42,10 @@ pub struct Pusher {
 impl Pusher {
     /// `allow_local` permette endpoint su indirizzi locali: solo per test e sviluppo.
     pub fn new(allow_local: bool) -> anyhow::Result<Self> {
-        let http = reqwest::Client::builder()
-            .tls_backend_preconfigured(tls_config()?)
-            .timeout(std::time::Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
-        Ok(Self { http, allow_local })
+        Ok(Self {
+            http: http_client()?,
+            allow_local,
+        })
     }
 
     /// Controlla che un endpoint UnifiedPush sia accettabile prima di salvarlo.

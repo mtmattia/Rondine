@@ -46,6 +46,8 @@ clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
+# Firma RS256 dei JWT per Google (ripetitore FCM, SPEC §8.1): è già la crittografia di rustls.
+ring = "0.17"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

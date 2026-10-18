@@ -517,7 +517,9 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Crea { .. } => {}
         Cmd::Nodo { url } => {
             c.set_node(&url).await?;
-            println!("Ora il tuo nodo è {url}. I tuoi contatti e i tuoi gruppi ricevono il biglietto nuovo.");
+            println!(
+                "Ora il tuo nodo è {url}. I tuoi contatti e i tuoi gruppi ricevono il biglietto nuovo."
+            );
         }
         Cmd::Rete {
             porta,

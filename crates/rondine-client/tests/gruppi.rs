@@ -15,6 +15,7 @@ async fn start_node() -> Result<String, Box<dyn std::error::Error>> {
         node_key: Identity::generate(),
         store: Store::in_memory()?,
         allow_local_push: true,
+        fcm: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     Ok(url)

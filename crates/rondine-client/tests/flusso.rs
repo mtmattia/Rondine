@@ -17,6 +17,7 @@ async fn start_node() -> Result<String, Box<dyn std::error::Error>> {
         node_key: Identity::generate(),
         store: Store::in_memory()?,
         allow_local_push: true,
+        fcm: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     Ok(url)
@@ -499,6 +500,7 @@ async fn sta_scrivendo_effimero_e_senza_sveglia() -> R {
         node_key: Identity::generate(),
         store: Store::in_memory()?,
         allow_local_push: true,
+        fcm: None,
     })?;
     // Scadenza breve per provare un "sta scrivendo" che nessuno ritira.
     state.set_ephemeral_ttl(1);
@@ -710,6 +712,7 @@ async fn start_node_killable()
         node_key: Identity::generate(),
         store: Store::in_memory()?,
         allow_local_push: true,
+        fcm: None,
     })?;
     Ok((url, tokio::spawn(rondine_nodo::serve(listener, state))))
 }
@@ -938,6 +941,7 @@ async fn sono_collegato_aspetta_chi_non_e_connesso() -> R {
         node_key: Identity::generate(),
         store: Store::in_memory()?,
         allow_local_push: true,
+        fcm: None,
     })?;
     // Gli effimeri scadono subito: come un ritiro che arriva troppo tardi.
     state.set_ephemeral_ttl(0);
@@ -970,6 +974,7 @@ async fn start_node_with_state() -> Result<(String, AppState), Box<dyn std::erro
         node_key: Identity::generate(),
         store: Store::in_memory()?,
         allow_local_push: true,
+        fcm: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state.clone()));
     Ok((url, state))
@@ -1299,5 +1304,163 @@ async fn cambio_di_nodo_contatti_e_gruppi_seguono() -> R {
     assert_eq!(texts(&mattia.sync().await?), ["dopo"]);
     mattia.send_text(&silvia.identity(), "ricevuto").await?;
     assert_eq!(texts(&silvia.sync().await?), ["ricevuto"]);
+    Ok(())
+}
+
+/// Chiamate ricevute dal finto Google: (percorso, autorizzazione, corpo).
+type GoogleCalls = Arc<Mutex<Vec<(String, String, serde_json::Value)>>>;
+
+/// Finto Google per il ripetitore FCM (SPEC §8.1): rilascia un token d'accesso solo per un JWT
+/// firmato dalla chiave di prova, e accetta i messaggi tranne quelli per il token "scaduto".
+async fn fake_google() -> Result<(String, GoogleCalls), Box<dyn std::error::Error>> {
+    use axum::routing::post;
+    use base64::Engine;
+    let calls: GoogleCalls = Arc::default();
+    let public = base64::engine::general_purpose::STANDARD
+        .decode(include_str!("dati/fcm-prova.pub.b64").trim())?;
+    let log = calls.clone();
+    let log2 = calls.clone();
+    let app = axum::Router::new()
+        .route(
+            "/token",
+            post(move |body: String| {
+                let log = log.clone();
+                let public = public.clone();
+                async move {
+                    let assertion = body
+                        .split('&')
+                        .find_map(|kv| kv.strip_prefix("assertion="))
+                        .unwrap_or_default()
+                        .to_string();
+                    let mut parts = assertion.rsplitn(2, '.');
+                    let sig = parts.next().unwrap_or_default();
+                    let signed = parts.next().unwrap_or_default();
+                    let sig = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                        .decode(sig)
+                        .unwrap_or_default();
+                    let ok = ring::signature::UnparsedPublicKey::new(
+                        &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+                        &public,
+                    )
+                    .verify(signed.as_bytes(), &sig)
+                    .is_ok();
+                    if let Ok(mut v) = log.lock() {
+                        v.push(("/token".into(), String::new(), serde_json::json!({ "ok": ok })));
+                    }
+                    if ok {
+                        (
+                            axum::http::StatusCode::OK,
+                            r#"{"access_token":"accesso-prova","expires_in":3600}"#,
+                        )
+                    } else {
+                        (axum::http::StatusCode::UNAUTHORIZED, r#"{"error":"firma"}"#)
+                    }
+                }
+            }),
+        )
+        .route(
+            "/v1/projects/rondine-prova/messages:send",
+            post(
+                move |headers: axum::http::HeaderMap, body: axum::Json<serde_json::Value>| {
+                    let log = log2.clone();
+                    async move {
+                        let auth = headers
+                            .get("authorization")
+                            .and_then(|h| h.to_str().ok())
+                            .unwrap_or_default()
+                            .to_string();
+                        let dead = body.0["message"]["token"] == "scaduto";
+                        if let Ok(mut v) = log.lock() {
+                            v.push(("/send".into(), auth, body.0));
+                        }
+                        if dead {
+                            (
+                                axum::http::StatusCode::NOT_FOUND,
+                                r#"{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}"#,
+                            )
+                        } else {
+                            (axum::http::StatusCode::OK, r#"{"name":"m/1"}"#)
+                        }
+                    }
+                },
+            ),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}", listener.local_addr()?);
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    Ok((url, calls))
+}
+
+#[tokio::test]
+async fn sveglia_fcm_dal_ripetitore() -> R {
+    let (google, calls) = fake_google().await?;
+    let account = serde_json::json!({
+        "type": "service_account",
+        "project_id": "rondine-prova",
+        "client_email": "ripetitore@rondine-prova.iam.gserviceaccount.com",
+        "private_key": include_str!("dati/fcm-prova.pem"),
+        "token_uri": format!("{google}/token"),
+    })
+    .to_string();
+    let mut fcm = rondine_nodo::FcmConfig::from_service_account(&account)?;
+    fcm.api_base = google.clone();
+
+    // Il ripetitore è il nido con le credenziali; Mattia sta su un altro nodo.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let relay = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: relay.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+        fcm: Some(fcm),
+    })?;
+    tokio::spawn(rondine_nodo::serve(listener, state));
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    mattia
+        .set_push_endpoint(&format!("{relay}/v1/fcm/token-di-mattia"))
+        .await?;
+
+    // Silvia aggiunge Mattia: il nodo sveglia, il ripetitore lo manda a FCM.
+    silvia.add(&mattia.invite_link()?).await?;
+    let mut sent = Vec::new();
+    for _ in 0..50 {
+        sent = calls
+            .lock()
+            .map_err(|_| "lock")?
+            .iter()
+            .filter(|(p, ..)| p == "/send")
+            .cloned()
+            .collect();
+        if !sent.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let (_, auth, body) = sent.first().ok_or("nessuna sveglia a FCM")?;
+    assert_eq!(auth, "Bearer accesso-prova", "JWT non accettato");
+    assert_eq!(body["message"]["token"], "token-di-mattia");
+    assert_eq!(body["message"]["data"]["t"], "wake");
+    assert_eq!(body["message"]["android"]["priority"], "high");
+
+    // Token scaduto: il ripetitore risponde 410, così il nodo toglie il bersaglio.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let http = reqwest::Client::new();
+    let r = http
+        .post(format!("{relay}/v1/fcm/scaduto"))
+        .body(WAKE_BODY)
+        .send()
+        .await?;
+    assert_eq!(r.status(), 410);
+    // Senza credenziali il ripetitore non c'è.
+    let r = http
+        .post(format!("{node}/v1/fcm/token-di-mattia"))
+        .body(WAKE_BODY)
+        .send()
+        .await?;
+    assert_eq!(r.status(), 503);
     Ok(())
 }

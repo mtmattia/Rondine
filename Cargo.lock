@@ -2564,10 +2564,12 @@ name = "rondine-client"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "blake3",
  "if-addrs",
  "mdns-sd",
  "reqwest",
+ "ring",
  "rondine-core",
  "rondine-mls",
  "rondine-nodo",
@@ -2627,8 +2629,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "clap",
  "reqwest",
+ "ring",
  "rondine-core",
  "rusqlite",
  "rustls",

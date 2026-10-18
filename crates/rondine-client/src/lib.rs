@@ -340,15 +340,6 @@ impl Client {
     /// "Sono collegato" a tutti i contatti, con gli indirizzi diretti (SPEC §12.3). Effimero:
     /// arriva solo a chi è connesso, e non sveglia nessuno.
     pub async fn announce_online(&mut self) {
-        let Some(lan) = &self.lan else {
-            return;
-        };
-        let addrs: Vec<String> = lan.public_addrs().iter().map(|a| a.to_string()).collect();
-        let app = AppMessage::Online {
-            v: 1,
-            addrs,
-            ts: now(),
-        };
         let contacts: Vec<Contact> = self
             .state
             .contacts
@@ -357,8 +348,58 @@ impl Client {
             .cloned()
             .collect();
         for c in contacts {
-            // Un di più: chi non è raggiungibile adesso lo saprà la prossima volta.
-            let _ = self.send_app_with(&c, &app, true, None).await;
+            self.send_online(&c).await;
+        }
+    }
+
+    /// "Sono collegato" a un contatto (SPEC §12.3): non effimero, così chi non è connesso lo
+    /// trova al prossimo ritiro, ma senza coda né mesh. Un di più: se non parte, pazienza.
+    async fn send_online(&mut self, c: &Contact) {
+        let Some(lan) = &self.lan else {
+            return;
+        };
+        if c.blocked {
+            return;
+        }
+        let addrs: Vec<String> = lan.public_addrs().iter().map(|a| a.to_string()).collect();
+        let app = AppMessage::Online {
+            v: 1,
+            addrs,
+            ts: now(),
+        };
+        let Some(group) = self.preferred_group(c) else {
+            return;
+        };
+        let Ok(plain) = serde_json::to_vec(&app) else {
+            return;
+        };
+        let Ok(ct) = self.device.encrypt(&group, &plain) else {
+            return;
+        };
+        // L'archivio MLS va salvato subito: il messaggio ha fatto avanzare le chiavi.
+        if self.save().is_err() {
+            return;
+        }
+        let envelope = Envelope::Mls {
+            v: 1,
+            msg: b64::encode(ct),
+        };
+        let Ok(bytes) = serde_json::to_vec(&envelope) else {
+            return;
+        };
+        let _ = self.try_deliver(&c.card, &b64::encode(bytes), false).await;
+    }
+
+    /// "Sono collegato" a un contatto per identità, se c'è una chat con lui.
+    async fn send_online_to(&mut self, id: &PublicKey) {
+        let c = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == id && !c.groups.is_empty())
+            .cloned();
+        if let Some(c) = c {
+            self.send_online(&c).await;
         }
     }
 
@@ -391,6 +432,15 @@ impl Client {
         if let Some(l) = self.lan.as_mut() {
             l.add_peer(id, addr);
         }
+    }
+
+    /// Dimentica gli indirizzi diretti di un contatto (test, CLI): come un contatto dietro NAT,
+    /// che si raggiunge solo dal nodo o dalla mesh finché non manda un altro "sono collegato".
+    pub fn forget_addrs(&mut self, id: &PublicKey) -> Result<()> {
+        if let Some(c) = self.contact_mut(id) {
+            c.addrs.clear();
+        }
+        self.save()
     }
 
     pub fn forget_lan_peer(&mut self, id: &PublicKey) {
@@ -890,6 +940,8 @@ impl Client {
         }
         self.start_chat(&info.identity).await?;
         self.save()?;
+        // Chat nuova: il contatto deve sapere dove trovarmi, anche se ero già acceso.
+        self.send_online_to(&info.identity).await;
         self.state
             .contacts
             .iter()
@@ -1350,6 +1402,17 @@ impl Client {
                     }
                 }
             }
+        }
+        // Contatti nuovi: devono sapere dove trovarmi (SPEC §12.3).
+        let new: Vec<PublicKey> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::NewContact { identity, .. } => Some(*identity),
+                _ => None,
+            })
+            .collect();
+        for id in new {
+            self.send_online_to(&id).await;
         }
         // Qualcuno ha detto "sono collegato": la coda verso di lui riparte subito.
         if self.online_marker() != online_before {

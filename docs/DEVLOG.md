@@ -71,3 +71,8 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-18 — Benvenuto: tolta la spiegazione imprecisa sotto il campo Nodo.
 - 2026-10-18 — Benvenuto: "Nodo (facoltativo)" con tasto ⓘ che spiega a cosa serve; campo vuoto = profilo senza nodo.
 - 2026-10-18 — Nodo aggiunto dopo (SPEC §12.7): `Client::set_node` crea casella, permessi e key package e manda a ogni contatto il biglietto nuovo con un permesso suo. App: Impostazioni → Nodo; CLI: `rondine nodo <url>`.
+- 2026-10-18 — Corretto: con il nodo non si riusciva a scrivere a un contatto senza nodo che ti
+  aveva aggiunto dopo essersi acceso (messaggio fermo "in attesa"). Il "sono collegato" ora parte
+  anche quando nasce una chat, dai due lati, e non è più effimero (il nodo lo buttava dopo 30 s
+  se non eri connesso); resta senza coda né mesh (SPEC §12.3). Due test che lo riproducono;
+  `forget_addrs` per simulare nei test un contatto dietro NAT.

@@ -299,16 +299,20 @@ Chi riceve tratta il `blob` esattamente come uno ritirato dalla casella. Limiti:
 busta, coda di 1000.
 
 ### 12.3 "Sono collegato"
-Quando si accende (e quando cambiano i suoi indirizzi), il dispositivo manda a ogni contatto, in
-deposito effimero (§6), il messaggio MLS:
+Quando si accende, quando cambiano i suoi indirizzi e quando nasce una chat con un contatto
+nuovo (da una parte e dall'altra), il dispositivo manda al contatto il messaggio MLS:
 
 ```json
 { "v": 1, "type": "online", "addrs": ["192.168.1.20:41234", "[2a01:…]:41234"], "ts": 1792240000 }
 ```
 
 `addrs` sono gli indirizzi su cui ascolta (rete locale e IPv6 globali). Chi lo riceve li ricorda
-per quel contatto e prova subito a consegnargli i messaggi in attesa. Il nodo vede solo un
-deposito effimero.
+per quel contatto e prova subito a consegnargli i messaggi in attesa.
+
+Si consegna come un messaggio normale (nodo, poi diretto), **non effimero**: chi non è connesso
+in quel momento lo trova al prossimo ritiro. Se nessuna via risponde si lascia perdere, senza coda
+né mesh: il prossimo "sono collegato" lo sostituisce. Senza questo avviso chi ha il nodo non
+saprebbe mai dove trovare un contatto senza nodo che l'ha aggiunto dopo essersi acceso.
 
 ### 12.4 Ordine di consegna
 1. Deposito nel nodo del contatto (se il suo biglietto ne ha uno).
@@ -323,7 +327,7 @@ deposito effimero.
 La consegna diretta via internet riesce quando l'indirizzo annunciato è raggiungibile (tipicamente
 IPv6); dietro un NAT IPv4 non riesce, e restano il nodo e la mesh.
 
-I depositi effimeri (§7.3, §12.3) non vanno in coda né nella mesh.
+I depositi effimeri (§7.3) e i "sono collegato" (§12.3) non vanno in coda né nella mesh.
 
 ### 12.5 Mesh tra utenti
 Chi non riesce a consegnare affida la busta ad altri: fino a 3 suoi contatti (non il

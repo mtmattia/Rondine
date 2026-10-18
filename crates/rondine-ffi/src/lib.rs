@@ -311,9 +311,13 @@ impl Rondine {
     pub async fn start_lan(&self, discovery: bool) -> Result<u16> {
         self.run(move |c| {
             Box::pin(async move {
-                Ok(c.start_lan(([0, 0, 0, 0], 0).into(), discovery)
-                    .await?
-                    .port())
+                // IPv6 e IPv4 insieme; se IPv6 manca, solo IPv4.
+                let any6: std::net::SocketAddr = (std::net::Ipv6Addr::UNSPECIFIED, 0).into();
+                let addr = match c.start_lan(any6, discovery).await {
+                    Ok(a) => a,
+                    Err(_) => c.start_lan(([0, 0, 0, 0], 0).into(), discovery).await?,
+                };
+                Ok(addr.port())
             })
         })
         .await

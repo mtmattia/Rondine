@@ -33,7 +33,7 @@ struct Deliver {
 }
 
 #[derive(Serialize, Deserialize)]
-struct KeyPackage {
+pub(crate) struct KeyPackage {
     keypackage: String,
 }
 
@@ -46,7 +46,6 @@ pub(crate) struct Lan {
     discovered: Arc<Mutex<HashMap<String, SocketAddr>>>,
     mdns: Option<ServiceDaemon>,
     server: tokio::task::JoinHandle<()>,
-    http: reqwest::Client,
 }
 
 impl Drop for Lan {
@@ -87,11 +86,7 @@ impl Lan {
         } else {
             None
         };
-        let http = reqwest::Client::builder()
-            .tls_backend_preconfigured(crate::net::tls_config()?)
-            .connect_timeout(std::time::Duration::from_secs(2))
-            .timeout(std::time::Duration::from_secs(10))
-            .build()?;
+
         Ok(Self {
             shared,
             addr,
@@ -99,12 +94,36 @@ impl Lan {
             discovered,
             mdns,
             server,
-            http,
         })
     }
 
     pub(crate) fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// Indirizzi da annunciare con "sono collegato": se ascolta su tutte le interfacce, quelli
+    /// di rete locale (IPv4 privati) e gli IPv6 globali; altrimenti quello su cui ascolta.
+    pub(crate) fn public_addrs(&self) -> Vec<SocketAddr> {
+        if !self.addr.ip().is_unspecified() {
+            return vec![self.addr];
+        }
+        let port = self.addr.port();
+        let mut out: Vec<SocketAddr> = if_addrs::get_if_addrs()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|i| !i.is_loopback())
+            .map(|i| i.ip())
+            .filter(|ip| match ip {
+                IpAddr::V4(v4) => v4.is_private(),
+                // Niente link-local (fe80::/10): non serve fuori dal collegamento.
+                IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) != 0xfe80 && !v6.is_loopback(),
+            })
+            .map(|ip| SocketAddr::new(ip, port))
+            .collect();
+        out.sort();
+        out.dedup();
+        out.truncate(8);
+        out
     }
 
     pub(crate) fn add_peer(&mut self, id: PublicKey, addr: SocketAddr) {
@@ -148,37 +167,6 @@ impl Lan {
 
     pub(crate) fn queue_len(&self) -> usize {
         self.shared.incoming.lock().map(|v| v.len()).unwrap_or(0)
-    }
-
-    /// Consegna diretta di una busta (b64) a un vicino.
-    pub(crate) async fn deliver(&self, to: SocketAddr, blob: &str) -> Result<()> {
-        let res = self
-            .http
-            .post(format!("http://{to}/lan/v1/deliver"))
-            .json(&Deliver {
-                blob: blob.to_string(),
-            })
-            .send()
-            .await?;
-        if !res.status().is_success() {
-            return Err(Error::Invalid(format!(
-                "il vicino ha rifiutato il messaggio ({})",
-                res.status()
-            )));
-        }
-        Ok(())
-    }
-
-    pub(crate) async fn fetch_keypackage(&self, from: SocketAddr) -> Result<String> {
-        let kp: KeyPackage = self
-            .http
-            .get(format!("http://{from}/lan/v1/keypackage"))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        Ok(kp.keypackage)
     }
 }
 

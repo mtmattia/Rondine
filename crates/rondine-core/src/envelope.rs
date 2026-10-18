@@ -37,6 +37,21 @@ pub enum AppMessage {
         active: bool,
         ts: u64,
     },
+    /// "Sono collegato": indirizzi per la consegna diretta (SPEC §12.3), in deposito effimero.
+    Online {
+        v: u32,
+        addrs: Vec<String>,
+        ts: u64,
+    },
+    /// Busta affidata a un postino della mesh (SPEC §12.5).
+    Relay {
+        v: u32,
+        id: String,
+        nonce: String,
+        tag: String,
+        hops: u32,
+        blob: String,
+    },
     /// Conferma di consegna o di lettura di messaggi ricevuti (SPEC §7.2).
     Receipt {
         v: u32,
@@ -58,7 +73,9 @@ impl AppMessage {
             AppMessage::Hello { v, .. }
             | AppMessage::Text { v, .. }
             | AppMessage::Receipt { v, .. }
-            | AppMessage::Typing { v, .. } => *v,
+            | AppMessage::Typing { v, .. }
+            | AppMessage::Online { v, .. }
+            | AppMessage::Relay { v, .. } => *v,
         }
     }
 }

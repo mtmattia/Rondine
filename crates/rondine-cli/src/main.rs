@@ -397,9 +397,14 @@ async fn main() -> anyhow::Result<()> {
 async fn rete(c: &mut Client, porta: u16, vicini: &[String], secondi: u64) -> anyhow::Result<()> {
     use tokio::io::AsyncBufReadExt;
 
-    let addr = c
-        .start_lan(std::net::SocketAddr::from(([0, 0, 0, 0], porta)), true)
-        .await?;
+    let any6 = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta));
+    let addr = match c.start_lan(any6, true).await {
+        Ok(a) => a,
+        Err(_) => {
+            c.start_lan(std::net::SocketAddr::from(([0, 0, 0, 0], porta)), true)
+                .await?
+        }
+    };
     for v in vicini {
         let (key, at) = v
             .split_once('=')

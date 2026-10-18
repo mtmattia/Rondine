@@ -62,3 +62,8 @@ Una riga per modifica: data, cosa è cambiato.
   ricompare; con il nodo spento la rete locale va avanti. Client: `create_local`, `start_lan`.
   CLI: `crea` senza `--nodo`, `rondine rete`. App: "Senza nodo" al benvenuto, MulticastLock,
   "nella tua rete", spunta 🕓. Provato: test, mDNS tra due CLI, emulatore ↔ CLI senza nodo.
+- 2026-10-18 — Vie di consegna (SPEC §12 riscritta): prima il nodo, poi diretto (rete locale e
+  indirizzi del "sono collegato", messaggio MLS `online`), poi coda sul telefono + mesh: i contatti
+  fanno da postini (`relay` con etichetta del destinatario riconoscibile solo da chi lo conosce,
+  fino a 4 passaggi). Coda ritentata ogni 5 minuti o subito; doppioni scartati per hash. Tolto
+  l'interruttore "Senza nodo" dall'app. Ascolto IPv6+IPv4. 20 test di accettazione.

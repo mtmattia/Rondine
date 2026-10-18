@@ -89,7 +89,34 @@ pub struct Client {
     typing_sent: HashMap<PublicKey, (bool, u64)>,
     /// Rete locale, se avviata (SPEC §12).
     lan: Option<lan::Lan>,
+    /// Lavori della mesh raccolti durante l'elaborazione, eseguiti alla fine di `sync`.
+    relay_jobs: Vec<RelayJob>,
 }
+
+/// Cosa fare di un `relay` ricevuto (SPEC §12.5).
+enum RelayJob {
+    /// È per un mio contatto: glielo consegno.
+    Deliver { to: PublicKey, blob: String },
+    /// Non so per chi è: lo passo ad altri, tranne a chi me l'ha dato.
+    Forward { relay: RelayMsg, from: PublicKey },
+    /// È per me.
+    Local(String),
+}
+
+#[derive(Clone)]
+struct RelayMsg {
+    id: String,
+    nonce: String,
+    tag: String,
+    hops: u32,
+    blob: String,
+}
+
+/// Ogni quanto la coda ritenta una consegna (SPEC §12.4), e quanto tiene ciò che non è un testo.
+const RETRY_SECS: u64 = 300;
+const OUTBOX_MAX_AGE_SECS: u64 = 86_400;
+/// Quante buste e quanti relay ricordare per scartare i doppioni (SPEC §12.5, §12.6).
+const SEEN_MAX: usize = 5000;
 
 /// Ogni quanto si ripete "sta scrivendo" mentre si scrive, e per quanto lo si mostra.
 const TYPING_RESEND_SECS: u64 = 4;
@@ -148,6 +175,8 @@ impl Client {
                 contacts: Vec::new(),
                 messages: Vec::new(),
                 outbox: Vec::new(),
+                seen_blobs: Vec::new(),
+                seen_relays: Vec::new(),
             },
             identity,
             device,
@@ -155,6 +184,7 @@ impl Client {
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
             lan: None,
+            relay_jobs: Vec::new(),
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
         client.save()?;
@@ -188,6 +218,8 @@ impl Client {
                 contacts: Vec::new(),
                 messages: Vec::new(),
                 outbox: Vec::new(),
+                seen_blobs: Vec::new(),
+                seen_relays: Vec::new(),
             },
             identity,
             device,
@@ -195,6 +227,7 @@ impl Client {
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
             lan: None,
+            relay_jobs: Vec::new(),
         };
         client.save()?;
         Ok(client)
@@ -235,7 +268,57 @@ impl Client {
         let lan = lan::Lan::start(bind, &self.identity.public(), kps, discovery).await?;
         let addr = lan.addr();
         self.lan = Some(lan);
+        self.announce_online().await;
         Ok(addr)
+    }
+
+    /// "Sono collegato" a tutti i contatti, con gli indirizzi diretti (SPEC §12.3). Effimero:
+    /// arriva solo a chi è connesso, e non sveglia nessuno.
+    pub async fn announce_online(&mut self) {
+        let Some(lan) = &self.lan else {
+            return;
+        };
+        let addrs: Vec<String> = lan.public_addrs().iter().map(|a| a.to_string()).collect();
+        let app = AppMessage::Online {
+            v: 1,
+            addrs,
+            ts: now(),
+        };
+        let contacts: Vec<Contact> = self
+            .state
+            .contacts
+            .iter()
+            .filter(|c| !c.blocked && !c.groups.is_empty())
+            .cloned()
+            .collect();
+        for c in contacts {
+            // Un di più: chi non è raggiungibile adesso lo saprà la prossima volta.
+            let _ = self.send_app_with(&c, &app, true, None).await;
+        }
+    }
+
+    /// Indirizzi diretti di un contatto: trovato in rete locale, o dal suo "sono collegato".
+    fn direct_addrs(&self, id: &PublicKey) -> Vec<std::net::SocketAddr> {
+        let mut out: Vec<std::net::SocketAddr> = self
+            .lan
+            .as_ref()
+            .and_then(|l| l.peer(id))
+            .into_iter()
+            .collect();
+        if let Some(c) = self.state.contacts.iter().find(|c| &c.identity == id) {
+            out.extend(
+                c.addrs
+                    .iter()
+                    .filter_map(|a| a.parse::<std::net::SocketAddr>().ok()),
+            );
+        }
+        out.dedup();
+        out
+    }
+
+    /// C'è una via diretta (rete locale o internet) verso il contatto?
+    pub fn has_direct_route(&self, id: &PublicKey) -> bool {
+        !self.direct_addrs(id).is_empty()
     }
 
     /// Indirizzo di un contatto in rete locale dato a mano (test, CLI): sul telefono lo trova mDNS.
@@ -266,18 +349,37 @@ impl Client {
         self.lan.as_ref().map(|l| l.queue_len()).unwrap_or(0)
     }
 
-    /// Prova a consegnare la coda ai contatti tornati raggiungibili. Restituisce le spunte
-    /// avanzate da "in attesa" a "inviato".
+    /// Ritenta la coda (SPEC §12.4): ogni 5 minuti, o subito se il contatto è in rete locale o
+    /// ha appena detto "sono collegato". Restituisce le spunte passate da "in attesa" a
+    /// "inviato".
     async fn flush_outbox(&mut self) -> Vec<Event> {
-        let Some(lan) = self.lan.as_ref() else {
-            return Vec::new();
-        };
-        let mut sent = Vec::new();
+        let t = now();
         let mut keep = Vec::new();
-        for o in std::mem::take(&mut self.state.outbox) {
-            match lan.peer(&o.to) {
-                Some(addr) if lan.deliver(addr, &o.blob).await.is_ok() => sent.push(o),
-                _ => keep.push(o),
+        let mut sent = Vec::new();
+        for mut o in std::mem::take(&mut self.state.outbox) {
+            if o.message_id.is_none() && t.saturating_sub(o.queued_at) > OUTBOX_MAX_AGE_SECS {
+                continue;
+            }
+            let nearby = self.lan.as_ref().is_some_and(|l| l.peer(&o.to).is_some());
+            let card = self
+                .state
+                .contacts
+                .iter()
+                .find(|c| c.identity == o.to)
+                .map(|c| c.card.clone());
+            let Some(card) = card else {
+                continue;
+            };
+            if t < o.next_try && !nearby {
+                keep.push(o);
+                continue;
+            }
+            match self.try_deliver(&card, &o.blob, false).await {
+                Ok(Some(_)) => sent.push(o),
+                _ => {
+                    o.next_try = t + RETRY_SECS;
+                    keep.push(o);
+                }
             }
         }
         self.state.outbox = keep;
@@ -322,6 +424,7 @@ impl Client {
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
             lan: None,
+            relay_jobs: Vec::new(),
         })
     }
 
@@ -717,6 +820,7 @@ impl Client {
                 my_permit_id: None,
                 added_at: now(),
                 favorite: false,
+                addrs: Vec::new(),
             });
         }
         self.start_chat(&info.identity).await?;
@@ -740,39 +844,44 @@ impl Client {
             .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
         let their = verify_card(&contact.card)?;
 
-        // Key package: dal contatto stesso in rete locale, altrimenti dal suo nodo (SPEC §12.3).
+        // Key package: dal nodo del contatto, se non risponde direttamente dal suo telefono
+        // (SPEC §12.4).
         let mut kp_b64 = None;
-        if let Some(lan) = &self.lan
-            && let Some(addr) = lan.peer(peer)
-        {
-            kp_b64 = lan.fetch_keypackage(addr).await.ok();
+        if let Some((node, inbox, permit)) = their.mailbox() {
+            let claimed = self
+                .net
+                .call(
+                    Method::POST,
+                    node,
+                    &format!("/v1/inboxes/{inbox}/keypackages/claim"),
+                    &json!({ "permit": permit }),
+                )
+                .await;
+            match claimed {
+                Ok(bytes) => {
+                    let v: serde_json::Value = parse(&bytes)?;
+                    kp_b64 = v["keypackage"].as_str().map(str::to_string);
+                }
+                Err(Error::Node { status, .. }) if status < 500 => {
+                    claimed?;
+                }
+                Err(_) => {}
+            }
         }
-        let kp_b64 = match (kp_b64, their.mailbox()) {
-            (Some(kp), _) => kp,
-            (None, Some((node, inbox, permit))) => {
-                let claimed: serde_json::Value = parse(
-                    &self
-                        .net
-                        .call(
-                            Method::POST,
-                            node,
-                            &format!("/v1/inboxes/{inbox}/keypackages/claim"),
-                            &json!({ "permit": permit }),
-                        )
-                        .await?,
-                )?;
-                claimed["keypackage"]
-                    .as_str()
-                    .ok_or_else(|| Error::Invalid("risposta senza key package".into()))?
-                    .to_string()
+        if kp_b64.is_none() {
+            for addr in self.direct_addrs(peer) {
+                if let Ok(kp) = self.net.keypackage_direct(addr).await {
+                    kp_b64 = Some(kp);
+                    break;
+                }
             }
-            (None, None) => {
-                return Err(Error::Invalid(format!(
-                    "{} non è raggiungibile: la prima volta dovete essere sulla stessa rete",
-                    their.display_name
-                )));
-            }
-        };
+        }
+        let kp_b64 = kp_b64.ok_or_else(|| {
+            Error::Invalid(format!(
+                "{} non è raggiungibile adesso: riprova più tardi",
+                their.display_name
+            ))
+        })?;
         let kp = b64::decode(&kp_b64)?;
 
         let permit = match &contact.my_permit_id {
@@ -815,25 +924,18 @@ impl Client {
         self.deposit_with(card, envelope, false, None).await
     }
 
-    /// Consegna una busta (SPEC §12.3): diretta in rete locale, altrimenti nel nodo del
-    /// contatto, altrimenti in coda sul telefono. `ephemeral`: niente sveglia e niente coda (§6).
-    async fn deposit_with(
-        &mut self,
+    /// Una consegna senza coda né mesh (SPEC §12.4): il nodo del contatto, poi le vie dirette.
+    /// `Ok(None)`: nessuna via ha risposto. Un rifiuto esplicito del nodo resta un errore.
+    async fn try_deliver(
+        &self,
         card: &SignedCard,
-        envelope: &Envelope,
+        blob: &str,
         ephemeral: bool,
-        message_id: Option<&str>,
-    ) -> Result<Route> {
+    ) -> Result<Option<Route>> {
         let info = verify_card(card)?;
-        let blob = b64::encode(serde_json::to_vec(envelope)?);
-        if let Some(lan) = &self.lan
-            && let Some(addr) = lan.peer(&info.identity)
-            && lan.deliver(addr, &blob).await.is_ok()
-        {
-            return Ok(Route::Direct);
-        }
         if let Some((node, inbox, permit)) = info.mailbox() {
-            self.net
+            let res = self
+                .net
                 .call(
                     Method::POST,
                     node,
@@ -844,19 +946,125 @@ impl Client {
                         "ephemeral": ephemeral,
                     }),
                 )
-                .await?;
-            return Ok(Route::Node);
+                .await;
+            match res {
+                Ok(_) => return Ok(Some(Route::Node)),
+                // Il nodo ha risposto di no (permesso revocato, casella piena…): non si aggira.
+                Err(Error::Node { status, .. }) if status < 500 => return res.map(|_| None),
+                Err(_) => {}
+            }
+        }
+        for addr in self.direct_addrs(&info.identity) {
+            if self.net.deliver_direct(addr, blob).await.is_ok() {
+                return Ok(Some(Route::Direct));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Consegna una busta (SPEC §12.4): nodo, poi diretto; se nessuna via risponde resta in coda
+    /// sul telefono e parte nella mesh. Le effimere non vanno né in coda né nella mesh.
+    async fn deposit_with(
+        &mut self,
+        card: &SignedCard,
+        envelope: &Envelope,
+        ephemeral: bool,
+        message_id: Option<&str>,
+    ) -> Result<Route> {
+        let info = verify_card(card)?;
+        let blob = b64::encode(serde_json::to_vec(envelope)?);
+        if let Some(route) = self.try_deliver(card, &blob, ephemeral).await? {
+            return Ok(route);
         }
         if ephemeral {
             return Ok(Route::Dropped);
         }
+        let t = now();
         self.state.outbox.push(Outgoing {
             to: info.identity,
-            blob,
+            blob: blob.clone(),
             message_id: message_id.map(str::to_string),
+            queued_at: t,
+            next_try: t + RETRY_SECS,
         });
         self.save()?;
+        let nonce = rondine_core::random_id();
+        let relay = RelayMsg {
+            id: rondine_core::random_id(),
+            tag: rondine_core::lan::mesh_tag(&info.identity, &b64::decode(&nonce)?),
+            nonce,
+            hops: 1,
+            blob,
+        };
+        self.send_relay(relay, &[info.identity]).await;
         Ok(Route::Queued)
+    }
+
+    /// Affida una busta a fino a 3 contatti (SPEC §12.5), tranne quelli in `exclude`. La scelta è
+    /// a caso ma stabile per lo stesso relay. Ognuno la riceve come messaggio MLS per lui.
+    async fn send_relay(&mut self, relay: RelayMsg, exclude: &[PublicKey]) {
+        if !self.state.seen_relays.contains(&relay.id) {
+            remember(&mut self.state.seen_relays, relay.id.clone());
+        }
+        let me = self.identity.public();
+        let mut postmen: Vec<Contact> = self
+            .state
+            .contacts
+            .iter()
+            .filter(|c| {
+                !c.blocked
+                    && !c.groups.is_empty()
+                    && c.identity != me
+                    && !exclude.contains(&c.identity)
+            })
+            .cloned()
+            .collect();
+        postmen.sort_by_key(|c| {
+            let mut h = blake3::Hasher::new();
+            h.update(relay.id.as_bytes());
+            h.update(&c.identity.0);
+            *h.finalize().as_bytes()
+        });
+        postmen.truncate(rondine_core::lan::MESH_FANOUT);
+        let app = AppMessage::Relay {
+            v: 1,
+            id: relay.id.clone(),
+            nonce: relay.nonce.clone(),
+            tag: relay.tag.clone(),
+            hops: relay.hops,
+            blob: relay.blob.clone(),
+        };
+        for c in postmen {
+            // Al postino si consegna come a chiunque, ma senza ripartire nella mesh.
+            let Some(group) = self.preferred_group(&c) else {
+                continue;
+            };
+            let Ok(plain) = serde_json::to_vec(&app) else {
+                continue;
+            };
+            let Ok(ct) = self.device.encrypt(&group, &plain) else {
+                continue;
+            };
+            let _ = self.save();
+            let Ok(env) = serde_json::to_vec(&Envelope::Mls {
+                v: 1,
+                msg: b64::encode(ct),
+            }) else {
+                continue;
+            };
+            let env = b64::encode(env);
+            if !matches!(self.try_deliver(&c.card, &env, false).await, Ok(Some(_))) {
+                let t = now();
+                self.state.outbox.push(Outgoing {
+                    to: c.identity,
+                    blob: env,
+                    message_id: None,
+                    queued_at: t,
+                    next_try: t + RETRY_SECS,
+                });
+            }
+        }
+        let _ = self.save();
     }
 
     /// Gruppo su cui scrivere: quello creato dalla chiave più bassa (SPEC §7.1).
@@ -1030,10 +1238,8 @@ impl Client {
             // l'errore si segnala e basta. Senza rete locale resta un errore.
             let items = match fetched {
                 Ok(items) => items,
-                Err(e) if self.lan.is_some() => {
-                    events.push(Event::Rejected(format!("nodo non raggiungibile: {e}")));
-                    Vec::new()
-                }
+                // Previsto quando il nodo è giù: le altre vie (diretta, mesh) lo coprono.
+                Err(_) if self.lan.is_some() => Vec::new(),
                 Err(e) => return Err(e),
             };
             for item in items {
@@ -1047,11 +1253,42 @@ impl Client {
         if let Some(lan) = &self.lan {
             blobs.extend(lan.take_incoming());
         }
+        let online_before = self.online_marker();
         for blob in blobs {
-            match self.handle_blob(&blob) {
-                Ok(mut evs) => events.append(&mut evs),
-                Err(e) => events.push(Event::Rejected(e.to_string())),
+            self.process_blob(&blob, &mut events);
+        }
+        // Lavori della mesh: consegne per i miei contatti, passaggi, buste per me.
+        while !self.relay_jobs.is_empty() {
+            for job in std::mem::take(&mut self.relay_jobs) {
+                match job {
+                    RelayJob::Local(blob) => self.process_blob(&blob, &mut events),
+                    RelayJob::Forward { relay, from } => self.send_relay(relay, &[from]).await,
+                    RelayJob::Deliver { to, blob } => {
+                        let card = self
+                            .state
+                            .contacts
+                            .iter()
+                            .find(|c| c.identity == to)
+                            .map(|c| c.card.clone());
+                        if let Some(card) = card
+                            && !matches!(self.try_deliver(&card, &blob, false).await, Ok(Some(_)))
+                        {
+                            let t = now();
+                            self.state.outbox.push(Outgoing {
+                                to,
+                                blob,
+                                message_id: None,
+                                queued_at: t,
+                                next_try: t + RETRY_SECS,
+                            });
+                        }
+                    }
+                }
             }
+        }
+        // Qualcuno ha detto "sono collegato": la coda verso di lui riparte subito.
+        if self.online_marker() != online_before {
+            events.extend(self.flush_outbox().await);
         }
         self.save()?;
         if !ids.is_empty() {
@@ -1087,6 +1324,29 @@ impl Client {
             }
         }
         Ok(events)
+    }
+
+    /// Elabora una busta una volta sola: i doppioni (da altre vie) si scartano in silenzio.
+    fn process_blob(&mut self, blob: &str, events: &mut Vec<Event>) {
+        let hash = b64::encode(&blake3::hash(blob.as_bytes()).as_bytes()[..16]);
+        if self.state.seen_blobs.contains(&hash) {
+            return;
+        }
+        remember(&mut self.state.seen_blobs, hash);
+        match self.handle_blob(blob) {
+            Ok(mut evs) => events.append(&mut evs),
+            Err(e) => events.push(Event::Rejected(e.to_string())),
+        }
+    }
+
+    /// Cambia quando arriva un "sono collegato" (per ritentare subito la coda).
+    fn online_marker(&self) -> usize {
+        self.state
+            .contacts
+            .iter()
+            .map(|c| c.addrs.len())
+            .sum::<usize>()
+            + self.state.outbox.iter().filter(|o| o.next_try == 0).count()
     }
 
     fn handle_blob(&mut self, blob: &str) -> Result<Vec<Event>> {
@@ -1157,6 +1417,7 @@ impl Client {
                     my_permit_id: None,
                     added_at: now(),
                     favorite: false,
+                    addrs: Vec::new(),
                 });
             }
         }
@@ -1218,11 +1479,79 @@ impl Client {
                     active: active && fresh,
                 }])
             }
+            AppMessage::Online { addrs, ts, .. } => {
+                // Vecchio di oltre un giorno: gli indirizzi non valgono più.
+                if ts + 86_400 < now() {
+                    return Ok(Vec::new());
+                }
+                let addrs: Vec<String> = addrs
+                    .into_iter()
+                    .filter(|a| a.parse::<std::net::SocketAddr>().is_ok())
+                    .take(8)
+                    .collect();
+                if let Some(c) = self.contact_mut(&sender) {
+                    c.addrs = addrs;
+                }
+                for o in self.state.outbox.iter_mut().filter(|o| o.to == sender) {
+                    o.next_try = 0;
+                }
+                Ok(Vec::new())
+            }
+            AppMessage::Relay {
+                id,
+                nonce,
+                tag,
+                hops,
+                blob,
+                ..
+            } => {
+                if self.state.seen_relays.contains(&id) {
+                    return Ok(Vec::new());
+                }
+                remember(&mut self.state.seen_relays, id.clone());
+                let n = b64::decode(&nonce)?;
+                if rondine_core::lan::mesh_tag(&self.identity.public(), &n) == tag {
+                    self.relay_jobs.push(RelayJob::Local(blob));
+                    return Ok(Vec::new());
+                }
+                let target = self
+                    .state
+                    .contacts
+                    .iter()
+                    .find(|c| {
+                        c.identity != sender
+                            && !c.blocked
+                            && rondine_core::lan::mesh_tag(&c.identity, &n) == tag
+                    })
+                    .map(|c| c.identity);
+                match target {
+                    Some(to) => self.relay_jobs.push(RelayJob::Deliver { to, blob }),
+                    None if hops < rondine_core::lan::MESH_MAX_HOPS => {
+                        self.relay_jobs.push(RelayJob::Forward {
+                            relay: RelayMsg {
+                                id,
+                                nonce,
+                                tag,
+                                hops: hops + 1,
+                                blob,
+                            },
+                            from: sender,
+                        });
+                    }
+                    // Al quarto passaggio la busta si cancella.
+                    None => {}
+                }
+                Ok(Vec::new())
+            }
             AppMessage::Receipt { status, ids, .. } => {
                 let new = match status {
                     ReceiptStatus::Delivered => Delivery::Delivered,
                     ReceiptStatus::Read => Delivery::Read,
                 };
+                // Consegnato (magari da un'altra via): la coda per quei messaggi non serve più.
+                self.state
+                    .outbox
+                    .retain(|o| o.message_id.as_ref().is_none_or(|id| !ids.contains(id)));
                 let mut changed = Vec::new();
                 for m in self
                     .state
@@ -1419,6 +1748,7 @@ impl Client {
                     my_permit_id: None,
                     added_at: now(),
                     favorite: false,
+                    addrs: Vec::new(),
                 });
             } else if let Some(c) = self.contact_mut(&info.identity) {
                 c.phone = Some(other.clone());
@@ -1511,4 +1841,13 @@ fn parse_target(t: &str) -> Option<Target> {
         return Some(Target::Name(t.to_string()));
     }
     None
+}
+
+/// Aggiunge a una lista limitata, dimenticando i più vecchi.
+fn remember(list: &mut Vec<String>, item: String) {
+    list.push(item);
+    if list.len() > SEEN_MAX {
+        let extra = list.len() - SEEN_MAX;
+        list.drain(..extra);
+    }
 }

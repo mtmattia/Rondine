@@ -21,6 +21,8 @@ pub(crate) fn tls_config() -> Result<rustls::ClientConfig> {
 #[derive(Clone)]
 pub struct Net {
     http: reqwest::Client,
+    /// Per le consegne dirette tra telefoni (SPEC §12.2): tempi brevi, chi non c'è non risponde.
+    direct: reqwest::Client,
 }
 
 impl Net {
@@ -30,7 +32,45 @@ impl Net {
             .timeout(std::time::Duration::from_secs(30))
             .user_agent(concat!("rondine-client/", env!("CARGO_PKG_VERSION")))
             .build()?;
-        Ok(Self { http })
+        let direct = reqwest::Client::builder()
+            .tls_backend_preconfigured(tls_config()?)
+            .connect_timeout(std::time::Duration::from_secs(2))
+            .timeout(std::time::Duration::from_secs(10))
+            .build()?;
+        Ok(Self { http, direct })
+    }
+
+    /// Consegna diretta di una busta (b64) a un telefono (SPEC §12.2).
+    pub async fn deliver_direct(&self, to: std::net::SocketAddr, blob: &str) -> Result<()> {
+        let res = self
+            .direct
+            .post(format!("http://{to}/lan/v1/deliver"))
+            .json(&serde_json::json!({ "blob": blob }))
+            .send()
+            .await?;
+        if !res.status().is_success() {
+            return Err(Error::Invalid(format!(
+                "il telefono ha rifiutato il messaggio ({})",
+                res.status()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Key package chiesto direttamente al telefono del contatto (SPEC §12.2).
+    pub async fn keypackage_direct(&self, from: std::net::SocketAddr) -> Result<String> {
+        let v: serde_json::Value = self
+            .direct
+            .get(format!("http://{from}/lan/v1/keypackage"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        v["keypackage"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| Error::Invalid("risposta senza key package".into()))
     }
 
     async fn send(&self, req: reqwest::RequestBuilder) -> Result<Vec<u8>> {

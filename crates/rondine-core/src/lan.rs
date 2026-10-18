@@ -25,6 +25,20 @@ pub fn instance_name(key: &PublicKey, day: u64) -> String {
     format!("r-{}", lan_id(key, day))
 }
 
+/// Passaggi massimi di una busta nella mesh, e a quanti contatti la passa ogni postino
+/// (SPEC §12.5).
+pub const MESH_MAX_HOPS: u32 = 4;
+pub const MESH_FANOUT: usize = 3;
+
+/// Etichetta del destinatario nella mesh: la riconosce solo chi conosce già la sua chiave.
+pub fn mesh_tag(key: &PublicKey, nonce: &[u8]) -> String {
+    let mut h = blake3::Hasher::new();
+    h.update(b"rondine/v1/mesh");
+    h.update(&key.0);
+    h.update(nonce);
+    b64::encode(&h.finalize().as_bytes()[..16])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,5 +55,16 @@ mod tests {
         );
         // Un'etichetta DNS sta in 63 caratteri.
         assert!(instance_name(&k, 20_000).len() <= 63);
+    }
+
+    #[test]
+    fn etichetta_mesh_dipende_da_chiave_e_nonce() {
+        let k = Identity::generate().public();
+        assert_eq!(mesh_tag(&k, b"n1"), mesh_tag(&k, b"n1"));
+        assert_ne!(mesh_tag(&k, b"n1"), mesh_tag(&k, b"n2"));
+        assert_ne!(
+            mesh_tag(&k, b"n1"),
+            mesh_tag(&Identity::generate().public(), b"n1")
+        );
     }
 }

@@ -26,7 +26,8 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Conferme di lettura, "sta scrivendo" | ✅ | spunte ✓ / ✓✓ / ✓✓ verdi (SPEC §7.2), "sta scrivendo" effimero senza sveglia (§7.3) |
 | Più dispositivi per persona | ⬜ | ogni dispositivo membro MLS |
 | Recupero dell'identità | ⬜ | frase di 24 parole o backup cifrato |
-| Collegamento diretto P2P | 🟡 | diretto in rete locale (SPEC §12); via internet serve ancora un nodo |
+| Collegamento diretto P2P | 🟡 | se il nodo non risponde: rete locale (mDNS) e indirizzi da "sono collegato" (IPv6); niente NAT traversal IPv4 |
+| Mesh tra utenti | ✅ | i contatti fanno da postini, fino a 4 passaggi, invisibile (SPEC §12.5) |
 | Rete locale senza internet | ✅ | mDNS + consegna diretta, profili anche senza nodo (SPEC §12) |
 | Mesh Bluetooth | ⬜ | M3 |
 | Chiamate vocali e video | ⬜ | WebRTC + TURN, dopo |
@@ -69,10 +70,14 @@ QR.
 ### M2 — Rete diretta (in corso)
 Collegamento diretto quando entrambi sono online, rete locale senza internet, nodo facoltativo.
 
-- [x] rete locale: scoperta mDNS con id che cambia ogni giorno, consegna diretta, coda in attesa
-- [x] profilo senza nodo (app: "Senza nodo"; CLI: `crea` senza `--nodo`, `rondine rete`)
-- [x] con il nodo spento, la rete locale continua a funzionare
-- [ ] P2P via internet (NAT traversal: serve comunque un punto d'incontro, per esempio il nodo)
+- [x] ordine di consegna: nodo → diretto (rete locale, "sono collegato") → coda + mesh
+- [x] rete locale: scoperta mDNS con id che cambia ogni giorno, consegna diretta
+- [x] "sono collegato" con gli indirizzi diretti; coda ritentata ogni 5 minuti o subito
+- [x] mesh tra utenti (postini fino a 4 passaggi) e scarto dei doppioni
+- [x] con il nodo spento, rete locale e mesh continuano a funzionare
+- [x] profilo senza nodo nel client e nella CLI (l'app non lo propone)
+- [ ] P2P via internet dietro NAT IPv4 (hole punching con il nodo come punto d'incontro)
+- [ ] Bluetooth come altro canale della mesh
 - [ ] annuncio mDNS rinnovato a mezzanotte (ora vale per il giorno di avvio e il successivo)
 
 ### M3 — Senza rete

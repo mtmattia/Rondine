@@ -18,7 +18,6 @@ import uniffi.rondine_ffi.ChatRow
 import uniffi.rondine_ffi.Profile
 import uniffi.rondine_ffi.Rondine
 import uniffi.rondine_ffi.RondineException
-import uniffi.rondine_ffi.createLocalProfile
 import uniffi.rondine_ffi.createProfile
 import uniffi.rondine_ffi.openProfile
 
@@ -95,16 +94,6 @@ object Repo {
     suspend fun create(name: String, node: String, phone: String?) {
         val r = createProfile(profileDir, name, node)
         if (!phone.isNullOrBlank()) r.setPhone(phone)
-        rondine = r
-        loaded.complete(Unit)
-        startLan()
-        refresh()
-        ready.value = true
-    }
-
-    /** Profilo senza nodo: solo rete locale (SPEC §12). */
-    suspend fun createLocal(name: String) {
-        val r = createLocalProfile(profileDir, name)
         rondine = r
         loaded.complete(Unit)
         startLan()

@@ -272,12 +272,14 @@ Pagine per i link condivisi (HTML, fuori da `/v1`, nessun dato salvato):
 | `GET /@{nome}` | pagina con "Apri in Rondine" → `rondine:@nome@nodo`; 404 se il nome non è valido |
 | `GET /invito` | pagina fissa: uno script legge il frammento `#…` e apre `rondine:invito/…` |
 
-## 12. Rete locale (P2P, nodo facoltativo)
+## 12. Vie di consegna: nodo, diretto, mesh
 
-Due telefoni sulla stessa rete si scambiano i messaggi direttamente, senza nodo e senza internet.
-Un profilo può anche non avere un nodo: allora funziona solo in rete locale.
+Il nodo resta la via principale, ma non l'unica: se non risponde, i telefoni si consegnano i
+messaggi direttamente (stessa rete o via internet) oppure se li fanno portare da altri utenti
+(mesh). Tutto è automatico e invisibile nell'app. Il contenuto è sempre la stessa busta (§6.1),
+cifrata con MLS per il destinatario: nessuna via aggiunge niente di leggibile.
 
-### 12.1 Scoperta (mDNS)
+### 12.1 Scoperta in rete locale (mDNS)
 Ogni dispositivo annuncia il servizio `_rondine._tcp.local.` con nome d'istanza `r-<lan_id>` e la
 porta su cui ascolta. `lan_id` = b64 dei primi 16 byte di
 `blake3("rondine/v1/lan" || chiave_pubblica || giorno)`, con `giorno` = giorni UNIX (u64 big
@@ -285,22 +287,70 @@ endian). Cambia ogni giorno e lo sa calcolare solo chi conosce già la chiave: c
 vede che c'è un utente Rondine, non chi è. Si cercano gli id di oggi e di ieri.
 
 ### 12.2 Consegna diretta
-HTTP in chiaro sulla rete locale: il contenuto è già cifrato da MLS, come nel nodo.
+Ogni dispositivo ascolta in HTTP (in chiaro: il contenuto è già cifrato da MLS) su tutte le sue
+interfacce, IPv4 e IPv6.
 
 | Metodo e percorso | Cosa fa |
 |---|---|
 | `POST /lan/v1/deliver` | `{blob}`: una busta (§6.1), come quelle depositate nel nodo → 202 |
 | `GET /lan/v1/keypackage` | `{keypackage}`: per avviare una chat (§7.1); l'ultimo resta e si riusa |
 
-Chi riceve tratta il `blob` esattamente come uno ritirato dalla casella: un mittente sconosciuto
-o bloccato viene scartato dopo la decifratura. Limiti: 256 KiB per busta, coda di 1000.
+Chi riceve tratta il `blob` esattamente come uno ritirato dalla casella. Limiti: 256 KiB per
+busta, coda di 1000.
 
-### 12.3 Ordine di consegna
-1. Se il contatto è in rete locale, consegna diretta.
-2. Altrimenti, se il suo biglietto ha un nodo, deposito nella casella.
-3. Altrimenti il messaggio resta in coda sul telefono (spunta "in attesa") e parte appena il
-   contatto ricompare in rete locale. I depositi effimeri (§7.3) non si mettono in coda.
+### 12.3 "Sono collegato"
+Quando si accende (e quando cambiano i suoi indirizzi), il dispositivo manda a ogni contatto, in
+deposito effimero (§6), il messaggio MLS:
 
-Un profilo senza nodo non ha nome utente, sveglia push né ricerca in rubrica: sono servizi del
-nodo. Si aggiunge di persona con il link d'invito o il QR (`rondine:invito/…`).
+```json
+{ "v": 1, "type": "online", "addrs": ["192.168.1.20:41234", "[2a01:…]:41234"], "ts": 1792240000 }
+```
 
+`addrs` sono gli indirizzi su cui ascolta (rete locale e IPv6 globali). Chi lo riceve li ricorda
+per quel contatto e prova subito a consegnargli i messaggi in attesa. Il nodo vede solo un
+deposito effimero.
+
+### 12.4 Ordine di consegna
+1. Deposito nel nodo del contatto (se il suo biglietto ne ha uno).
+2. Se il nodo non risponde: consegna diretta, all'indirizzo trovato con mDNS o a quelli dell'ultimo
+   "sono collegato".
+3. Se neanche quella va: il messaggio resta in coda sul telefono (spunta "in attesa") **e** parte
+   nella mesh (§12.5).
+4. Finché non arriva la conferma di consegna (§7.2), la coda ritenta (nodo, poi diretto) ogni
+   5 minuti, e subito quando arriva un "sono collegato" o il contatto compare in rete locale.
+   La coda di ciò che non è un testo (conferme, relay) si butta dopo un giorno.
+
+La consegna diretta via internet riesce quando l'indirizzo annunciato è raggiungibile (tipicamente
+IPv6); dietro un NAT IPv4 non riesce, e restano il nodo e la mesh.
+
+I depositi effimeri (§7.3, §12.3) non vanno in coda né nella mesh.
+
+### 12.5 Mesh tra utenti
+Chi non riesce a consegnare affida la busta ad altri: fino a 3 suoi contatti (non il
+destinatario), scelti a caso, con il messaggio MLS:
+
+```json
+{ "v": 1, "type": "relay", "id": "<b64 16 byte>", "nonce": "<b64 16 byte>",
+  "tag": "<b64 16 byte>", "hops": 1, "blob": "<busta per il destinatario>" }
+```
+
+`tag` = b64 dei primi 16 byte di `blake3("rondine/v1/mesh" || chiave_destinatario || nonce)`:
+lo riconosce solo chi conosce già la chiave del destinatario. Chi riceve un `relay`:
+- se l'`id` l'ha già visto, lo ignora;
+- se il `tag` corrisponde a un suo contatto (diverso da chi gliel'ha mandato), gli consegna il
+  `blob` con le sue vie (§12.4, senza ripartire nella mesh): il destinatario lo riceve come un
+  messaggio qualsiasi, firmato e cifrato dal mittente vero;
+- altrimenti, se `hops` < 4, lo passa a fino a 3 suoi contatti (non a chi gliel'ha mandato) con
+  `hops` + 1. Al quarto passaggio il messaggio si cancella.
+
+Il relay non legge niente: la busta è cifrata per il destinatario, e chi non lo conosce non sa
+nemmeno chi sia.
+
+### 12.6 Doppioni
+Lo stesso messaggio può arrivare da più vie (nodo, diretto, mesh). Chi riceve ricorda l'hash
+(`blake3`) delle ultime 5000 buste elaborate: le copie arrivate dopo si scartano senza errore e,
+se vengono dal nodo, si confermano comunque perché il nodo le cancelli.
+
+### 12.7 Profilo senza nodo
+Il client sa creare un profilo senza nodo (`node`, `inbox`, `permit` assenti nel biglietto, §4):
+funziona solo con le vie dirette e la mesh. L'app non lo propone; resta per prove e usi futuri.

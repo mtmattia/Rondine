@@ -631,7 +631,7 @@ async fn coda_finche_il_contatto_ricompare() -> R {
 }
 
 #[tokio::test]
-async fn in_rete_locale_anche_chi_ha_il_nodo() -> R {
+async fn col_nodo_attivo_si_passa_dal_nodo() -> R {
     let node = start_node().await?;
     let tmp = TempDir::new()?;
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
@@ -639,13 +639,13 @@ async fn in_rete_locale_anche_chi_ha_il_nodo() -> R {
     silvia.add(&mattia.invite_link()?).await?;
     mattia.sync().await?;
 
-    // In rete locale il messaggio va diretto, anche se entrambi hanno un nodo.
+    // Anche se sono nella stessa rete, il nodo resta la via principale (SPEC §12.4).
     let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
     mattia.start_lan("127.0.0.1:0".parse()?, false).await?;
     mattia.add_lan_peer(silvia.identity(), s);
-    mattia.send_text(&silvia.identity(), "diretto").await?;
-    assert_eq!(silvia.lan_queue_len(), 1, "doveva arrivare in rete locale");
-    assert_eq!(texts(&silvia.sync().await?), ["diretto"]);
+    mattia.send_text(&silvia.identity(), "dal nodo").await?;
+    assert_eq!(silvia.lan_queue_len(), 0, "doveva passare dal nodo");
+    assert_eq!(texts(&silvia.sync().await?), ["dal nodo"]);
     Ok(())
 }
 
@@ -677,31 +677,195 @@ async fn scoperta_mdns_in_rete_locale() -> R {
 
 #[tokio::test]
 async fn nodo_spento_la_rete_locale_va_lo_stesso() -> R {
-    let node = start_node().await?;
+    let (ns, killer) = start_node_killable().await?;
     let tmp = TempDir::new()?;
-    let mut mattia = profile(&tmp, "Mattia", &node).await?;
-    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let mut mattia = profile(&tmp, "Mattia", &ns).await?;
+    let mut silvia = profile(&tmp, "Silvia", &ns).await?;
     silvia.add(&mattia.invite_link()?).await?;
     mattia.sync().await?;
     let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
     mattia.start_lan("127.0.0.1:0".parse()?, false).await?;
     mattia.add_lan_peer(silvia.identity(), s);
 
-    // Il nodo di Silvia non risponde più (senza internet): quello che arriva in rete locale
-    // deve passare lo stesso.
-    let silvia_dir = tmp.path().join("Silvia");
-    let mut state: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(silvia_dir.join("stato.json"))?)?;
-    state["node"] = "http://127.0.0.1:9".into();
-    std::fs::write(silvia_dir.join("stato.json"), serde_json::to_vec(&state)?)?;
-    let mut silvia2 = Client::open(&silvia_dir)?;
-    let s2 = silvia2.start_lan("127.0.0.1:0".parse()?, false).await?;
-    mattia.add_lan_peer(silvia2.identity(), s2);
-    drop(silvia);
-
-    mattia
-        .send_text(&silvia2.identity(), "anche senza internet")
+    // Il nodo (di entrambi) si spegne, per esempio senza internet: si passa dalla rete locale,
+    // e la sincronizzazione di Silvia non si ferma per il nodo che non risponde.
+    killer.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let m = mattia
+        .send_text(&silvia.identity(), "anche senza internet")
         .await?;
-    assert_eq!(texts(&silvia2.sync().await?), ["anche senza internet"]);
+    assert_eq!(m.status, Delivery::Sent);
+    assert_eq!(texts(&silvia.sync().await?), ["anche senza internet"]);
+    Ok(())
+}
+
+/// Un nodo che si può spegnere a metà prova (come un nodo irraggiungibile).
+async fn start_node_killable()
+-> Result<(String, tokio::task::JoinHandle<std::io::Result<()>>), Box<dyn std::error::Error>> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: url.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+    })?;
+    Ok((url, tokio::spawn(rondine_nodo::serve(listener, state))))
+}
+
+/// Due profili si conoscono a vicenda (invito + primo sync).
+async fn befriend(a: &mut Client, b: &mut Client) -> R {
+    b.add(&a.invite_link()?).await?;
+    a.sync().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn nodo_giu_consegna_diretta_grazie_a_sono_collegato() -> R {
+    let (ns, killer) = start_node_killable().await?;
+    let np = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut silvia = profile(&tmp, "Silvia", &ns).await?;
+    let mut pino = profile(&tmp, "Pino", &np).await?;
+    befriend(&mut silvia, &mut pino).await?;
+
+    // Silvia si accende: manda "sono collegato" con i suoi indirizzi a Pino.
+    silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    pino.sync().await?;
+    assert!(
+        pino.has_direct_route(&silvia.identity()),
+        "Pino non ha imparato dove trovare Silvia"
+    );
+
+    // Il nodo di Silvia si spegne: il messaggio di Pino va diretto, senza restare in attesa.
+    killer.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let m = pino
+        .send_text(&silvia.identity(), "il tuo nodo è giù")
+        .await?;
+    assert_eq!(m.status, Delivery::Sent);
+    assert_eq!(texts(&silvia.sync().await?), ["il tuo nodo è giù"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn mesh_tramite_un_contatto_in_comune() -> R {
+    let (ns, killer) = start_node_killable().await?;
+    let np = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut silvia = profile(&tmp, "Silvia", &ns).await?;
+    let mut pino = profile(&tmp, "Pino", &np).await?;
+    let mut mario = profile(&tmp, "Mario", &np).await?;
+    // Silvia ascolta prima di avere contatti: nessuno impara i suoi indirizzi da "sono collegato".
+    let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    befriend(&mut silvia, &mut pino).await?;
+    befriend(&mut silvia, &mut mario).await?;
+    befriend(&mut pino, &mut mario).await?;
+    // Mario è vicino a Silvia (stessa rete); Pino no.
+    mario.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mario.add_lan_peer(silvia.identity(), s);
+
+    killer.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let m = pino.send_text(&silvia.identity(), "passa da Mario").await?;
+    assert_eq!(
+        m.status,
+        Delivery::Pending,
+        "in attesa, ma partito nella mesh"
+    );
+
+    // Mario fa da postino senza saperlo e senza poter leggere.
+    let ev = mario.sync().await?;
+    assert!(texts(&ev).is_empty(), "il postino non vede il messaggio");
+    assert!(mario.messages_with(&pino.identity()).is_empty());
+
+    // Silvia lo riceve come un messaggio di Pino, e Pino vede la consegna.
+    let ev = silvia.sync().await?;
+    let from_pino: Vec<_> = ev
+        .iter()
+        .filter_map(|e| match e {
+            Event::Message(m) if m.contact == pino.identity() => Some(m.body.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(from_pino, ["passa da Mario"]);
+    pino.sync().await?;
+    let stato = pino
+        .messages_with(&silvia.identity())
+        .iter()
+        .find(|x| x.id == m.id)
+        .map(|x| x.status);
+    assert_eq!(stato, Some(Delivery::Delivered));
+    Ok(())
+}
+
+#[tokio::test]
+async fn doppioni_dalla_mesh_scartati_in_silenzio() -> R {
+    let (ns, killer) = start_node_killable().await?;
+    let np = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut silvia = profile(&tmp, "Silvia", &ns).await?;
+    let mut pino = profile(&tmp, "Pino", &np).await?;
+    let mut mario = profile(&tmp, "Mario", &np).await?;
+    let mut stefania = profile(&tmp, "Stefania", &np).await?;
+    let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    for p in [&mut pino, &mut mario, &mut stefania] {
+        befriend(&mut silvia, p).await?;
+    }
+    befriend(&mut pino, &mut mario).await?;
+    befriend(&mut pino, &mut stefania).await?;
+    for p in [&mut mario, &mut stefania] {
+        p.start_lan("127.0.0.1:0".parse()?, false).await?;
+        p.add_lan_peer(silvia.identity(), s);
+    }
+
+    killer.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    pino.send_text(&silvia.identity(), "una volta sola").await?;
+    mario.sync().await?;
+    stefania.sync().await?;
+    // Due postini hanno consegnato la stessa busta: una sola, e nessun errore.
+    let ev = silvia.sync().await?;
+    assert_eq!(texts(&ev), ["una volta sola"]);
+    assert!(
+        !ev.iter().any(|e| matches!(e, Event::Rejected(_))),
+        "{ev:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn mesh_al_massimo_quattro_passaggi() -> R {
+    let (ns, killer) = start_node_killable().await?;
+    let np = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut silvia = profile(&tmp, "Silvia", &ns).await?;
+    let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    // Catena Pino → A → B → C → D → E; solo E conosce Silvia ed è vicino a lei.
+    let mut chain = Vec::new();
+    for name in ["Pino", "A", "B", "C", "D", "E"] {
+        chain.push(profile(&tmp, name, &np).await?);
+    }
+    for i in 0..chain.len() - 1 {
+        let (left, right) = chain.split_at_mut(i + 1);
+        befriend(&mut left[i], &mut right[0]).await?;
+    }
+    befriend(&mut silvia, &mut chain[0]).await?;
+    befriend(&mut silvia, &mut chain[5]).await?;
+    chain[5].start_lan("127.0.0.1:0".parse()?, false).await?;
+    chain[5].add_lan_peer(silvia.identity(), s);
+
+    killer.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let silvia_id = silvia.identity();
+    chain[0].send_text(&silvia_id, "troppo lontano").await?;
+    // Ognuno sincronizza due volte: A, B, C, D passano il messaggio; D è al quarto passaggio e
+    // lo cancella invece di passarlo a E.
+    for _ in 0..2 {
+        for c in chain.iter_mut().skip(1) {
+            c.sync().await?;
+        }
+    }
+    assert!(texts(&silvia.sync().await?).is_empty());
     Ok(())
 }

@@ -39,6 +39,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-platform-verifier = "0.7"
 # Scoperta dei dispositivi in rete locale (SPEC §12.1).
 mdns-sd = "0.21"
+# Indirizzi del dispositivo da annunciare con "sono collegato" (SPEC §12.3).
+if-addrs = "0.15"
 rusqlite = { version = "0.37", features = ["bundled"] }
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"

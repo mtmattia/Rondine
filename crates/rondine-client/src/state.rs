@@ -37,6 +37,9 @@ pub struct Contact {
     pub added_at: u64,
     #[serde(default)]
     pub favorite: bool,
+    /// Indirizzi per la consegna diretta, dall'ultimo "sono collegato" (SPEC §12.3).
+    #[serde(default)]
+    pub addrs: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -94,9 +97,15 @@ pub struct State {
     pub contacts: Vec<Contact>,
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
-    /// Buste in attesa che il contatto ricompaia in rete locale (SPEC §12.3).
+    /// Buste in attesa di una via per il contatto (SPEC §12.4).
     #[serde(default)]
     pub outbox: Vec<Outgoing>,
+    /// Hash delle ultime buste elaborate, per scartare i doppioni (SPEC §12.6).
+    #[serde(default)]
+    pub seen_blobs: Vec<String>,
+    /// Id dei `relay` della mesh già visti (SPEC §12.5).
+    #[serde(default)]
+    pub seen_relays: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -107,4 +116,9 @@ pub struct Outgoing {
     /// Messaggio di testo a cui si riferisce, per aggiornarne le spunte.
     #[serde(default)]
     pub message_id: Option<String>,
+    #[serde(default)]
+    pub queued_at: u64,
+    /// Prossimo tentativo (SPEC §12.4: ogni 5 minuti, o subito se il contatto ricompare).
+    #[serde(default)]
+    pub next_try: u64,
 }

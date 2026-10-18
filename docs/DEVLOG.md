@@ -84,4 +84,5 @@ Una riga per modifica: data, cosa è cambiato.
   (con test) e il biglietto `gruppo` che a parità di secondo perdeva contro quello prestato
   dall'amministratore (con test). 4 test MLS, 1 unitario e 3 di accettazione.
 - 2026-10-18 — GitHub Actions (`.github/workflows/apk.yml`): a ogni tag `v*` compila l'APK di prova
-  (debug) e lo pubblica in una Release scaricabile.
+  (debug) e lo pubblica in una Release scaricabile; anche a ogni push sui branch `ccr-*`, con un
+  tag di prova creato dalla Action (il push di tag da qui è bloccato dal proxy).

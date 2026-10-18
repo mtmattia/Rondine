@@ -1,11 +1,12 @@
-# APK di prova scaricabile: a ogni tag `v*` compila l'app (Rust con cargo-ndk + Gradle) e la
-# allega a una Release di GitHub. È la build debug, firmata con una chiave di debug generata
+# APK di prova scaricabile: a ogni tag `v*`, e a ogni push sui branch di lavoro `ccr-*`, compila
+# l'app (Rust con cargo-ndk + Gradle) e la allega a una Release di GitHub (pre-release). È la build debug, firmata con una chiave di debug generata
 # qui: per una build firmata con la chiave del progetto servono i segreti del keystore.
 name: APK
 
 on:
   push:
     tags: ["v*"]
+    branches: ["ccr-*"]
   workflow_dispatch:
 
 permissions:
@@ -40,19 +41,17 @@ jobs:
         run: ./gradlew --no-daemon assembleDebug
 
       - name: Pubblica nella Release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          apk="rondine-${GITHUB_REF_NAME}-prova.apk"
+          # Su un tag si usa quello; su un branch se ne crea uno di prova sul commit compilato.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v0.1.0-prova.${GITHUB_RUN_NUMBER}"
+          fi
+          apk="rondine-${tag}.apk"
           cp android/app/build/outputs/apk/debug/app-debug.apk "$apk"
-          gh release create "$GITHUB_REF_NAME" "$apk" --prerelease \
-            --title "Rondine ${GITHUB_REF_NAME} (prova)" \
-            --notes "APK di prova (build debug), da installare a mano su Android 8 o successivo. Si installa accanto a un'eventuale versione definitiva (io.github.mtmattia.rondine.debug). Ogni APK di prova ha una firma diversa: per aggiornarlo va disinstallato il precedente, e con lui il profilo."
-
-      - name: APK come artefatto
-        if: "!startsWith(github.ref, 'refs/tags/')"
-        uses: actions/upload-artifact@v4
-        with:
-          name: rondine-prova-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          gh release create "$tag" "$apk" --prerelease --target "$GITHUB_SHA" \
+            --title "Rondine ${tag} (prova)" \
+            --notes "APK di prova (build debug) del commit ${GITHUB_SHA::7}, da installare a mano su Android 8 o successivo. Si installa accanto a un'eventuale versione definitiva (io.github.mtmattia.rondine.debug). Ogni APK di prova ha una firma diversa: per aggiornarlo va disinstallato il precedente, e con lui il profilo."

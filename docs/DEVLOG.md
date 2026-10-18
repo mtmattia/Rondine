@@ -148,3 +148,6 @@ Una riga per modifica: data, cosa è cambiato.
   l'app attraverso FCM e mostrato la notifica. Il nido pubblico di Mattia (servizio systemd
   utente `rondine-nodo`) è aggiornato alla versione attuale con `RONDINE_FCM_CREDENZIALI`; copia
   del binario e dei dati vecchi in `~/.local/share/rondine/backup-20261018-2110`.
+- 2026-10-18 — Chiave unica di firma creata (RSA 4096, in `~/.config/rondine/`, segreti di GitHub
+  caricati); le Release includono APK foss, APK play e AAB play; le versioni 0.x escono come
+  pre-release. Prima Release: v0.1.0.

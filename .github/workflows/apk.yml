@@ -56,14 +56,17 @@ jobs:
           fi
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/rondine.jks"
           export RONDINE_FIRMA_KEYSTORE="$RUNNER_TEMP/rondine.jks"
-          ./gradlew --no-daemon assembleFossRelease bundlePlayRelease
+          ./gradlew --no-daemon assembleFossRelease assemblePlayRelease bundlePlayRelease
           rm "$RUNNER_TEMP/rondine.jks"
           tag="$GITHUB_REF_NAME"
           cp app/build/outputs/apk/foss/release/app-foss-release.apk "../rondine-${tag}.apk"
+          cp app/build/outputs/apk/play/release/app-play-release.apk "../rondine-${tag}-play.apk"
           cp app/build/outputs/bundle/playRelease/app-play-release.aab "../rondine-${tag}-play.aab"
-          cd .. && gh release create "$tag" "rondine-${tag}.apk" "rondine-${tag}-play.aab" \
+          # Le versioni 0.x sono anteprime.
+          pre=""; case "$tag" in v0.*) pre="--prerelease";; esac
+          cd .. && gh release create "$tag" $pre "rondine-${tag}.apk" "rondine-${tag}-play.apk" "rondine-${tag}-play.aab" \
             --target "$GITHUB_SHA" --title "Rondine ${tag}" \
-            --notes "Rondine ${tag}. L'APK è la versione libera (come su F-Droid), firmato con la stessa chiave della versione Google Play: si aggiornano a vicenda senza perdere niente. L'AAB è la versione per Google Play."
+            --notes "Rondine ${tag}. Due versioni, stessa firma: si installano una sopra l'altra senza perdere niente. rondine-${tag}.apk è la versione libera (come su F-Droid): notifiche con ntfy. rondine-${tag}-play.apk è la versione Google: se manca ntfy, notifiche attraverso Google (FCM). L'AAB è per Google Play."
         shell: bash
 
       - name: Compila l'APK di prova

@@ -21,8 +21,15 @@ I passi con 👤 li fa una persona (account, pagamenti, segreti); il resto è pr
 
 ## La chiave unica
 
-👤 Una volta sola, tenuta fuori dal repository, con almeno una copia di sicurezza offline: se si
-perde, le versioni nuove non potranno più aggiornare quelle installate.
+Creata il 18 ottobre 2026: `~/.config/rondine/rondine.jks` sul PC di Mattia, password in
+`~/.config/rondine/firma-password.txt`, già configurata in `~/.gradle/gradle.properties` e nei
+segreti di GitHub. Impronta SHA-256 del certificato (pubblica, serve a F-Droid):
+`3a189eb837f97a5fecd90e5277bd80065cf33e920b66e254de339919ee622fa6`.
+
+👤 **Copia di sicurezza offline** di quei due file (chiavetta, password manager): se si
+perdono, le versioni nuove non potranno più aggiornare quelle installate.
+
+Per ricrearla da zero (solo se non esiste ancora):
 
 ```sh
 mkdir -p ~/.config/rondine && cd ~/.config/rondine

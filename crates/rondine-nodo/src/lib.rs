@@ -395,6 +395,8 @@ impl AppState {
             Some((f, token)) => f.wake(token).await,
             None => self.0.pusher.wake(&target.kind, &target.target).await,
         };
+        let short: String = inbox.chars().take(8).collect();
+        tracing::info!(casella = %short, esito = ?outcome, ripetitore = own.is_some(), "sveglia");
         if outcome == PushOutcome::Gone
             && let Ok(db) = self.db()
             && db.clear_push(inbox).is_err()
@@ -509,12 +511,18 @@ async fn set_push(
             // Il ripetitore FCM di questo stesso nodo (SPEC §8.1) si chiama senza rete: il suo
             // nome può puntare, da qui, a un indirizzo privato (per esempio Tailscale).
             let own = s.0.fcm.is_some() && fcm::own_token(&s.0.public_url, &endpoint).is_some();
-            if !own {
-                s.0.pusher
-                    .check_endpoint(&endpoint)
-                    .await
-                    .map_err(ApiError::bad)?;
+            // Nel log solo la casella abbreviata e il server della sveglia: l'indirizzo completo
+            // (per esempio l'argomento ntfy) basta a svegliare il telefono, quindi resta riservato.
+            let host = reqwest::Url::parse(&endpoint)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_string))
+                .unwrap_or_else(|| "?".into());
+            let short: String = inbox.chars().take(8).collect();
+            if !own && let Err(why) = s.0.pusher.check_endpoint(&endpoint).await {
+                tracing::info!(casella = %short, server = %host, motivo = why, "sveglia rifiutata");
+                return Err(ApiError::bad(why));
             }
+            tracing::info!(casella = %short, server = %host, ripetitore = own, "sveglia registrata");
             s.db()?.set_push(&inbox, "unifiedpush", &endpoint)?;
             Ok(StatusCode::NO_CONTENT)
         }

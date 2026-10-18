@@ -165,3 +165,6 @@ Una riga per modifica: data, cosa è cambiato.
   primo piano finché non riesce; l'avviso dice il motivo vero; in Impostazioni la voce
   "Notifiche ad app chiusa" spiega il caso dei telefoni Xiaomi, realme, Oppo, Huawei e apre la
   pagina giusta. Provato sull'emulatore (nido che rifiuta, poi accetta).
+- 2026-10-18 — Pubblicata v0.1.1 (pre-release, versionCode 2). L'APK foss compilato da GitHub
+  Actions è identico byte per byte a quello compilato sul PC (sha256 `10a62ec0…`): la build è
+  riproducibile tra computer diversi, come serve a F-Droid.

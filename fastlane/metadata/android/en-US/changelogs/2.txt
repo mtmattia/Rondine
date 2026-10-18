@@ -1,0 +1,1 @@
+Photos, documents and voice messages; static and live location with map; emoji; switch node in Settings; notifications via Google in the Play version; notifications re-enable themselves; chat list loads instantly.

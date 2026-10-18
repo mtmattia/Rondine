@@ -69,3 +69,4 @@ Una riga per modifica: data, cosa è cambiato.
   l'interruttore "Senza nodo" dall'app. Ascolto IPv6+IPv4. 20 test di accettazione.
 - 2026-10-18 — App: la chat scorre da sola all'ultimo messaggio quando ne mandi uno, o quando ne arriva uno mentre sei in fondo.
 - 2026-10-18 — Benvenuto: tolta la spiegazione imprecisa sotto il campo Nodo.
+- 2026-10-18 — Benvenuto: "Nodo (facoltativo)" con tasto ⓘ che spiega a cosa serve; campo vuoto = profilo senza nodo.

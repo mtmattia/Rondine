@@ -31,8 +31,27 @@ android {
         buildConfigField("String", "DEFAULT_NODE", "\"$defaultNode\"")
     }
 
+    // Firma della versione release per Google Play (chiave di caricamento). Chiave e password
+    // stanno fuori dal repository: in ~/.gradle/gradle.properties (`rondine.firma.*`) o nelle
+    // variabili d'ambiente `RONDINE_FIRMA_*` (per GitHub Actions). Senza, la release resta non
+    // firmata, come la vuole F-Droid, che la firma da sé.
+    fun secret(name: String): String? =
+        (findProperty("rondine.firma.$name") as String?) ?: System.getenv("RONDINE_FIRMA_${name.uppercase()}")
+    val keystore = secret("keystore")
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = secret("password")
+                keyAlias = secret("alias") ?: "rondine"
+                keyPassword = secret("password_chiave") ?: secret("password")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.QrCode2
@@ -309,6 +310,11 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             ) {
                 maps = !maps
                 MapTiles.setEnabled(context, maps)
+            }
+            SettingRow(Icons.Filled.PrivacyTip, "Privacy", "Cosa resta sul telefono e cosa vede il nodo") {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md")),
+                )
             }
             SettingRow(Icons.Filled.Code, "Codice sorgente", "Rondine è open source (MIT o Apache-2.0)") {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mtmattia/Rondine")))

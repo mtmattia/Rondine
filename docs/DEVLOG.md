@@ -119,3 +119,8 @@ Una riga per modifica: data, cosa è cambiato.
   `https://cachyos-mattia.tail9cc49c.ts.net` (facoltativo, cambiabile), mappa delle posizioni su
   due livelli: 2×2 tessere OpenStreetMap del quadrato di zoom 14 e segnaposto disegnato sul
   telefono; interruttore in Impostazioni.
+- 2026-10-18 — Pubblicazione: informativa sulla privacy (`docs/PRIVACY.md`, italiano e inglese,
+  collegata da Impostazioni), firma della release da `rondine.firma.*` o `RONDINE_FIRMA_*` fuori
+  dal repository (senza: non firmata, per F-Droid), guida `docs/PUBBLICAZIONE.md`. Provati
+  `bundleRelease` e `assembleRelease` con una chiave usa e getta: AAB e APK firmati, e l'APK
+  minificato crea il profilo sull'emulatore.

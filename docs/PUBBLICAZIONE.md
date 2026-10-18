@@ -51,7 +51,8 @@ keytool -genkeypair -keystore rondine.jks -alias rondine -keyalg RSA -keysize 40
 ## Build riproducibile
 
 Lo stesso sorgente dà lo stesso APK, byte per byte, su qualunque computer: Rust è fissato in
-`rust-toolchain.toml`, l'NDK in `build.gradle.kts`, cargo-ndk nella Action. È ciò che permette a
+`rust-toolchain.toml`, l'NDK in `build.gradle.kts`, cargo-ndk nella Action. I percorsi delle dipendenze
+(`~/.cargo`) e del repository si tolgono dalla libreria Rust con `--remap-path-prefix`. È ciò che permette a
 F-Droid di distribuire il nostro APK firmato invece di firmarne uno suo. Verifica: due build
 release non firmate da due cartelle diverse devono avere lo stesso `sha256sum` (provato il
 18 ottobre 2026).

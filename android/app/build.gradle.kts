@@ -126,6 +126,13 @@ val cargoBuild = tasks.register<Exec>("cargoBuild") {
     description = "Compila rondine-ffi per Android con cargo-ndk"
     workingDir = repoRoot
     environment("ANDROID_NDK_HOME", ndkDir.get().asFile.path)
+    // Build riproducibile: Rust mette nella libreria i percorsi dei sorgenti delle dipendenze
+    // (~/.cargo/registry/…), diversi su ogni computer. Si sostituiscono con nomi fissi.
+    val cargoHome = System.getenv("CARGO_HOME") ?: "${System.getProperty("user.home")}/.cargo"
+    val rustflags = "--remap-path-prefix=$cargoHome=/cargo --remap-path-prefix=${repoRoot.path}=/rondine"
+    environment("RUSTFLAGS", rustflags)
+    // Se cambiano le opzioni, la libreria va ricompilata.
+    inputs.property("rustflags", rustflags)
     val args = mutableListOf("cargo", "ndk")
     rustAbis.forEach { args += listOf("-t", it) }
     args += listOf("-P", "26", "-o", rustJniDir.get().asFile.path, "build", "--release", "-p", "rondine-ffi")

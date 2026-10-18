@@ -151,3 +151,7 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-18 — Chiave unica di firma creata (RSA 4096, in `~/.config/rondine/`, segreti di GitHub
   caricati); le Release includono APK foss, APK play e AAB play; le versioni 0.x escono come
   pre-release. Prima Release: v0.1.0.
+- 2026-10-18 — Pubblicata v0.1.0 (pre-release) con APK foss, APK play e AAB play, firmati con la
+  chiave unica. Confronto con la build locale: cambiava solo `librondine_ffi.so`, che conteneva i
+  percorsi di `~/.cargo` (442 per libreria). Ora la build Rust usa `--remap-path-prefix`: due
+  build da cartelle e `CARGO_HOME` diverse danno lo stesso APK firmato, byte per byte.

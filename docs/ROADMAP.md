@@ -83,6 +83,26 @@ Collegamento diretto quando entrambi sono online, rete locale senza internet, no
 ### M3 — Senza rete
 Mesh Bluetooth e Wi-Fi Direct, consegna differita.
 
+### M4 — Nidi (da fare, idea di Mattia del 2026-10-18)
+I nodi diventano **nidi**, e ogni PC con l'app Rondine fa da nido.
+
+- [ ] app Rondine per PC che fa anche da nido (casella, sveglia, bacheca) senza configurazione
+- [ ] i nidi, appena collegati, si trovano e si parlano tra loro a maglia (mesh), così ogni nido
+      raggiunge tutti gli altri
+- [ ] ogni rondine (telefono) sceglie il nido in base alla latenza, e può cambiarlo
+- [ ] "nido" al posto di "nodo" nell'interfaccia e nei documenti (nel protocollo resta `node`)
+
+Domande aperte da decidere prima del codice (vanno in `docs/SPEC.md`):
+- **Principi da rivedere.** SPEC §1 dice che nodi diversi *non* si parlano. La maglia tra nidi
+  cambia questo principio: il traffico tra nidi non deve far capire a nessun nido chi parla con
+  chi (regola 2), per esempio con buste sigillate e inoltro a più passaggi.
+- **PC dietro NAT.** Un PC di casa non è raggiungibile da internet: per la maglia servono almeno
+  alcuni nidi pubblici come punto d'incontro, o l'hole punching tra nidi (vedi M2).
+- **Indirizzo nel biglietto.** Oggi il biglietto dice in quale casella consegnare. Se la rondine
+  cambia nido per latenza, gli altri devono trovarla lo stesso: casella sincronizzata su più nidi,
+  oppure un indirizzo che la maglia sa risolvere.
+- **Fiducia.** Un nido di chiunque entra nella maglia: limiti contro abusi e spam tra nidi.
+
 ### Dopo
 iPhone (APNs con push relay e Notification Service Extension), chiamate (WebRTC, TURN federato),
 media, più dispositivi, sigillo per destinatario nei gruppi (SPEC §7.4, limite noto).

@@ -155,3 +155,7 @@ Una riga per modifica: data, cosa è cambiato.
   chiave unica. Confronto con la build locale: cambiava solo `librondine_ffi.so`, che conteneva i
   percorsi di `~/.cargo` (442 per libreria). Ora la build Rust usa `--remap-path-prefix`: due
   build da cartelle e `CARGO_HOME` diverse danno lo stesso APK firmato, byte per byte.
+- 2026-10-18 — Corretto: sul nido che fa anche da ripetitore FCM la sveglia
+  `<nido>/v1/fcm/<token>` veniva rifiutata, perché da lì il nome del nido punta all'indirizzo
+  Tailscale (privato). Il nodo ora riconosce il proprio ripetitore e chiama FCM direttamente
+  (SPEC §8.1); 1 test. Nido pubblico aggiornato.

@@ -193,6 +193,25 @@ impl Fcm {
     }
 }
 
+impl Fcm {
+    /// Sveglia diretta, senza passare dalla rete: per i telefoni che stanno su questo stesso nido.
+    pub(crate) async fn wake(&self, token: &str) -> crate::PushOutcome {
+        match self.send(token).await {
+            Sent::Ok => crate::PushOutcome::Sent,
+            Sent::Gone => crate::PushOutcome::Gone,
+            Sent::Failed => crate::PushOutcome::Failed,
+        }
+    }
+}
+
+/// Il token, se l'endpoint è il ripetitore di questo nodo (`<public_url>/v1/fcm/<token>`).
+pub(crate) fn own_token<'a>(public_url: &str, endpoint: &'a str) -> Option<&'a str> {
+    let token = endpoint
+        .strip_prefix(public_url.trim_end_matches('/'))?
+        .strip_prefix("/v1/fcm/")?;
+    valid_token(token).then_some(token)
+}
+
 /// I token FCM sono lunghi qualche centinaio di caratteri: lettere, cifre, `-`, `_`, `:`.
 fn valid_token(t: &str) -> bool {
     !t.is_empty()

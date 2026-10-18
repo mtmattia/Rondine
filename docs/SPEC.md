@@ -325,7 +325,10 @@ credenziali del progetto (`--fcm-credenziali`, il file JSON del service account)
   `503` se il ripetitore non è attivo su questo nodo.
 
 L'app Play registra sul proprio nodo un bersaglio `unifiedpush` con endpoint
-`<ripetitore>/v1/fcm/<token>`: per i nodi è una sveglia UnifiedPush come le altre. Il ripetitore
+`<ripetitore>/v1/fcm/<token>`: per i nodi è una sveglia UnifiedPush come le altre. Se il ripetitore è
+il nodo stesso della casella, il nodo lo riconosce (stesso URL pubblico) e chiama FCM direttamente:
+il suo nome, visto da lì, può puntare a un indirizzo privato (per esempio Tailscale), che per le
+altre sveglie è vietato. Il ripetitore
 vede il token, l'ora della sveglia e il nodo che la manda, mai mittente né contenuto; Google vede
 che l'app ha ricevuto una sveglia. Per chiamare FCM (API HTTP v1) il ripetitore firma con RS256
 (libreria `ring`) un JWT per `https://oauth2.googleapis.com/token`, con lo scope

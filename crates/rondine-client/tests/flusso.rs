@@ -1464,3 +1464,63 @@ async fn sveglia_fcm_dal_ripetitore() -> R {
     assert_eq!(r.status(), 503);
     Ok(())
 }
+
+/// Il telefono sta sullo stesso nido che fa da ripetitore (il caso del nido di Mattia): il suo
+/// nome punta, da lì, a un indirizzo privato (Tailscale), che per le sveglie è vietato. Il nido
+/// deve riconoscere il proprio ripetitore e chiamare FCM direttamente.
+#[tokio::test]
+async fn sveglia_fcm_sul_nido_che_fa_da_ripetitore() -> R {
+    let (google, calls) = fake_google().await?;
+    let account = serde_json::json!({
+        "type": "service_account",
+        "project_id": "rondine-prova",
+        "client_email": "ripetitore@rondine-prova.iam.gserviceaccount.com",
+        "private_key": include_str!("dati/fcm-prova.pem"),
+        "token_uri": format!("{google}/token"),
+    })
+    .to_string();
+    let mut fcm = rondine_nodo::FcmConfig::from_service_account(&account)?;
+    fcm.api_base = google;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let node = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: node.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        // Controllo degli indirizzi attivo, come in produzione.
+        allow_local_push: false,
+        fcm: Some(fcm),
+    })?;
+    tokio::spawn(rondine_nodo::serve(listener, state));
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+
+    // Un endpoint privato qualsiasi resta vietato; il ripetitore del nido stesso no.
+    assert!(
+        mattia
+            .set_push_endpoint("http://127.0.0.1:9/up")
+            .await
+            .is_err()
+    );
+    mattia
+        .set_push_endpoint(&format!("{node}/v1/fcm/token-di-mattia"))
+        .await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    let mut tokens = Vec::new();
+    for _ in 0..50 {
+        tokens = calls
+            .lock()
+            .map_err(|_| "lock")?
+            .iter()
+            .filter(|(p, ..)| p == "/send")
+            .map(|(_, _, b)| b["message"]["token"].clone())
+            .collect();
+        if !tokens.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(tokens, [serde_json::json!("token-di-mattia")]);
+    Ok(())
+}

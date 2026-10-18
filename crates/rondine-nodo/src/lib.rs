@@ -385,7 +385,17 @@ impl AppState {
                 return;
             }
         };
-        if self.0.pusher.wake(&target.kind, &target.target).await == PushOutcome::Gone
+        let own = match &self.0.fcm {
+            Some(f) if target.kind == "unifiedpush" => {
+                fcm::own_token(&self.0.public_url, &target.target).map(|t| (f, t))
+            }
+            _ => None,
+        };
+        let outcome = match own {
+            Some((f, token)) => f.wake(token).await,
+            None => self.0.pusher.wake(&target.kind, &target.target).await,
+        };
+        if outcome == PushOutcome::Gone
             && let Ok(db) = self.db()
             && db.clear_push(inbox).is_err()
         {
@@ -496,10 +506,15 @@ async fn set_push(
     s.owner_of(&inbox, &headers, &method, &uri, &body)?;
     match parse_json::<PushRequest>(&body)? {
         PushRequest::Unifiedpush { endpoint } => {
-            s.0.pusher
-                .check_endpoint(&endpoint)
-                .await
-                .map_err(ApiError::bad)?;
+            // Il ripetitore FCM di questo stesso nodo (SPEC §8.1) si chiama senza rete: il suo
+            // nome può puntare, da qui, a un indirizzo privato (per esempio Tailscale).
+            let own = s.0.fcm.is_some() && fcm::own_token(&s.0.public_url, &endpoint).is_some();
+            if !own {
+                s.0.pusher
+                    .check_endpoint(&endpoint)
+                    .await
+                    .map_err(ApiError::bad)?;
+            }
             s.db()?.set_push(&inbox, "unifiedpush", &endpoint)?;
             Ok(StatusCode::NO_CONTENT)
         }

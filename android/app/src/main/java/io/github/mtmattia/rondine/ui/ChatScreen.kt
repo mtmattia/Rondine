@@ -32,8 +32,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.PhotoCamera as OutlinedPhotoCamera
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
@@ -69,6 +76,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.foundation.layout.height
+import androidx.activity.compose.BackHandler
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -131,6 +152,15 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
     /** File scelto, in attesa della didascalia e di "Invia". */
     var picked by remember { mutableStateOf<PickedFile?>(null) }
     var downloading by remember { mutableStateOf(setOf<String>()) }
+    var emojiOpen by remember { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val recorder = remember { VoiceRecorder(context) }
+    var recordingMs by remember { mutableStateOf<Long?>(null) }
+    /** Registrazione a mani libere, dopo un tocco singolo sul microfono. */
+    var voiceLocked by remember { mutableStateOf(false) }
+    var voicePaused by remember { mutableStateOf(false) }
+    var voiceLevels by remember { mutableStateOf(listOf<Float>()) }
+    var cameraFile by remember { mutableStateOf<java.io.File?>(null) }
     val chats by Repo.chats.collectAsState()
     val typing = chats.any { it.contact.id == contactId && it.typing }
     val onLan = chats.any { it.contact.id == contactId && it.onLan }
@@ -173,6 +203,84 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
     }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { onPicked(it, true) }
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { onPicked(it, false) }
+
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val f = cameraFile
+        cameraFile = null
+        if (ok && f != null) {
+            onPicked(FileProvider.getUriForFile(context, "${context.packageName}.file", f), true)
+        }
+    }
+    fun openCamera() {
+        val dir = java.io.File(context.cacheDir, "fotocamera").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val f = java.io.File(dir, "scatto.jpg")
+        cameraFile = f
+        camera.launch(FileProvider.getUriForFile(context, "${context.packageName}.file", f))
+    }
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) openCamera() else scope.launch { snackbar.showSnackbar("Serve il permesso della fotocamera") }
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        scope.launch {
+            snackbar.showSnackbar(if (ok) "Tieni premuto il microfono per registrare" else "Serve il permesso del microfono")
+        }
+    }
+    fun granted(p: String) = ContextCompat.checkSelfPermission(context, p) == PackageManager.PERMISSION_GRANTED
+
+    fun startRecording() {
+        if (!granted(Manifest.permission.RECORD_AUDIO)) {
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        try {
+            recorder.start()
+            recordingMs = 0L
+            voiceLocked = false
+            voicePaused = false
+            voiceLevels = emptyList()
+            Repo.typing(contactId, false)
+        } catch (e: Exception) {
+            recorder.stop(false)
+            scope.launch { snackbar.showSnackbar("Non riesco a registrare: ${e.message}") }
+        }
+    }
+    LaunchedEffect(recordingMs != null) {
+        while (recordingMs != null) {
+            recordingMs = recorder.elapsedMs
+            voiceLevels = (voiceLevels + recorder.level()).takeLast(40)
+            kotlinx.coroutines.delay(100)
+        }
+    }
+    fun stopRecording(cancel: Boolean) {
+        if (recordingMs == null) return
+        voiceLocked = false
+        voicePaused = false
+        val short = recorder.elapsedMs < MIN_VOICE_MS
+        recordingMs = null
+        val f = recorder.stop(keep = !cancel)
+        if (f == null) {
+            if (short && !cancel) scope.launch { snackbar.showSnackbar("Tieni premuto per registrare un vocale") }
+            return
+        }
+        scope.launch {
+            try {
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())
+                val data = withContext(Dispatchers.IO) { f.readBytes() }
+                Repo.client().sendFile(contactId, "vocale-$stamp.m4a", VOICE_MIME, data, null, null, null, null)
+                Repo.refresh()
+            } catch (e: RondineException) {
+                snackbar.showSnackbar("Vocale non inviato: ${e.userMessage}")
+            } finally {
+                f.delete()
+            }
+        }
+    }
+    DisposableEffect(Unit) { onDispose { recorder.stop(false) } }
+    BackHandler(enabled = emojiOpen || attachMenu) {
+        emojiOpen = false
+        attachMenu = false
+    }
 
     fun download(m: Message) {
         if (m.id in downloading) return
@@ -366,32 +474,46 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                InputBar(
+                if (!(voiceLocked && recordingMs != null)) InputBar(
                     text = text,
                     onText = {
                         text = it
                         Repo.typing(contactId, it.isNotBlank())
                     },
                     sending = sending,
-                    onAttach = { attachMenu = true },
-                    attachMenu = {
-                        DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Foto") },
-                                leadingIcon = { Icon(Icons.Filled.ImageIcon, null) },
-                                onClick = {
-                                    attachMenu = false
-                                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Documento") },
-                                leadingIcon = { Icon(Icons.Filled.Description, null) },
-                                onClick = {
-                                    attachMenu = false
-                                    docPicker.launch(arrayOf("*/*"))
-                                },
-                            )
+                    emojiOpen = emojiOpen,
+                    onEmoji = {
+                        attachMenu = false
+                        if (emojiOpen) {
+                            emojiOpen = false
+                            keyboard?.show()
+                        } else {
+                            keyboard?.hide()
+                            emojiOpen = true
+                        }
+                    },
+                    onFieldTap = {
+                        emojiOpen = false
+                        attachMenu = false
+                    },
+                    onCamera = {
+                        if (granted(Manifest.permission.CAMERA)) openCamera()
+                        else cameraPermission.launch(Manifest.permission.CAMERA)
+                    },
+                    recordingMs = recordingMs,
+                    onRecordStart = { startRecording() },
+                    onRecordEnd = { cancel, tap ->
+                        // Tocco breve: si continua a registrare a mani libere, come su WhatsApp.
+                        if (tap && !cancel && recordingMs != null) voiceLocked = true
+                        else stopRecording(cancel)
+                    },
+                    onAttach = {
+                        if (attachMenu) {
+                            attachMenu = false
+                        } else {
+                            keyboard?.hide()
+                            emojiOpen = false
+                            attachMenu = true
                         }
                     },
                     onSend = {
@@ -411,6 +533,49 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                         }
                     },
                 )
+                when {
+                    voiceLocked && recordingMs != null -> VoiceLockedPanel(
+                        elapsedMs = recordingMs ?: 0L,
+                        levels = voiceLevels,
+                        paused = voicePaused,
+                        onDelete = { stopRecording(cancel = true) },
+                        onPauseResume = {
+                            try {
+                                if (voicePaused) recorder.resume() else recorder.pause()
+                                voicePaused = recorder.paused
+                            } catch (e: RuntimeException) {
+                                scope.launch { snackbar.showSnackbar("Pausa non riuscita: ${e.message}") }
+                            }
+                        },
+                        onSend = { stopRecording(cancel = false) },
+                    )
+                    emojiOpen -> EmojiPanel { e ->
+                        text += e
+                        Repo.typing(contactId, true)
+                    }
+                    attachMenu -> AttachPanel(
+                        listOf(
+                            AttachAction("Galleria", Icons.Filled.PhotoLibrary, Color(0xFF3D7BE0)) {
+                                attachMenu = false
+                                photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            AttachAction("Fotocamera", Icons.Filled.PhotoCamera, Color(0xFFE5426B)) {
+                                attachMenu = false
+                                if (granted(Manifest.permission.CAMERA)) openCamera()
+                                else cameraPermission.launch(Manifest.permission.CAMERA)
+                            },
+                            AttachAction("Documento", Icons.Filled.Description, Color(0xFF7E57E8)) {
+                                attachMenu = false
+                                docPicker.launch(arrayOf("*/*"))
+                            },
+                            AttachAction("Audio", Icons.Filled.Headphones, Color(0xFFF07B2B)) {
+                                attachMenu = false
+                                docPicker.launch(arrayOf("audio/*"))
+                            },
+                        ),
+                    )
+                    else -> Spacer(Modifier.navigationBarsPadding())
+                }
             }
         }
     }
@@ -520,17 +685,35 @@ private fun Bubble(
     }
 }
 
+/** Una pressione più breve di così sul microfono è un tocco: registrazione a mani libere. */
+private const val TAP_MS = 400L
+
+/** Barra di scrittura come su WhatsApp: emoji, testo, 📎 e fotocamera nel campo; a destra il
+ *  microfono (tieni premuto per un vocale, scorri a sinistra per annullare) o "Invia". */
 @Composable
 private fun InputBar(
     text: String,
     onText: (String) -> Unit,
     sending: Boolean,
+    emojiOpen: Boolean,
+    onEmoji: () -> Unit,
+    onFieldTap: () -> Unit,
     onAttach: () -> Unit,
-    attachMenu: @Composable () -> Unit,
+    onCamera: () -> Unit,
+    recordingMs: Long?,
+    onRecordStart: () -> Unit,
+    /** `tap`: il dito si è alzato subito, senza trascinare. */
+    onRecordEnd: (cancel: Boolean, tap: Boolean) -> Unit,
     onSend: () -> Unit,
 ) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val cancelPx = with(density) { 110.dp.toPx() }
+    var slide by remember { mutableStateOf(0f) }
+    val start by androidx.compose.runtime.rememberUpdatedState(onRecordStart)
+    val end by androidx.compose.runtime.rememberUpdatedState(onRecordEnd)
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp).navigationBarsPadding(),
+        Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
         Surface(
@@ -539,39 +722,93 @@ private fun InputBar(
             color = MaterialTheme.colorScheme.surface,
             shadowElevation = 1.dp,
         ) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                TextField(
-                    value = text,
-                    onValueChange = onText,
-                    placeholder = { Text("Messaggio") },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 6,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                    ),
-                )
-                Box {
-                    IconButton(onClick = onAttach) {
-                        Icon(Icons.Filled.AttachFile, "Allega", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (recordingMs != null) {
+                val cancelling = slide < -cancelPx
+                Row(Modifier.height(56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Mic, null, tint = Color(0xFFE53935))
+                    Spacer(Modifier.width(8.dp))
+                    Text(formatDuration(recordingMs), fontSize = 16.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        if (cancelling) "Rilascia per annullare" else "‹ Scorri per annullare",
+                        color = if (cancelling) MaterialTheme.colorScheme.error else muted,
+                        fontSize = 14.sp,
+                    )
+                }
+            } else {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    IconButton(onClick = onEmoji, modifier = Modifier.padding(bottom = 4.dp)) {
+                        if (emojiOpen) Icon(Icons.Filled.Keyboard, "Tastiera", tint = muted)
+                        else Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = muted)
                     }
-                    attachMenu()
+                    TextField(
+                        value = text,
+                        onValueChange = onText,
+                        placeholder = { Text("Messaggio") },
+                        modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) onFieldTap() },
+                        maxLines = 6,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                        ),
+                    )
+                    IconButton(onClick = onAttach, modifier = Modifier.padding(bottom = 4.dp)) {
+                        Icon(Icons.Filled.AttachFile, "Allega", tint = muted)
+                    }
+                    if (text.isBlank()) {
+                        IconButton(onClick = onCamera, modifier = Modifier.padding(bottom = 4.dp)) {
+                            Icon(Icons.Outlined.OutlinedPhotoCamera, "Fotocamera", tint = muted)
+                        }
+                    }
                 }
             }
         }
         Spacer(Modifier.width(6.dp))
-        FilledIconButton(
-            onClick = onSend,
-            enabled = text.isNotBlank() && !sending,
-            modifier = Modifier.size(50.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ),
-        ) { Icon(Icons.AutoMirrored.Filled.Send, "Invia") }
+        val buttonColors = IconButtonDefaults.filledIconButtonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        )
+        if (text.isNotBlank()) {
+            FilledIconButton(
+                onClick = onSend,
+                enabled = !sending,
+                modifier = Modifier.size(56.dp),
+                shape = CircleShape,
+                colors = buttonColors,
+            ) { Icon(Icons.AutoMirrored.Filled.Send, "Invia") }
+        } else {
+            // Tieni premuto: si registra finché non lasci; trascinando a sinistra si annulla.
+            Box(
+                Modifier
+                    .size(if (recordingMs != null) 64.dp else 56.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .semantics { contentDescription = "Registra un vocale" }
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            down.consume()
+                            slide = 0f
+                            start()
+                            var upAt = down.uptimeMillis
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                slide = ch.position.x - down.position.x
+                                upAt = ch.uptimeMillis
+                                if (!ch.pressed) break
+                                ch.consume()
+                            }
+                            val tap = upAt - down.uptimeMillis < TAP_MS && slide > -cancelPx / 4
+                            end(slide < -cancelPx, tap)
+                            slide = 0f
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Mic, null, tint = MaterialTheme.colorScheme.onPrimary) }
+        }
     }
 }
 

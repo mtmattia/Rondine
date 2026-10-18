@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Messaggi vocali; la fotocamera la dichiara già il lettore di QR. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Rete locale (SPEC §12): ricevere gli annunci mDNS degli altri telefoni. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />

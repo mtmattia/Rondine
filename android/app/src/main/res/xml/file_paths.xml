@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Solo la cartella dei file del profilo, mai il resto (chiavi, stato). -->
+<!-- Solo la cartella dei file del profilo e gli scatti della fotocamera, mai il resto (chiavi,
+     stato). -->
 <paths>
     <files-path name="file" path="profilo/file/" />
+    <cache-path name="fotocamera" path="fotocamera/" />
 </paths>

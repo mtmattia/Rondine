@@ -10,6 +10,12 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,7 +84,11 @@ val AttachmentInfo.isImage get() = mime.startsWith("image/")
 val Message.preview: String
     get() {
         val a = attachment ?: return body
-        val what = if (a.isImage) "📷 Foto" else "📄 ${a.name}"
+        val what = when {
+            a.isVoice -> "🎤 Messaggio vocale"
+            a.isImage -> "📷 Foto"
+            else -> "📄 ${a.name}"
+        }
         return if (body.isBlank()) what else "$what · $body"
     }
 
@@ -204,7 +214,9 @@ fun AttachmentView(
     onDownload: () -> Unit,
 ) {
     val colors = LocalChatColors.current
-    if (a.isImage) {
+    if (a.isVoice) {
+        VoiceView(a, downloading, onDownload)
+    } else if (a.isImage) {
         val full by produceState<ImageBitmap?>(null, a.path) {
             value = a.path?.let { p -> withContext(Dispatchers.IO) { decodeFileSampled(p, 1080)?.asImageBitmap() } }
         }
@@ -271,3 +283,45 @@ fun AttachmentView(
     }
 }
 
+
+/** Una voce del pannello degli allegati. */
+class AttachAction(val label: String, val icon: ImageVector, val tint: Color, val onClick: () -> Unit)
+
+/** Pannello degli allegati sotto la barra, al posto della tastiera (come su WhatsApp). */
+@Composable
+fun AttachPanel(actions: List<AttachAction>) {
+    Surface(
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 4.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(top = 10.dp, bottom = 16.dp).navigationBarsPadding()) {
+            Box(
+                Modifier.align(Alignment.CenterHorizontally).size(40.dp, 4.dp)
+                    .clip(CircleShape).background(Color(0x33000000)),
+            )
+            Spacer(Modifier.height(16.dp))
+            actions.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+                    row.forEach { a ->
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).clickable(onClick = a.onClick)
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box(
+                                Modifier.size(76.dp, 52.dp)
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(26.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(a.icon, null, Modifier.size(28.dp), tint = a.tint) }
+                            Spacer(Modifier.height(6.dp))
+                            Text(a.label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+}

@@ -101,3 +101,9 @@ Una riga per modifica: data, cosa è cambiato.
   inviare si aggiunge la didascalia. Nella chat le foto si vedono nella bolla e i documenti si
   aprono con le app del telefono (FileProvider solo su `profilo/file/`). Provato sull'emulatore
   con un nodo locale e la CLI: foto e PDF nei due sensi, arrivati identici.
+- 2026-10-18 — App: barra di scrittura come WhatsApp (emoji, 📎 e fotocamera nel campo, microfono
+  o "Invia"), pannello allegati a tessere (Galleria, Fotocamera, Documento, Audio), foto scattate
+  con l'app fotocamera, pannello emoji e messaggi vocali in AAC: tieni premuto e rilascia per
+  mandarlo, scorri a sinistra per annullare, oppure tocco singolo per registrare a mani libere con
+  pausa, cestino e invio. Nella chat i vocali si ascoltano con avanzamento. Provato
+  sull'emulatore.

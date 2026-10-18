@@ -292,8 +292,14 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
 - Chi riceve un `location_update` aggiorna il messaggio `location` con quell'`id` solo se viene
   dallo stesso contatto, se `ts` non è più vecchio dell'ultimo e se il messaggio è ancora in tempo
   reale; `live_until` può solo diminuire.
-- Nessuna mappa viene scaricata da un servizio esterno, che vedrebbe la posizione: l'app la apre
-  nell'app di mappe del telefono (`geo:`).
+- **Mappa su due livelli.** Il punto esatto non va mai a un servizio di mappe. L'app scarica
+  solo le 4 tessere (zoom 15) del quadrato fisso di zoom 14 che contiene il punto (circa 2,4 km
+  di lato all'equatore, 1,7 km a 45° di latitudine): il server delle mappe vede quale quadrato,
+  non dove dentro. Il segnaposto lo disegna il telefono sopra le tessere. Le tessere restano in
+  cache 7 giorni; le mappe si possono spegnere. Toccando la mappa la posizione si apre nell'app
+  di mappe del telefono (`geo:`). Limite noto: chi segue una posizione in tempo reale scarica un
+  quadrato nuovo quando il punto ne esce, quindi il server delle mappe vede gli spostamenti a
+  quadrati di quella grandezza.
 
 ## 8. Sveglia push
 
@@ -471,7 +477,15 @@ con le vie dirette e la mesh. Nell'app il campo "Nodo" è facoltativo.
 **Aggiungere un nodo dopo:** il client crea la casella (`POST /v1/inboxes`), il permesso
 d'invito e i key package, poi manda a ogni contatto un `hello` (§7) con il nuovo biglietto e un
 permesso suo (etichetta `contatto:…`, da revocare per bloccarlo). Chi lo riceve aggiorna il
-biglietto e da lì consegna anche nel nodo. Cambiare nodo a chi ne ha già uno non è ancora previsto.
+biglietto e da lì consegna anche nel nodo.
+
+**Cambiare nodo.** Allo stesso modo si passa a un altro nodo: casella nuova, key package, permessi
+e `hello` col biglietto nuovo a ogni contatto, più un `hello` col permesso `gruppo` nuovo a ogni
+gruppo attivo (§7.4). La sveglia push si registra sul nodo nuovo e si toglie dal vecchio. Chi non ha
+ancora ricevuto il biglietto nuovo continua a consegnare nella vecchia casella: il client la ritira
+insieme alla nuova per 30 giorni (la conservazione dei nodi, §6), poi la lascia. Nome utente,
+numero verificato (§13) e voce nella bacheca appartengono al vecchio nodo: il nome si libera, gli
+altri si lasciano scadere, e si possono rifare sul nodo nuovo.
 
 ## 13. Numero verificato
 

@@ -234,7 +234,7 @@ async fn sveglia_unifiedpush_dopo_un_deposito() -> R {
     let (push_url, got) = fake_distributor().await?;
     let n1 = start_node().await?;
     let tmp = TempDir::new()?;
-    let mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut mattia = profile(&tmp, "Mattia", &n1).await?;
     let mut silvia = profile(&tmp, "Silvia", &n1).await?;
     mattia.set_push_endpoint(&push_url).await?;
 
@@ -1234,7 +1234,7 @@ async fn aggiornamenti_della_posizione_senza_sveglia() -> R {
     let (push_url, got) = fake_distributor().await?;
     let node = start_node().await?;
     let tmp = TempDir::new()?;
-    let (mut mattia, silvia) = pair(&tmp, &node).await?;
+    let (mut mattia, mut silvia) = pair(&tmp, &node).await?;
     mattia.set_location_interval(0);
     let live = mattia
         .send_location(&silvia.identity(), 45.0, 9.0, None, Some(600))
@@ -1250,5 +1250,54 @@ async fn aggiornamenti_della_posizione_senza_sveglia() -> R {
     // Un messaggio vero sveglia.
     mattia.send_text(&silvia.identity(), "arrivo").await?;
     assert_eq!(wait_wakes(&got, 1, 1000).await?.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cambio_di_nodo_contatti_e_gruppi_seguono() -> R {
+    let (n1, n2) = (start_node().await?, start_node().await?);
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &n1).await?;
+    let group = mattia.create_group("Casa", &[silvia.identity()]).await?.id;
+    silvia.sync_all().await?;
+    mattia.claim_username("mattia").await?;
+
+    mattia.set_node(&n2).await?;
+    assert_eq!(mattia.state().node, n2);
+    assert_eq!(
+        mattia.state().username,
+        None,
+        "il nome era del vecchio nodo"
+    );
+
+    // Silvia scrive col biglietto vecchio: arriva lo stesso, dalla vecchia casella.
+    silvia.send_text(&mattia.identity(), "prima").await?;
+    assert_eq!(texts(&mattia.sync().await?), ["prima"]);
+
+    // Ricevuto il biglietto nuovo, il contatto e il gruppo puntano al nodo nuovo.
+    silvia.sync_all().await?;
+    let card_node =
+        |c: &rondine_core::SignedCard| -> Result<Option<String>, Box<dyn std::error::Error>> {
+            Ok(c.verify()?.node)
+        };
+    let me = mattia.identity();
+    let contact = silvia
+        .contacts()
+        .iter()
+        .find(|c| c.identity == me)
+        .ok_or("contatto sparito")?;
+    assert_eq!(card_node(&contact.card)?, Some(n2.clone()));
+    let member = silvia
+        .groups()
+        .iter()
+        .find(|g| g.id == group)
+        .and_then(|g| g.members.iter().find(|m| m.identity == me))
+        .ok_or("membro sparito")?;
+    assert_eq!(card_node(&member.card)?, Some(n2.clone()));
+
+    silvia.send_text(&me, "dopo").await?;
+    assert_eq!(texts(&mattia.sync().await?), ["dopo"]);
+    mattia.send_text(&silvia.identity(), "ricevuto").await?;
+    assert_eq!(texts(&silvia.sync().await?), ["ricevuto"]);
     Ok(())
 }

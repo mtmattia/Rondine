@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.QrCode2
@@ -295,7 +296,20 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 Icons.Filled.Dns,
                 "Nodo",
                 if (p.hasNode) p.node else "Nessuno: tocca per aggiungerne uno",
-            ) { if (!p.hasNode) dialog = SettingsDialog.Node }
+            ) { dialog = SettingsDialog.Node }
+            var maps by remember { mutableStateOf(MapTiles.enabled(context)) }
+            SettingRow(
+                Icons.Filled.Map,
+                "Mappe nelle posizioni",
+                if (maps) {
+                    "Attive: da OpenStreetMap solo il quadrato di circa 2 km, il punto esatto lo disegna il telefono"
+                } else {
+                    "Spente: nessuna richiesta al server delle mappe"
+                },
+            ) {
+                maps = !maps
+                MapTiles.setEnabled(context, maps)
+            }
             SettingRow(Icons.Filled.Code, "Codice sorgente", "Rondine è open source (MIT o Apache-2.0)") {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mtmattia/Rondine")))
             }
@@ -340,12 +354,18 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             }
         }
         SettingsDialog.Node -> TextDialog(
-            title = "Aggiungi un nodo",
+            title = if (p.hasNode) "Cambia nodo" else "Aggiungi un nodo",
             label = "Nodo",
             placeholder = "https://…",
-            initial = BuildConfig.DEFAULT_NODE.ifEmpty { "https://" },
-            note = "I tuoi contatti ricevono il nuovo biglietto: da lì ti arrivano messaggi e " +
-                "notifiche anche col telefono spento, e puoi scegliere un nome utente.",
+            initial = if (p.hasNode) p.node else BuildConfig.DEFAULT_NODE.ifEmpty { "https://" },
+            note = if (p.hasNode) {
+                "I tuoi contatti e i tuoi gruppi ricevono il nuovo biglietto. Per 30 giorni Rondine " +
+                    "ritira anche dal vecchio nodo. Il nome utente e il numero verificato restano al " +
+                    "vecchio nodo: potrai sceglierli di nuovo."
+            } else {
+                "I tuoi contatti ricevono il nuovo biglietto: da lì ti arrivano messaggi e " +
+                    "notifiche anche col telefono spento, e puoi scegliere un nome utente."
+            },
             onDismiss = { dialog = null },
         ) { value ->
             dialog = null
@@ -354,7 +374,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 Repo.refresh()
                 // Col nodo arrivano anche le notifiche: si registra subito il distributore.
                 onPickPush()
-                "Nodo aggiunto"
+                if (p.hasNode) "Nodo cambiato" else "Nodo aggiunto"
             }
         }
         null -> {}

@@ -24,9 +24,10 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // Nodo proposto al primo avvio sui telefoni veri, da `rondine.nodo` in
-        // ~/.gradle/gradle.properties (fuori dal repository). Vuoto: si scrive a mano.
-        val defaultNode = (findProperty("rondine.nodo") as String?).orEmpty()
+        // Nodo proposto al primo avvio sui telefoni veri (facoltativo, si può cancellare o cambiare
+        // dopo in Impostazioni): il nido pubblico di Mattia. Un altro con `rondine.nodo` in
+        // ~/.gradle/gradle.properties o `-Prondine.nodo=…`; vuoto per non proporne nessuno.
+        val defaultNode = (findProperty("rondine.nodo") as String?) ?: "https://cachyos-mattia.tail9cc49c.ts.net"
         buildConfigField("String", "DEFAULT_NODE", "\"$defaultNode\"")
     }
 

@@ -219,6 +219,20 @@ pub struct State {
     pub group_chats: Vec<GroupChat>,
     #[serde(default)]
     pub group_messages: Vec<GroupMessage>,
+    /// Caselle dei nodi lasciati: si ritirano ancora per un po' (SPEC §12.7).
+    #[serde(default)]
+    pub retired: Vec<RetiredInbox>,
+    /// Endpoint UnifiedPush registrato, da spostare se cambia il nodo.
+    #[serde(default)]
+    pub push_endpoint: Option<String>,
+}
+
+/// Casella di un nodo lasciato, ritirata fino a `until` per chi ha ancora il biglietto vecchio.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RetiredInbox {
+    pub node: String,
+    pub inbox: String,
+    pub until: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -210,6 +210,8 @@ struct RelayMsg {
 
 /// Ogni quanto la coda ritenta una consegna (SPEC §12.4), e quanto tiene ciò che non è un testo.
 const RETRY_SECS: u64 = 300;
+/// Per quanto si ritira la casella di un nodo lasciato (la conservazione dei nodi, SPEC §6).
+const RETIRED_INBOX_SECS: u64 = 30 * 24 * 3600;
 const OUTBOX_MAX_AGE_SECS: u64 = 86_400;
 /// Quante buste e quanti relay ricordare per scartare i doppioni (SPEC §12.5, §12.6).
 const SEEN_MAX: usize = 5000;
@@ -272,6 +274,8 @@ impl Client {
                 messages: Vec::new(),
                 outbox: Vec::new(),
                 phone_verified: false,
+                retired: Vec::new(),
+                push_endpoint: None,
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -320,6 +324,8 @@ impl Client {
                 messages: Vec::new(),
                 outbox: Vec::new(),
                 phone_verified: false,
+                retired: Vec::new(),
+                push_endpoint: None,
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -342,13 +348,19 @@ impl Client {
     /// Aggiunge un nodo a un profilo che non l'aveva (SPEC §12.7): casella, permessi, key
     /// package, e il biglietto nuovo a ogni contatto con un permesso suo.
     pub async fn set_node(&mut self, node: &str) -> Result<()> {
-        if self.has_node() {
-            return Err(Error::Invalid(
-                "questo profilo ha già un nodo: cambiarlo non è ancora possibile".into(),
-            ));
-        }
         node_host(node)?;
         let node = node.trim().trim_end_matches('/').to_string();
+        let old = self
+            .has_node()
+            .then(|| (self.state.node.clone(), self.state.inbox.clone()));
+        if old
+            .as_ref()
+            .is_some_and(|(n, _)| node_host(n).ok() == node_host(&node).ok())
+        {
+            return Err(Error::Invalid("è già il tuo nodo".into()));
+        }
+        let old_invite = self.state.invite_permit.clone();
+        let old_boards = self.state.boards.clone();
         let created: serde_json::Value = parse(
             &self
                 .net
@@ -369,17 +381,25 @@ impl Client {
         self.state.node = node.clone();
         self.state.inbox = inbox;
         self.state.invite_permit = Some(invite);
-        if self.state.boards.is_empty() {
-            self.state.boards.push(node);
+        // Il vecchio nodo lascia il posto al nuovo anche tra le bacheche.
+        if let Some((old_node, _)) = &old {
+            self.state.boards.retain(|b| b != old_node);
+        }
+        if !self.state.boards.contains(&node) {
+            self.state.boards.insert(0, node.clone());
         }
         // Senza key package nessuno potrebbe avviare una chat passando dal nodo: se il caricamento
         // fallisce si torna come prima.
         if let Err(e) = self.upload_keypackages(KEYPACKAGE_BATCH).await {
-            self.state.node.clear();
-            self.state.inbox.clear();
-            self.state.invite_permit = None;
-            self.state.boards.clear();
+            let (n, i) = old.clone().unwrap_or_default();
+            self.state.node = n;
+            self.state.inbox = i;
+            self.state.invite_permit = old_invite;
+            self.state.boards = old_boards;
             return Err(e);
+        }
+        if let Some((old_node, old_inbox)) = old {
+            self.leave_node(&old_node, &old_inbox).await;
         }
         self.save()?;
         let contacts: Vec<Contact> = self
@@ -401,6 +421,15 @@ impl Client {
             // Chi non è raggiungibile adesso lo riceve dalla coda o dalla mesh.
             let _ = self.send_app(&c, &AppMessage::Hello { v: 1, card }).await;
         }
+        // I gruppi ricevono il biglietto con un permesso `gruppo` del nodo nuovo (SPEC §7.4).
+        for g in self.state.group_chats.iter_mut().filter(|g| g.active) {
+            g.my_permit = None;
+            self.batch
+                .pending
+                .push(groups::Pending::Announce(g.id.clone()));
+        }
+        // Gli errori dei gruppi qui non fermano il cambio: il prossimo annuncio li ripara.
+        let _ = self.run_pending().await;
         self.save()
     }
 
@@ -845,6 +874,47 @@ impl Client {
         }
         self.save()?;
         Ok(())
+    }
+
+    /// Dopo il passaggio a un altro nodo (SPEC §12.7): la vecchia casella resta da ritirare per
+    /// 30 giorni; nome, numero verificato e bacheca erano del vecchio nodo; la sveglia si sposta.
+    /// Tutto ciò che riguarda il vecchio nodo è un di più: se non risponde si va avanti.
+    async fn leave_node(&mut self, old_node: &str, old_inbox: &str) {
+        self.state.retired.push(state::RetiredInbox {
+            node: old_node.to_string(),
+            inbox: old_inbox.to_string(),
+            until: now() + RETIRED_INBOX_SECS,
+        });
+        if let Some(handle) = self.state.username.take()
+            && let Ok(h) = Handle::parse(&handle)
+        {
+            let _ = self
+                .net
+                .owner::<()>(
+                    &self.identity,
+                    Method::DELETE,
+                    old_node,
+                    &format!("/v1/names/{}", h.name),
+                    None,
+                )
+                .await;
+        }
+        self.state.public_permit = None;
+        self.state.directory_permit = None;
+        self.state.phone_verified = false;
+        if let Some(endpoint) = self.state.push_endpoint.clone() {
+            let _ = self
+                .net
+                .owner::<()>(
+                    &self.identity,
+                    Method::DELETE,
+                    old_node,
+                    &format!("/v1/inboxes/{old_inbox}/push"),
+                    None,
+                )
+                .await;
+            let _ = self.set_push_endpoint(&endpoint).await;
+        }
     }
 
     /// Cerca un nome utente `nome@nodo` e restituisce il biglietto verificato.
@@ -1955,6 +2025,31 @@ impl Client {
                 blobs.push(blob.to_string());
             }
         }
+        // Vecchie caselle (SPEC §12.7): chi ha il biglietto vecchio consegna ancora lì.
+        let t = now();
+        self.state.retired.retain(|r| r.until > t);
+        let mut retired_acks: Vec<(String, String, Vec<String>)> = Vec::new();
+        for r in self.state.retired.clone() {
+            let rpath = format!("/v1/inboxes/{}/messages", r.inbox);
+            let Ok(items) = self
+                .net
+                .owner::<()>(&self.identity, Method::GET, &r.node, &rpath, None)
+                .await
+                .and_then(|b| parse::<Vec<serde_json::Value>>(&b))
+            else {
+                continue;
+            };
+            let mut rids = Vec::new();
+            for item in items {
+                if let (Some(id), Some(blob)) = (item["id"].as_str(), item["blob"].as_str()) {
+                    rids.push(id.to_string());
+                    blobs.push(blob.to_string());
+                }
+            }
+            if !rids.is_empty() {
+                retired_acks.push((r.node, format!("{rpath}/ack"), rids));
+            }
+        }
         if let Some(lan) = &self.lan {
             blobs.extend(lan.take_incoming());
         }
@@ -2035,6 +2130,18 @@ impl Client {
                     Some(&json!({ "ids": ids })),
                 )
                 .await?;
+        }
+        for (node, ack, rids) in retired_acks {
+            let _ = self
+                .net
+                .owner(
+                    &self.identity,
+                    Method::POST,
+                    &node,
+                    &ack,
+                    Some(&json!({ "ids": rids })),
+                )
+                .await;
         }
         // Conferme di consegna, una per contatto. Sono un di più: se non partono, i messaggi
         // restano comunque ritirati.
@@ -2364,7 +2471,7 @@ impl Client {
     // ---------- push ----------
 
     /// Registra l'endpoint UnifiedPush del telefono sul mio nodo.
-    pub async fn set_push_endpoint(&self, endpoint: &str) -> Result<()> {
+    pub async fn set_push_endpoint(&mut self, endpoint: &str) -> Result<()> {
         self.require_node()?;
         self.net
             .owner(
@@ -2375,10 +2482,16 @@ impl Client {
                 Some(&json!({ "kind": "unifiedpush", "endpoint": endpoint })),
             )
             .await?;
+        if self.state.push_endpoint.as_deref() != Some(endpoint) {
+            self.state.push_endpoint = Some(endpoint.to_string());
+            self.save()?;
+        }
         Ok(())
     }
 
-    pub async fn clear_push_endpoint(&self) -> Result<()> {
+    pub async fn clear_push_endpoint(&mut self) -> Result<()> {
+        self.state.push_endpoint = None;
+        self.save()?;
         self.require_node()?;
         self.net
             .owner::<()>(

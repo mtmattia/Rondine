@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -204,15 +205,30 @@ fun LocationView(m: Message, l: LocationInfo, onOpen: () -> Unit, onStop: (() ->
     val live = l.liveUntil != null
     val active = l.liveUntil?.let { it.toLong() > now } == true
     Column(Modifier.width(260.dp)) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val block by androidx.compose.runtime.produceState<MapTiles.Block?>(null, l.lat, l.lon) {
+            value = if (MapTiles.enabled(context)) MapTiles.block(context, l.lat, l.lon) else null
+        }
+        val pinColor = if (active) MaterialTheme.colorScheme.primary else Color(0xFFE53935)
         Box(
-            Modifier.fillMaxWidth().height(130.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpen),
-            contentAlignment = Alignment.Center,
+            Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpen),
         ) {
-            MapPlaceholder(Modifier.fillMaxSize())
-            Icon(
-                Icons.Filled.LocationOn, "Apri nella mappa", Modifier.size(42.dp),
-                tint = if (active) MaterialTheme.colorScheme.primary else Color(0xFFE53935),
-            )
+            val b = block
+            if (b == null) {
+                MapPlaceholder(Modifier.fillMaxSize())
+                Icon(
+                    Icons.Filled.LocationOn, "Apri nella mappa", Modifier.size(42.dp).align(Alignment.Center),
+                    tint = pinColor,
+                )
+            } else {
+                MapWithPin(b, pinColor, Modifier.fillMaxSize())
+                Text(
+                    "© OpenStreetMap",
+                    Modifier.align(Alignment.BottomEnd).background(Color(0xAAFFFFFF)).padding(horizontal = 4.dp),
+                    fontSize = 9.sp,
+                    color = Color(0xFF333333),
+                )
+            }
         }
         Spacer(Modifier.height(6.dp))
         Text(
@@ -237,6 +253,36 @@ fun LocationView(m: Message, l: LocationInfo, onOpen: () -> Unit, onStop: (() ->
                 Text("Interrompi la condivisione", color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+}
+
+/** Le tessere del quadrato, ingrandite sulla larghezza e spostate per tenere il punto in vista,
+ *  col segnaposto disegnato qui sopra. */
+@Composable
+private fun MapWithPin(b: MapTiles.Block, pin: Color, modifier: Modifier) {
+    val img = remember(b) { b.bitmap.asImageBitmap() }
+    Canvas(modifier) {
+        val scale = size.width / b.bitmap.width
+        val drawnH = b.bitmap.height * scale
+        // Il punto al centro in verticale, senza uscire dal quadrato.
+        val top = (size.height / 2 - b.pinY * scale).coerceIn(size.height - drawnH, 0f)
+        drawImage(
+            img,
+            dstOffset = androidx.compose.ui.unit.IntOffset(0, top.toInt()),
+            dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), drawnH.toInt()),
+        )
+        val p = Offset(b.pinX * scale, top + b.pinY * scale)
+        val r = 9.dp.toPx()
+        // Goccia: cerchio con la punta in basso sul punto esatto.
+        val tip = androidx.compose.ui.graphics.Path().apply {
+            moveTo(p.x, p.y)
+            lineTo(p.x - r * 0.8f, p.y - r * 1.6f)
+            lineTo(p.x + r * 0.8f, p.y - r * 1.6f)
+            close()
+        }
+        drawPath(tip, pin)
+        drawCircle(pin, r, Offset(p.x, p.y - r * 2f))
+        drawCircle(Color.White, r * 0.4f, Offset(p.x, p.y - r * 2f))
     }
 }
 

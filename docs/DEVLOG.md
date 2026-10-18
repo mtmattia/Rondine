@@ -113,3 +113,9 @@ Una riga per modifica: data, cosa è cambiato.
   che apre l'app di mappe). App: microfono a tocco (pannello con pausa) al posto di "tieni
   premuto", lettore QR sempre in verticale, la chat si apre in fondo anche con molti messaggi.
   2 test di accettazione; provato sull'emulatore nei due sensi, anche con l'app in background.
+- 2026-10-18 — Cambio di nodo (SPEC §12.7): casella nuova, `hello` a contatti e gruppi, sveglia
+  spostata, vecchia casella ritirata per 30 giorni, nome utente liberato (1 test di accettazione;
+  provato sull'emulatore da Impostazioni). App: nodo proposto al primo avvio di serie
+  `https://cachyos-mattia.tail9cc49c.ts.net` (facoltativo, cambiabile), mappa delle posizioni su
+  due livelli: 2×2 tessere OpenStreetMap del quadrato di zoom 14 e segnaposto disegnato sul
+  telefono; interruttore in Impostazioni.

@@ -44,7 +44,7 @@ enum Cmd {
     },
     /// Mostra chi sei e il tuo link d'invito.
     Io,
-    /// Aggiunge un nodo a un profilo che non l'aveva.
+    /// Aggiunge il nodo, o passa a un altro (la vecchia casella si ritira ancora per 30 giorni).
     Nodo { url: String },
     /// Stampa il link d'invito; con --nuovo revoca quello vecchio.
     Invito {
@@ -517,7 +517,7 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Crea { .. } => {}
         Cmd::Nodo { url } => {
             c.set_node(&url).await?;
-            println!("Nodo aggiunto: {url}. I tuoi contatti ricevono il biglietto nuovo.");
+            println!("Ora il tuo nodo è {url}. I tuoi contatti e i tuoi gruppi ricevono il biglietto nuovo.");
         }
         Cmd::Rete {
             porta,

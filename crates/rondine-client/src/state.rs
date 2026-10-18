@@ -61,6 +61,29 @@ pub struct ChatMessage {
     /// Foto o documento (SPEC §7.5); `body` è la didascalia.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment: Option<Attachment>,
+    /// Posizione (SPEC §7.6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<Location>,
+}
+
+/// Posizione di un messaggio, fissa o in tempo reale (SPEC §7.6).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Location {
+    pub lat: f64,
+    pub lon: f64,
+    /// Precisione in metri.
+    pub acc: Option<f32>,
+    /// In tempo reale fino a questo momento; `None` per una posizione fissa.
+    pub live_until: Option<u64>,
+    /// Ultimo aggiornamento.
+    pub updated_at: u64,
+}
+
+impl Location {
+    /// In tempo reale e non ancora finita.
+    pub fn is_live(&self, now: u64) -> bool {
+        self.live_until.is_some_and(|u| u > now)
+    }
 }
 
 /// Foto o documento di un messaggio (SPEC §7.5).

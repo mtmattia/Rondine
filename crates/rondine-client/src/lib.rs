@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use reqwest::Method;
 use rondine_core::card::{INVITE_PREFIX, invite_link, parse_invite, verify_card};
 use rondine_core::discovery::{self, BoardEntry, DiscoveryRecord};
-use rondine_core::envelope::{AppMessage, Envelope, FileMsg, ReceiptStatus};
+use rondine_core::envelope::{
+    AppMessage, Envelope, FileMsg, LocationMsg, MIN_LOCATION_UPDATE_SECS, ReceiptStatus,
+};
 use rondine_core::username::{Handle, NAME_LINK_PREFIX, NameClaim, node_host, normalize_name};
 use rondine_core::{
     Card, Identity, PublicKey, Signed, SignedCard, SignedPermit, b64, check_version, now, phone,
@@ -25,7 +27,7 @@ pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
 pub use state::{
     Attachment, ChatMessage, Contact, Delivery, GroupChat, GroupMember, GroupMessage, GroupRef,
-    Outgoing, Source, State,
+    Location, Outgoing, Source, State,
 };
 
 /// Foto o documento da mandare (SPEC §7.5).
@@ -109,6 +111,15 @@ const LAN_KEYPACKAGES: usize = 5;
 /// Durata delle voci in bacheca: si ripubblicano prima che scadano.
 const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 
+/// Come depositare una busta (SPEC §6): normale, effimera ("sta scrivendo") o silenziosa (senza
+/// sveglia, per la posizione in tempo reale).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    Normal,
+    Ephemeral,
+    Quiet,
+}
+
 /// Cosa è successo durante una sincronizzazione.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(clippy::large_enum_variant)] // eventi di breve vita: non vale la pena di un Box
@@ -131,6 +142,11 @@ pub enum Event {
     },
     /// Un messaggio arrivato non è stato accettato; il motivo è nel testo.
     Rejected(String),
+    /// Si è spostata (o ha smesso) una posizione in tempo reale ricevuta (SPEC §7.6).
+    LocationUpdate {
+        contact: PublicKey,
+        id: String,
+    },
 }
 
 /// Per dove è passata una busta (SPEC §12.3).
@@ -169,6 +185,8 @@ pub struct Client {
     relay_jobs: Vec<RelayJob>,
     /// Eventi e azioni dei gruppi raccolti durante l'elaborazione (SPEC §7.4).
     batch: Batch,
+    /// Intervallo minimo tra due aggiornamenti della posizione (SPEC §7.6); cambia nei test.
+    location_gap: u64,
 }
 
 /// Cosa fare di un `relay` ricevuto (SPEC §12.5).
@@ -265,6 +283,7 @@ impl Client {
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
             batch: Batch::default(),
+            location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             relay_jobs: Vec::new(),
         };
@@ -312,6 +331,7 @@ impl Client {
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
             batch: Batch::default(),
+            location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             relay_jobs: Vec::new(),
         };
@@ -473,7 +493,9 @@ impl Client {
         let Ok(bytes) = serde_json::to_vec(&envelope) else {
             return;
         };
-        let _ = self.try_deliver(&c.card, &b64::encode(bytes), false).await;
+        let _ = self
+            .try_deliver(&c.card, &b64::encode(bytes), Kind::Normal)
+            .await;
     }
 
     /// "Sono collegato" a un contatto per identità, se c'è una chat con lui.
@@ -575,7 +597,7 @@ impl Client {
                 keep.push(o);
                 continue;
             }
-            match self.try_deliver(&card, &o.blob, false).await {
+            match self.try_deliver(&card, &o.blob, Kind::Normal).await {
                 Ok(Some(_)) => sent.push(o),
                 _ => {
                     o.next_try = t + RETRY_SECS;
@@ -625,6 +647,7 @@ impl Client {
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
             batch: Batch::default(),
+            location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             relay_jobs: Vec::new(),
         })
@@ -1136,7 +1159,7 @@ impl Client {
     }
 
     async fn deposit(&mut self, card: &SignedCard, envelope: &Envelope) -> Result<Route> {
-        self.deposit_with(card, envelope, false, None).await
+        self.deposit_with(card, envelope, Kind::Normal, None).await
     }
 
     /// Una consegna senza coda né mesh (SPEC §12.4): il nodo del contatto, poi le vie dirette.
@@ -1145,7 +1168,7 @@ impl Client {
         &self,
         card: &SignedCard,
         blob: &str,
-        ephemeral: bool,
+        kind: Kind,
     ) -> Result<Option<Route>> {
         let info = verify_card(card)?;
         if let Some((node, inbox, permit)) = info.mailbox() {
@@ -1158,7 +1181,8 @@ impl Client {
                     &json!({
                         "permit": permit,
                         "blob": blob,
-                        "ephemeral": ephemeral,
+                        "ephemeral": kind == Kind::Ephemeral,
+                        "quiet": kind == Kind::Quiet,
                     }),
                 )
                 .await;
@@ -1183,15 +1207,15 @@ impl Client {
         &mut self,
         card: &SignedCard,
         envelope: &Envelope,
-        ephemeral: bool,
+        kind: Kind,
         message_id: Option<&str>,
     ) -> Result<Route> {
         let info = verify_card(card)?;
         let blob = b64::encode(serde_json::to_vec(envelope)?);
-        if let Some(route) = self.try_deliver(card, &blob, ephemeral).await? {
+        if let Some(route) = self.try_deliver(card, &blob, kind).await? {
             return Ok(route);
         }
-        if ephemeral {
+        if kind == Kind::Ephemeral {
             return Ok(Route::Dropped);
         }
         let t = now();
@@ -1268,7 +1292,10 @@ impl Client {
                 continue;
             };
             let env = b64::encode(env);
-            if !matches!(self.try_deliver(&c.card, &env, false).await, Ok(Some(_))) {
+            if !matches!(
+                self.try_deliver(&c.card, &env, Kind::Normal).await,
+                Ok(Some(_))
+            ) {
                 let t = now();
                 self.state.outbox.push(Outgoing {
                     to: c.identity,
@@ -1307,6 +1334,7 @@ impl Client {
             read: true,
             status: Delivery::Sent,
             attachment: None,
+            location: None,
         };
         let app = AppMessage::Text {
             v: 1,
@@ -1316,7 +1344,7 @@ impl Client {
         };
         let mut msg = msg;
         if self
-            .send_app_with(&contact, &app, false, Some(&msg.id))
+            .send_app_with(&contact, &app, Kind::Normal, Some(&msg.id))
             .await?
             == Route::Queued
         {
@@ -1433,6 +1461,7 @@ impl Client {
             ts,
             read: true,
             status: Delivery::Sent,
+            location: None,
             attachment: Some(Attachment {
                 name: rondine_core::file::safe_name(&file.name),
                 mime: file.mime,
@@ -1447,7 +1476,7 @@ impl Client {
             }),
         };
         if self
-            .send_app_with(&contact, &app, false, Some(&msg.id))
+            .send_app_with(&contact, &app, Kind::Normal, Some(&msg.id))
             .await?
             == Route::Queued
         {
@@ -1573,6 +1602,7 @@ impl Client {
             ts: f.ts,
             read: false,
             status: Delivery::Sent,
+            location: None,
             attachment: Some(attachment),
         };
         self.typing.remove(&sender);
@@ -1580,16 +1610,234 @@ impl Client {
         Ok(vec![Event::Message(m)])
     }
 
+    // ---------- posizione (SPEC §7.6) ----------
+
+    /// Cambia l'intervallo minimo tra due aggiornamenti della posizione: serve ai test.
+    pub fn set_location_interval(&mut self, secs: u64) {
+        self.location_gap = secs;
+    }
+
+    /// Manda la mia posizione. Con `live_for` (secondi, al massimo 8 ore) è in tempo reale:
+    /// poi si aggiorna con [`Client::update_location`].
+    pub async fn send_location(
+        &mut self,
+        to: &PublicKey,
+        lat: f64,
+        lon: f64,
+        acc: Option<f32>,
+        live_for: Option<u64>,
+    ) -> Result<ChatMessage> {
+        let ts = now();
+        let loc = LocationMsg {
+            v: 1,
+            id: random_id(),
+            ts,
+            lat,
+            lon,
+            acc,
+            live_until: live_for.map(|s| ts.saturating_add(s)),
+        };
+        if !loc.valid() || live_for == Some(0) {
+            return Err(Error::Invalid("posizione o durata non valida".into()));
+        }
+        let contact = self.chat_contact(to).await?;
+        let mut msg = ChatMessage {
+            id: loc.id.clone(),
+            contact: *to,
+            outgoing: true,
+            body: String::new(),
+            ts,
+            read: true,
+            status: Delivery::Sent,
+            attachment: None,
+            location: Some(Location {
+                lat,
+                lon,
+                acc,
+                live_until: loc.live_until,
+                updated_at: ts,
+            }),
+        };
+        if self
+            .send_app_with(
+                &contact,
+                &AppMessage::Location(loc),
+                Kind::Normal,
+                Some(&msg.id),
+            )
+            .await?
+            == Route::Queued
+        {
+            msg.status = Delivery::Pending;
+        }
+        self.state.messages.push(msg.clone());
+        self.save()?;
+        Ok(msg)
+    }
+
+    /// Nuova posizione per una condivisione in tempo reale ancora attiva. Parte al massimo ogni
+    /// 15 s (le chiamate più fitte si ignorano) e non sveglia il telefono del contatto.
+    pub async fn update_location(
+        &mut self,
+        message_id: &str,
+        lat: f64,
+        lon: f64,
+        acc: Option<f32>,
+    ) -> Result<()> {
+        self.push_location(message_id, Some((lat, lon, acc))).await
+    }
+
+    /// Smette di condividere la posizione in tempo reale.
+    pub async fn stop_location(&mut self, message_id: &str) -> Result<()> {
+        self.push_location(message_id, None).await
+    }
+
+    async fn push_location(
+        &mut self,
+        message_id: &str,
+        update: Option<(f64, f64, Option<f32>)>,
+    ) -> Result<()> {
+        let t = now();
+        let m = self
+            .state
+            .messages
+            .iter()
+            .find(|m| m.id == message_id && m.outgoing)
+            .ok_or_else(|| Error::NotFound("posizione sconosciuta".into()))?;
+        let loc = m
+            .location
+            .clone()
+            .filter(|l| l.is_live(t))
+            .ok_or_else(|| Error::Invalid("la posizione non è più in tempo reale".into()))?;
+        let to = m.contact;
+        // Troppo presto dopo l'ultimo aggiornamento: si salta, il prossimo porterà quella nuova.
+        if update.is_some() && t < loc.updated_at + self.location_gap {
+            return Ok(());
+        }
+        let (lat, lon, acc) = update.unwrap_or((loc.lat, loc.lon, loc.acc));
+        let live_until = if update.is_some() {
+            loc.live_until
+        } else {
+            Some(t)
+        };
+        let msg = LocationMsg {
+            v: 1,
+            id: message_id.to_string(),
+            ts: t,
+            lat,
+            lon,
+            acc,
+            live_until,
+        };
+        if !msg.valid() {
+            return Err(Error::Invalid("posizione non valida".into()));
+        }
+        if let Some(l) = self
+            .state
+            .messages
+            .iter_mut()
+            .find(|m| m.id == message_id)
+            .and_then(|m| m.location.as_mut())
+        {
+            *l = Location {
+                lat,
+                lon,
+                acc,
+                live_until,
+                updated_at: t,
+            };
+        }
+        self.save()?;
+        let contact = self.chat_contact(&to).await?;
+        // L'ultima posizione (o la fine) deve arrivare: silenziosa ma non effimera.
+        self.send_app_with(
+            &contact,
+            &AppMessage::LocationUpdate(msg),
+            Kind::Quiet,
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Una posizione ricevuta in una chat 1:1.
+    fn received_location(&mut self, sender: PublicKey, l: LocationMsg) -> Result<Vec<Event>> {
+        if !l.valid() {
+            return Err(Error::Invalid("posizione non valida".into()));
+        }
+        if self.state.messages.iter().any(|m| m.id == l.id) {
+            return Ok(Vec::new());
+        }
+        let m = ChatMessage {
+            id: l.id,
+            contact: sender,
+            outgoing: false,
+            body: String::new(),
+            ts: l.ts,
+            read: false,
+            status: Delivery::Sent,
+            attachment: None,
+            location: Some(Location {
+                lat: l.lat,
+                lon: l.lon,
+                acc: l.acc,
+                live_until: l.live_until,
+                updated_at: l.ts,
+            }),
+        };
+        self.typing.remove(&sender);
+        self.state.messages.push(m.clone());
+        Ok(vec![Event::Message(m)])
+    }
+
+    /// Un aggiornamento della posizione in tempo reale: vale solo dallo stesso contatto, se è
+    /// non più vecchio e se la condivisione non è finita; la fine può solo anticipare.
+    fn received_location_update(
+        &mut self,
+        sender: PublicKey,
+        l: LocationMsg,
+    ) -> Result<Vec<Event>> {
+        if !l.valid() {
+            return Err(Error::Invalid("posizione non valida".into()));
+        }
+        let Some(loc) = self
+            .state
+            .messages
+            .iter_mut()
+            .find(|m| m.id == l.id && m.contact == sender && !m.outgoing)
+            .and_then(|m| m.location.as_mut())
+        else {
+            return Ok(Vec::new());
+        };
+        let Some(until) = loc.live_until else {
+            return Ok(Vec::new());
+        };
+        if l.ts < loc.updated_at || l.ts > until {
+            return Ok(Vec::new());
+        }
+        *loc = Location {
+            lat: l.lat,
+            lon: l.lon,
+            acc: l.acc,
+            live_until: Some(l.live_until.map_or(until, |u| u.min(until))),
+            updated_at: l.ts,
+        };
+        Ok(vec![Event::LocationUpdate {
+            contact: sender,
+            id: l.id,
+        }])
+    }
+
     /// Cifra un messaggio applicativo nella chat con il contatto e lo deposita nella sua casella.
     async fn send_app(&mut self, contact: &Contact, app: &AppMessage) -> Result<Route> {
-        self.send_app_with(contact, app, false, None).await
+        self.send_app_with(contact, app, Kind::Normal, None).await
     }
 
     async fn send_app_with(
         &mut self,
         contact: &Contact,
         app: &AppMessage,
-        ephemeral: bool,
+        kind: Kind,
         message_id: Option<&str>,
     ) -> Result<Route> {
         let group = self
@@ -1604,7 +1852,7 @@ impl Client {
                 v: 1,
                 msg: b64::encode(ct),
             },
-            ephemeral,
+            kind,
             message_id,
         )
         .await
@@ -1639,7 +1887,8 @@ impl Client {
             active,
             ts: t,
         };
-        self.send_app_with(&contact, &app, true, None).await?;
+        self.send_app_with(&contact, &app, Kind::Ephemeral, None)
+            .await?;
         Ok(())
     }
 
@@ -1726,7 +1975,10 @@ impl Client {
                             .find(|c| c.identity == to)
                             .map(|c| c.card.clone());
                         if let Some(card) = card
-                            && !matches!(self.try_deliver(&card, &blob, false).await, Ok(Some(_)))
+                            && !matches!(
+                                self.try_deliver(&card, &blob, Kind::Normal).await,
+                                Ok(Some(_))
+                            )
                         {
                             let t = now();
                             self.state.outbox.push(Outgoing {
@@ -1973,12 +2225,15 @@ impl Client {
                     read: false,
                     status: Delivery::Sent,
                     attachment: None,
+                    location: None,
                 };
                 self.typing.remove(&sender);
                 self.state.messages.push(m.clone());
                 Ok(vec![Event::Message(m)])
             }
             AppMessage::File(f) => self.received_file(sender, *f),
+            AppMessage::Location(l) => self.received_location(sender, l),
+            AppMessage::LocationUpdate(l) => self.received_location_update(sender, l),
             AppMessage::Typing { active, ts, .. } => {
                 // Uno vecchio (ritirato tardi) non vale più.
                 let fresh = ts + TYPING_SHOW_SECS > now();

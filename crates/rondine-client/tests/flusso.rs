@@ -1141,3 +1141,114 @@ async fn file_piccolo_dentro_il_messaggio_anche_senza_nodo() -> R {
     assert!(io.send_file(&x.identity(), big).await.is_err());
     Ok(())
 }
+
+/// Silvia ha aggiunto Mattia e lui ha ritirato il saluto: possono scriversi.
+async fn pair(tmp: &TempDir, node: &str) -> Result<(Client, Client), Box<dyn std::error::Error>> {
+    let mut mattia = profile(tmp, "Mattia", node).await?;
+    let mut silvia = profile(tmp, "Silvia", node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    silvia.sync().await?;
+    Ok((mattia, silvia))
+}
+
+#[tokio::test]
+async fn posizione_fissa_e_in_tempo_reale() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &node).await?;
+    mattia.set_location_interval(0);
+    let to = silvia.identity();
+
+    // Posizione fissa.
+    mattia
+        .send_location(&to, 45.4642, 9.19, Some(12.0), None)
+        .await?;
+    silvia.sync().await?;
+    let msgs = silvia.messages_with(&mattia.identity());
+    let loc = msgs
+        .last()
+        .and_then(|m| m.location.clone())
+        .ok_or("niente posizione")?;
+    assert_eq!((loc.lat, loc.lon, loc.acc), (45.4642, 9.19, Some(12.0)));
+    assert_eq!(loc.live_until, None);
+
+    // In tempo reale per un'ora: gli aggiornamenti spostano lo stesso messaggio.
+    let live = mattia
+        .send_location(&to, 45.0, 9.0, None, Some(3600))
+        .await?;
+    silvia.sync().await?;
+    mattia
+        .update_location(&live.id, 45.001, 9.002, Some(5.0))
+        .await?;
+    let ev = silvia.sync().await?;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::LocationUpdate { id, .. } if *id == live.id)),
+        "{ev:?}"
+    );
+    let mid = mattia.identity();
+    let get = |c: &Client| {
+        c.messages_with(&mid)
+            .into_iter()
+            .find(|m| m.id == live.id)
+            .and_then(|m| m.location.clone())
+    };
+    let loc = get(&silvia).ok_or("niente posizione in tempo reale")?;
+    assert_eq!((loc.lat, loc.lon), (45.001, 9.002));
+    assert!(loc.live_until.is_some_and(|u| u > rondine_core::now()));
+    // Non è un messaggio nuovo: la chat ne ha sempre due.
+    assert_eq!(silvia.messages_with(&mattia.identity()).len(), 2);
+
+    // Smette prima: da qui gli aggiornamenti non partono più.
+    mattia.stop_location(&live.id).await?;
+    silvia.sync().await?;
+    let loc = get(&silvia).ok_or("sparita")?;
+    assert!(loc.live_until.is_some_and(|u| u <= rondine_core::now()));
+    assert!(
+        mattia
+            .update_location(&live.id, 46.0, 9.0, None)
+            .await
+            .is_err()
+    );
+
+    // Coordinate impossibili o durata oltre le 8 ore: rifiutate.
+    assert!(
+        mattia
+            .send_location(&to, 95.0, 0.0, None, None)
+            .await
+            .is_err()
+    );
+    assert!(
+        mattia
+            .send_location(&to, 45.0, 9.0, None, Some(9 * 3600))
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
+/// Gli aggiornamenti della posizione sono depositi silenziosi: non svegliano il telefono.
+#[tokio::test]
+async fn aggiornamenti_della_posizione_senza_sveglia() -> R {
+    let (push_url, got) = fake_distributor().await?;
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, silvia) = pair(&tmp, &node).await?;
+    mattia.set_location_interval(0);
+    let live = mattia
+        .send_location(&silvia.identity(), 45.0, 9.0, None, Some(600))
+        .await?;
+    silvia.set_push_endpoint(&push_url).await?;
+    // Passa l'intervallo minimo tra due sveglie (10 s), così una sveglia partirebbe subito.
+    tokio::time::sleep(std::time::Duration::from_millis(10_500)).await;
+    mattia.update_location(&live.id, 45.1, 9.1, None).await?;
+    assert!(
+        wait_wakes(&got, 1, 800).await?.is_empty(),
+        "sveglia di troppo"
+    );
+    // Un messaggio vero sveglia.
+    mattia.send_text(&silvia.identity(), "arrivo").await?;
+    assert_eq!(wait_wakes(&got, 1, 1000).await?.len(), 1);
+    Ok(())
+}

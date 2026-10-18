@@ -92,6 +92,9 @@ enum Cmd {
         #[arg(long)]
         didascalia: Option<String>,
     },
+    /// Posizione: fissa, in tempo reale, aggiornamenti.
+    #[command(subcommand)]
+    Posizione(PosizioneCmd),
     /// Scarica di nuovo il file di un messaggio ricevuto (id mostrato da `leggi`).
     Scarica { id: String },
     /// Ritira e mostra i messaggi nuovi.
@@ -142,6 +145,30 @@ enum GruppoCmd {
     Togli { gruppo: String, membro: String },
     /// Esce dal gruppo.
     Esci { gruppo: String },
+}
+
+#[derive(Subcommand)]
+enum PosizioneCmd {
+    /// Manda una posizione; con --minuti la condivide in tempo reale (al massimo 480).
+    Manda {
+        contatto: String,
+        #[arg(allow_hyphen_values = true)]
+        lat: f64,
+        #[arg(allow_hyphen_values = true)]
+        lon: f64,
+        #[arg(long)]
+        minuti: Option<u64>,
+    },
+    /// Aggiorna una posizione in tempo reale (id mostrato da `leggi`).
+    Aggiorna {
+        id: String,
+        #[arg(allow_hyphen_values = true)]
+        lat: f64,
+        #[arg(allow_hyphen_values = true)]
+        lon: f64,
+    },
+    /// Smette di condividere una posizione in tempo reale.
+    Ferma { id: String },
 }
 
 #[derive(Subcommand)]
@@ -208,6 +235,17 @@ fn numbers(list: Vec<String>, file: Option<PathBuf>) -> anyhow::Result<Vec<Strin
 
 /// Testo di un messaggio, con l'eventuale file: dove sta, o come scaricarlo.
 fn text(m: &ChatMessage) -> String {
+    if let Some(l) = &m.location {
+        let live = match l.live_until {
+            Some(u) if u > rondine_core::now() => format!(
+                " · in tempo reale ancora {} min",
+                (u - rondine_core::now()).div_ceil(60)
+            ),
+            Some(_) => " · condivisione finita".into(),
+            None => String::new(),
+        };
+        return format!("[posizione {:.5},{:.5}{live} · id {}]", l.lat, l.lon, m.id);
+    }
     let Some(a) = &m.attachment else {
         return m.body.clone();
     };
@@ -325,6 +363,11 @@ fn print_events(events: &[Event], client: &Client) {
     for e in events {
         match e {
             Event::NewContact { name, .. } => println!("+ nuovo contatto: {name}"),
+            Event::LocationUpdate { id, .. } => {
+                if let Some(m) = client.state().messages.iter().find(|m| &m.id == id) {
+                    println!("~ posizione aggiornata: {}", text(m));
+                }
+            }
             Event::Message(m) => {
                 let from = client
                     .contacts()
@@ -588,6 +631,26 @@ async fn main() -> anyhow::Result<()> {
             f.caption = didascalia;
             let m = c.send_file(&id, f).await?;
             println!("Inviato: {}", text(&m));
+        }
+        Cmd::Posizione(PosizioneCmd::Manda {
+            contatto,
+            lat,
+            lon,
+            minuti,
+        }) => {
+            let id = c.find_contact(&contatto)?.identity;
+            let m = c
+                .send_location(&id, lat, lon, None, minuti.map(|m| m * 60))
+                .await?;
+            println!("Inviata: {}", text(&m));
+        }
+        Cmd::Posizione(PosizioneCmd::Aggiorna { id, lat, lon }) => {
+            c.update_location(&id, lat, lon, None).await?;
+            println!("Posizione aggiornata.");
+        }
+        Cmd::Posizione(PosizioneCmd::Ferma { id }) => {
+            c.stop_location(&id).await?;
+            println!("Condivisione finita.");
         }
         Cmd::Scarica { id } => {
             println!("Salvato in {}", c.download(&id).await?.display());

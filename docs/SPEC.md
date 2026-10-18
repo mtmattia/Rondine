@@ -141,6 +141,9 @@ per `id`. Un permesso revocato non funziona più; per bloccare un contatto basta
 - Dimensione massima di un messaggio: 256 KiB. Conservazione: 30 giorni o fino alla conferma.
 - Deposito **effimero** (`"ephemeral": true`): niente sveglia, e il nodo lo cancella dopo 30 s
   se nessuno lo ritira. Serve per "sta scrivendo" (§7.3); il nodo vede solo che è effimero.
+- Deposito **silenzioso** (`"quiet": true`): si conserva come gli altri ma senza sveglia. Serve
+  per gli aggiornamenti della posizione in tempo reale (§7.6), che arrivano spesso e non devono
+  svegliare il telefono ogni volta.
 
 ### 6.1 Contenuto depositato (busta)
 Il nodo vede solo `blob`. Dentro, dopo la decodifica b64, c'è una busta JSON:
@@ -179,6 +182,8 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "group", ... }   // §7.4
 { "v": 1, "type": "leave" }        // §7.4
 { "v": 1, "type": "file", ... }    // §7.5
+{ "v": 1, "type": "location", ... }          // §7.6
+{ "v": 1, "type": "location_update", ... }   // §7.6
 ```
 
 ### 7.2 Conferme (spunte)
@@ -270,6 +275,26 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
   messaggio `file`.
 - `name` è solo un suggerimento: chi riceve lo ripulisce (niente percorsi) prima di salvarlo.
 
+### 7.6 Posizione
+
+```json
+{ "v": 1, "type": "location", "id": "<b64 16 byte>", "ts": 1792240000,
+  "lat": 45.4642, "lon": 9.19, "acc": 12, "live_until": 1792243600 }
+{ "v": 1, "type": "location_update", "id": "<id del location>", "ts": 1792240030,
+  "lat": 45.4650, "lon": 9.1912, "acc": 8, "live_until": 1792243600 }
+```
+
+- `lat` e `lon` in gradi (WGS84), `acc` (facoltativo) è la precisione in metri.
+- Senza `live_until` è una posizione fissa. Con `live_until` è **in tempo reale** fino a quel
+  momento, al massimo 8 ore dopo `ts`: chi la manda continua a mandare `location_update` con lo
+  stesso `id`, al massimo uno ogni 15 s, come depositi silenziosi (§6). Per smettere prima manda un
+  `location_update` con `live_until` = `ts`.
+- Chi riceve un `location_update` aggiorna il messaggio `location` con quell'`id` solo se viene
+  dallo stesso contatto, se `ts` non è più vecchio dell'ultimo e se il messaggio è ancora in tempo
+  reale; `live_until` può solo diminuire.
+- Nessuna mappa viene scaricata da un servizio esterno, che vedrebbe la posizione: l'app la apre
+  nell'app di mappe del telefono (`geo:`).
+
 ## 8. Sveglia push
 
 Il proprietario registra un bersaglio:
@@ -328,7 +353,7 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `POST /v1/inboxes/{inbox}/permits/revoke` | proprietario | `{id}` |
 | `PUT /v1/inboxes/{inbox}/push` | proprietario | registra il bersaglio della sveglia |
 | `DELETE /v1/inboxes/{inbox}/push` | proprietario | rimuove il bersaglio |
-| `POST /v1/inboxes/{inbox}/messages` | permesso | `{permit, blob, ephemeral?}` → `{id}` |
+| `POST /v1/inboxes/{inbox}/messages` | permesso | `{permit, blob, ephemeral?, quiet?}` → `{id}` |
 | `GET /v1/inboxes/{inbox}/messages` | proprietario | `[{id, blob, received_at}]` |
 | `POST /v1/inboxes/{inbox}/messages/ack` | proprietario | `{ids}` |
 | `POST /v1/inboxes/{inbox}/files` | permesso (intestazione) | corpo: file cifrato → `{id}` (§6.2) |

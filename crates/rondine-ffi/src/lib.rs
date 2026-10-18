@@ -93,6 +93,18 @@ pub struct Message {
     pub status: MessageStatus,
     /// Foto o documento; `body` è la didascalia (SPEC §7.5).
     pub attachment: Option<AttachmentInfo>,
+    /// Posizione, fissa o in tempo reale (SPEC §7.6).
+    pub location: Option<LocationInfo>,
+}
+
+#[derive(uniffi::Record)]
+pub struct LocationInfo {
+    pub lat: f64,
+    pub lon: f64,
+    pub acc: Option<f32>,
+    /// In tempo reale fino a questo momento (secondi Unix).
+    pub live_until: Option<u64>,
+    pub updated_at: u64,
 }
 
 #[derive(uniffi::Record)]
@@ -128,6 +140,14 @@ impl From<Delivery> for MessageStatus {
     }
 }
 
+/// Una mia condivisione della posizione in tempo reale ancora attiva.
+#[derive(uniffi::Record)]
+pub struct LiveShare {
+    pub message_id: String,
+    pub contact_id: String,
+    pub until: u64,
+}
+
 #[derive(uniffi::Record)]
 pub struct ChatRow {
     pub contact: ContactInfo,
@@ -149,6 +169,8 @@ pub struct SyncResult {
     pub receipts: u32,
     /// Qualcuno ha iniziato o smesso di scrivere.
     pub typing_changed: bool,
+    /// Una posizione in tempo reale ricevuta si è spostata o è finita.
+    pub locations_changed: bool,
 }
 
 fn contact_info(c: &Contact) -> ContactInfo {
@@ -188,6 +210,13 @@ fn message(m: &ChatMessage) -> Message {
             thumb: a.thumb.clone(),
             width: a.width,
             height: a.height,
+        }),
+        location: m.location.as_ref().map(|l| LocationInfo {
+            lat: l.lat,
+            lon: l.lon,
+            acc: l.acc,
+            live_until: l.live_until,
+            updated_at: l.updated_at,
         }),
     }
 }
@@ -415,6 +444,61 @@ impl Rondine {
             .await
     }
 
+    /// Manda la mia posizione; con `live_for` (secondi, al massimo 8 ore) in tempo reale.
+    pub async fn send_location(
+        &self,
+        contact_id: String,
+        lat: f64,
+        lon: f64,
+        acc: Option<f32>,
+        live_for: Option<u64>,
+    ) -> Result<Message> {
+        let k = key(&contact_id)?;
+        self.run(move |c| {
+            Box::pin(async move {
+                Ok(message(
+                    &c.send_location(&k, lat, lon, acc, live_for).await?,
+                ))
+            })
+        })
+        .await
+    }
+
+    /// Nuova posizione per una condivisione in tempo reale (al massimo una ogni 15 s).
+    pub async fn update_location(
+        &self,
+        message_id: String,
+        lat: f64,
+        lon: f64,
+        acc: Option<f32>,
+    ) -> Result<()> {
+        self.run(move |c| {
+            Box::pin(async move { Ok(c.update_location(&message_id, lat, lon, acc).await?) })
+        })
+        .await
+    }
+
+    pub async fn stop_location(&self, message_id: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.stop_location(&message_id).await?) }))
+            .await
+    }
+
+    /// Le mie posizioni in tempo reale ancora attive: (id del messaggio, fino a quando).
+    pub async fn live_locations(&self) -> Vec<LiveShare> {
+        let c = self.client.lock().await;
+        let t = rondine_core::now();
+        c.state()
+            .messages
+            .iter()
+            .filter(|m| m.outgoing && m.location.as_ref().is_some_and(|l| l.is_live(t)))
+            .map(|m| LiveShare {
+                message_id: m.id.clone(),
+                contact_id: m.contact.to_b64(),
+                until: m.location.as_ref().and_then(|l| l.live_until).unwrap_or(t),
+            })
+            .collect()
+    }
+
     /// Scarica di nuovo il file di un messaggio ricevuto; restituisce il percorso.
     pub async fn download(&self, message_id: String) -> Result<String> {
         self.run(move |c| {
@@ -438,6 +522,7 @@ impl Rondine {
             rejected: Vec::new(),
             receipts: 0,
             typing_changed: false,
+            locations_changed: false,
         };
         for e in events {
             match e {
@@ -445,6 +530,7 @@ impl Rondine {
                 Event::Message(m) => out.messages.push(message(&m)),
                 Event::Rejected(why) => out.rejected.push(why),
                 Event::Typing { .. } => out.typing_changed = true,
+                Event::LocationUpdate { .. } => out.locations_changed = true,
                 Event::Receipt { ids, .. } => {
                     out.receipts = out
                         .receipts

@@ -521,6 +521,9 @@ pub struct DepositRequest {
     /// Effimero ("sta scrivendo"): niente sveglia, sparisce dopo poco se non ritirato.
     #[serde(default)]
     pub ephemeral: bool,
+    /// Silenzioso: si conserva ma senza sveglia (posizione in tempo reale, SPEC §6).
+    #[serde(default)]
+    pub quiet: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -560,7 +563,7 @@ async fn deposit(
             .then(|| now() + s.0.ephemeral_ttl.load(std::sync::atomic::Ordering::Relaxed));
         db.put_message(&id, &inbox, &blob, now(), expires_at)?;
     }
-    if !req.ephemeral {
+    if !req.ephemeral && !req.quiet {
         s.schedule_wake(&inbox)?;
     }
     Ok((StatusCode::CREATED, Json(Deposited { id })))

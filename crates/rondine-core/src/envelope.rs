@@ -72,6 +72,44 @@ pub enum AppMessage {
     },
     /// Foto o documento (SPEC §7.5).
     File(Box<FileMsg>),
+    /// Posizione, fissa o in tempo reale (SPEC §7.6).
+    Location(LocationMsg),
+    /// Nuova posizione di un `location` in tempo reale (SPEC §7.6).
+    #[serde(rename = "location_update")]
+    LocationUpdate(LocationMsg),
+}
+
+/// Posizione (SPEC §7.6): `id` è quello del messaggio `location`, anche negli aggiornamenti.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct LocationMsg {
+    pub v: u32,
+    pub id: String,
+    pub ts: u64,
+    pub lat: f64,
+    pub lon: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acc: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_until: Option<u64>,
+}
+
+/// Durata massima di una posizione in tempo reale.
+pub const MAX_LIVE_SECS: u64 = 8 * 3600;
+/// Intervallo minimo tra due aggiornamenti della posizione.
+pub const MIN_LOCATION_UPDATE_SECS: u64 = 15;
+
+impl LocationMsg {
+    /// Coordinate possibili e durata entro il limite.
+    pub fn valid(&self) -> bool {
+        self.lat.is_finite()
+            && self.lon.is_finite()
+            && (-90.0..=90.0).contains(&self.lat)
+            && (-180.0..=180.0).contains(&self.lon)
+            && self.acc.is_none_or(|a| a.is_finite() && a >= 0.0)
+            && self
+                .live_until
+                .is_none_or(|u| u <= self.ts.saturating_add(MAX_LIVE_SECS))
+    }
 }
 
 /// Il messaggio `file` (SPEC §7.5): il file cifrato sta in `at` oppure in `data`.
@@ -118,6 +156,7 @@ impl AppMessage {
             | AppMessage::Group { v, .. }
             | AppMessage::Leave { v } => *v,
             AppMessage::File(f) => f.v,
+            AppMessage::Location(l) | AppMessage::LocationUpdate(l) => l.v,
         }
     }
 }
@@ -160,6 +199,10 @@ mod tests {
         };
         assert_eq!(m.at.as_ref().map(|a| a.file.as_str()), Some("f"));
         assert!(serde_json::to_string(&f)?.starts_with(r#"{"type":"file","v":1,"#));
+        let u: AppMessage = serde_json::from_str(
+            r#"{"type":"location_update","v":1,"id":"x","ts":5,"lat":45.5,"lon":9.2,"live_until":60}"#,
+        )?;
+        assert!(matches!(u, AppMessage::LocationUpdate(ref l) if l.valid() && l.lat == 45.5));
         Ok(())
     }
 }

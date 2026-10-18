@@ -32,7 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.PhotoCamera as OutlinedPhotoCamera
@@ -161,6 +161,9 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
     var voicePaused by remember { mutableStateOf(false) }
     var voiceLevels by remember { mutableStateOf(listOf<Float>()) }
     var cameraFile by remember { mutableStateOf<java.io.File?>(null) }
+    var locationOpen by remember { mutableStateOf(false) }
+    var here by remember { mutableStateOf<android.location.Location?>(null) }
+    var hereError by remember { mutableStateOf<String?>(null) }
     val chats by Repo.chats.collectAsState()
     val typing = chats.any { it.contact.id == contactId && it.typing }
     val onLan = chats.any { it.contact.id == contactId && it.onLan }
@@ -223,10 +226,43 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
     }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         scope.launch {
-            snackbar.showSnackbar(if (ok) "Tieni premuto il microfono per registrare" else "Serve il permesso del microfono")
+            snackbar.showSnackbar(if (ok) "Tocca il microfono per registrare" else "Serve il permesso del microfono")
         }
     }
     fun granted(p: String) = ContextCompat.checkSelfPermission(context, p) == PackageManager.PERMISSION_GRANTED
+
+    fun openLocation() {
+        keyboard?.hide()
+        emojiOpen = false
+        attachMenu = false
+        locationOpen = true
+        here = null
+        hereError = null
+        scope.launch {
+            here = currentLocation(context)
+            if (here == null) hereError = "Posizione non disponibile: controlla che la localizzazione sia attiva"
+        }
+    }
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        if (res.values.any { it }) openLocation()
+        else scope.launch { snackbar.showSnackbar("Serve il permesso della posizione") }
+    }
+    fun sendLocation(liveFor: Long?) {
+        val l = here ?: return
+        locationOpen = false
+        scope.launch {
+            try {
+                Repo.client().sendLocation(
+                    contactId, l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy else null,
+                    liveFor?.toULong(),
+                )
+                if (liveFor != null) io.github.mtmattia.rondine.location.LiveLocationService.start(context)
+                Repo.refresh()
+            } catch (e: RondineException) {
+                snackbar.showSnackbar("Posizione non inviata: ${e.userMessage}")
+            }
+        }
+    }
 
     fun startRecording() {
         if (!granted(Manifest.permission.RECORD_AUDIO)) {
@@ -236,7 +272,11 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
         try {
             recorder.start()
             recordingMs = 0L
-            voiceLocked = false
+            voiceLocked = true
+            emojiOpen = false
+            attachMenu = false
+            locationOpen = false
+            keyboard?.hide()
             voicePaused = false
             voiceLevels = emptyList()
             Repo.typing(contactId, false)
@@ -260,7 +300,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
         recordingMs = null
         val f = recorder.stop(keep = !cancel)
         if (f == null) {
-            if (short && !cancel) scope.launch { snackbar.showSnackbar("Tieni premuto per registrare un vocale") }
+            if (short && !cancel) scope.launch { snackbar.showSnackbar("Vocale troppo corto") }
             return
         }
         scope.launch {
@@ -277,9 +317,10 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
         }
     }
     DisposableEffect(Unit) { onDispose { recorder.stop(false) } }
-    BackHandler(enabled = emojiOpen || attachMenu) {
+    BackHandler(enabled = emojiOpen || attachMenu || locationOpen) {
         emojiOpen = false
         attachMenu = false
+        locationOpen = false
     }
 
     fun download(m: Message) {
@@ -432,8 +473,15 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                 // mando io, o quando arriva qualcosa mentre sono già in fondo.
                 val listState = rememberLazyListState()
                 val last = messages.lastOrNull()
+                // Alla prima apertura si parte dal fondo: prima dei messaggi la lista ha solo
+                // l'avviso sulla cifratura, e resterebbe agganciata a quello (in cima).
+                var atBottomOnce by remember { mutableStateOf(false) }
                 LaunchedEffect(last?.id) {
-                    if (last != null && (last.outgoing || listState.firstVisibleItemIndex <= 1)) {
+                    if (last == null) return@LaunchedEffect
+                    if (!atBottomOnce) {
+                        listState.scrollToItem(0)
+                        atBottomOnce = true
+                    } else if (last.outgoing || listState.firstVisibleItemIndex <= 1) {
                         listState.animateScrollToItem(0)
                     }
                 }
@@ -459,6 +507,20 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                                     openAttachment(context, a)?.let { scope.launch { snackbar.showSnackbar(it) } }
                                 },
                                 onDownload = { download(item.m) },
+                                onOpenLocation = { l ->
+                                    openInMaps(context, l.lat, l.lon, c?.name ?: "Posizione")
+                                        ?.let { scope.launch { snackbar.showSnackbar(it) } }
+                                },
+                                onStopLocation = {
+                                    scope.launch {
+                                        try {
+                                            Repo.client().stopLocation(item.m.id)
+                                            Repo.refresh()
+                                        } catch (e: RondineException) {
+                                            snackbar.showSnackbar(e.userMessage)
+                                        }
+                                    }
+                                },
                             )
                             is ChatItem.Day -> CenterChip(item.label)
                             ChatItem.Notice -> EncryptionNotice()
@@ -495,19 +557,15 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                     onFieldTap = {
                         emojiOpen = false
                         attachMenu = false
+                        locationOpen = false
                     },
                     onCamera = {
                         if (granted(Manifest.permission.CAMERA)) openCamera()
                         else cameraPermission.launch(Manifest.permission.CAMERA)
                     },
-                    recordingMs = recordingMs,
-                    onRecordStart = { startRecording() },
-                    onRecordEnd = { cancel, tap ->
-                        // Tocco breve: si continua a registrare a mani libere, come su WhatsApp.
-                        if (tap && !cancel && recordingMs != null) voiceLocked = true
-                        else stopRecording(cancel)
-                    },
+                    onMic = { startRecording() },
                     onAttach = {
+                        locationOpen = false
                         if (attachMenu) {
                             attachMenu = false
                         } else {
@@ -549,6 +607,12 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                         },
                         onSend = { stopRecording(cancel = false) },
                     )
+                    locationOpen -> LocationPanel(
+                        location = here,
+                        error = hereError,
+                        onSendCurrent = { sendLocation(null) },
+                        onShareLive = { sendLocation(it) },
+                    )
                     emojiOpen -> EmojiPanel { e ->
                         text += e
                         Repo.typing(contactId, true)
@@ -568,9 +632,17 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                                 attachMenu = false
                                 docPicker.launch(arrayOf("*/*"))
                             },
-                            AttachAction("Audio", Icons.Filled.Headphones, Color(0xFFF07B2B)) {
+                            AttachAction("Posizione", Icons.Filled.LocationOn, Color(0xFF2FB77C)) {
                                 attachMenu = false
-                                docPicker.launch(arrayOf("audio/*"))
+                                if (granted(Manifest.permission.ACCESS_FINE_LOCATION) ||
+                                    granted(Manifest.permission.ACCESS_COARSE_LOCATION)
+                                ) {
+                                    openLocation()
+                                } else {
+                                    locationPermission.launch(
+                                        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                                    )
+                                }
                             },
                         ),
                     )
@@ -641,6 +713,8 @@ private fun Bubble(
     downloading: Boolean,
     onOpen: (uniffi.rondine_ffi.AttachmentInfo) -> Unit,
     onDownload: () -> Unit,
+    onOpenLocation: (uniffi.rondine_ffi.LocationInfo) -> Unit,
+    onStopLocation: () -> Unit,
 ) {
     val colors = LocalChatColors.current
     val big = 12.dp
@@ -661,13 +735,17 @@ private fun Bubble(
             modifier = Modifier.widthIn(max = 320.dp),
         ) {
             val a = m.attachment
-            val pad = if (a != null) 4.dp else 0.dp
+            val loc = m.location
+            val pad = if (a != null || loc != null) 4.dp else 0.dp
             Column(Modifier.padding(start = 10.dp - pad * 1.5f, end = 8.dp - pad, top = 6.dp - pad, bottom = 4.dp)) {
+                if (loc != null) {
+                    LocationView(m, loc, onOpen = { onOpenLocation(loc) }, onStop = if (m.outgoing) onStopLocation else null)
+                }
                 if (a != null) {
                     AttachmentView(a, downloading, onOpen = { onOpen(a) }, onDownload = onDownload)
                     if (m.body.isNotBlank()) Spacer(Modifier.size(4.dp))
                 }
-                if (m.body.isNotBlank() || a == null) {
+                if (m.body.isNotBlank() || (a == null && loc == null)) {
                     Text(
                         m.body, color = colors.bubbleText, fontSize = 16.sp,
                         modifier = Modifier.padding(start = pad * 1.5f, end = pad),
@@ -685,11 +763,8 @@ private fun Bubble(
     }
 }
 
-/** Una pressione più breve di così sul microfono è un tocco: registrazione a mani libere. */
-private const val TAP_MS = 400L
-
 /** Barra di scrittura come su WhatsApp: emoji, testo, 📎 e fotocamera nel campo; a destra il
- *  microfono (tieni premuto per un vocale, scorri a sinistra per annullare) o "Invia". */
+ *  microfono (un tocco apre la registrazione) o "Invia". */
 @Composable
 private fun InputBar(
     text: String,
@@ -700,18 +775,10 @@ private fun InputBar(
     onFieldTap: () -> Unit,
     onAttach: () -> Unit,
     onCamera: () -> Unit,
-    recordingMs: Long?,
-    onRecordStart: () -> Unit,
-    /** `tap`: il dito si è alzato subito, senza trascinare. */
-    onRecordEnd: (cancel: Boolean, tap: Boolean) -> Unit,
+    onMic: () -> Unit,
     onSend: () -> Unit,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val cancelPx = with(density) { 110.dp.toPx() }
-    var slide by remember { mutableStateOf(0f) }
-    val start by androidx.compose.runtime.rememberUpdatedState(onRecordStart)
-    val end by androidx.compose.runtime.rememberUpdatedState(onRecordEnd)
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.Bottom,
@@ -722,20 +789,7 @@ private fun InputBar(
             color = MaterialTheme.colorScheme.surface,
             shadowElevation = 1.dp,
         ) {
-            if (recordingMs != null) {
-                val cancelling = slide < -cancelPx
-                Row(Modifier.height(56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Mic, null, tint = Color(0xFFE53935))
-                    Spacer(Modifier.width(8.dp))
-                    Text(formatDuration(recordingMs), fontSize = 16.sp)
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        if (cancelling) "Rilascia per annullare" else "‹ Scorri per annullare",
-                        color = if (cancelling) MaterialTheme.colorScheme.error else muted,
-                        fontSize = 14.sp,
-                    )
-                }
-            } else {
+            run {
                 Row(verticalAlignment = Alignment.Bottom) {
                     IconButton(onClick = onEmoji, modifier = Modifier.padding(bottom = 4.dp)) {
                         if (emojiOpen) Icon(Icons.Filled.Keyboard, "Tastiera", tint = muted)
@@ -779,35 +833,12 @@ private fun InputBar(
                 colors = buttonColors,
             ) { Icon(Icons.AutoMirrored.Filled.Send, "Invia") }
         } else {
-            // Tieni premuto: si registra finché non lasci; trascinando a sinistra si annulla.
-            Box(
-                Modifier
-                    .size(if (recordingMs != null) 64.dp else 56.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .semantics { contentDescription = "Registra un vocale" }
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-                            down.consume()
-                            slide = 0f
-                            start()
-                            var upAt = down.uptimeMillis
-                            while (true) {
-                                val ev = awaitPointerEvent()
-                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                slide = ch.position.x - down.position.x
-                                upAt = ch.uptimeMillis
-                                if (!ch.pressed) break
-                                ch.consume()
-                            }
-                            val tap = upAt - down.uptimeMillis < TAP_MS && slide > -cancelPx / 4
-                            end(slide < -cancelPx, tap)
-                            slide = 0f
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Mic, null, tint = MaterialTheme.colorScheme.onPrimary) }
+            FilledIconButton(
+                onClick = onMic,
+                modifier = Modifier.size(56.dp),
+                shape = CircleShape,
+                colors = buttonColors,
+            ) { Icon(Icons.Filled.Mic, "Registra un vocale") }
         }
     }
 }

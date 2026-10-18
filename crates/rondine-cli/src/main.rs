@@ -645,8 +645,11 @@ async fn main() -> anyhow::Result<()> {
             println!("Inviata: {}", text(&m));
         }
         Cmd::Posizione(PosizioneCmd::Aggiorna { id, lat, lon }) => {
-            c.update_location(&id, lat, lon, None).await?;
-            println!("Posizione aggiornata.");
+            if c.update_location(&id, lat, lon, None).await? {
+                println!("Posizione aggiornata.");
+            } else {
+                println!("Troppo presto: al massimo un aggiornamento ogni 15 secondi.");
+            }
         }
         Cmd::Posizione(PosizioneCmd::Ferma { id }) => {
             c.stop_location(&id).await?;

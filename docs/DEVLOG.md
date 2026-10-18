@@ -107,3 +107,9 @@ Una riga per modifica: data, cosa è cambiato.
   mandarlo, scorri a sinistra per annullare, oppure tocco singolo per registrare a mani libere con
   pausa, cestino e invio. Nella chat i vocali si ascoltano con avanzamento. Provato
   sull'emulatore.
+- 2026-10-18 — Posizione fissa e in tempo reale (SPEC §7.6) con depositi silenziosi senza sveglia
+  (§6): client, CLI (`rondine posizione manda/aggiorna/ferma`) e app (tessera Posizione, 15 min /
+  1 ora / 8 ore, servizio in primo piano con notifica e "Interrompi", bolla con mappa disegnata
+  che apre l'app di mappe). App: microfono a tocco (pannello con pausa) al posto di "tieni
+  premuto", lettore QR sempre in verticale, la chat si apre in fondo anche con molti messaggi.
+  2 test di accettazione; provato sull'emulatore nei due sensi, anche con l'app in background.

@@ -161,7 +161,7 @@ object Repo {
             val res = r.sync()
             // Anche finché qualcuno "sta scrivendo": lo stato scade da solo e va ridisegnato.
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty() || res.receipts > 0u ||
-                res.typingChanged || chats.value.any { it.typing }
+                res.typingChanged || res.locationsChanged || chats.value.any { it.typing }
             ) {
                 refresh()
             }

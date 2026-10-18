@@ -83,6 +83,7 @@ val AttachmentInfo.isImage get() = mime.startsWith("image/")
 /** Testo breve per la lista chat e le notifiche. */
 val Message.preview: String
     get() {
+        location?.let { return it.previewText }
         val a = attachment ?: return body
         val what = when {
             a.isVoice -> "🎤 Messaggio vocale"

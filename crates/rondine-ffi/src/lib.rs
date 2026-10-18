@@ -464,14 +464,15 @@ impl Rondine {
         .await
     }
 
-    /// Nuova posizione per una condivisione in tempo reale (al massimo una ogni 15 s).
+    /// Nuova posizione per una condivisione in tempo reale (al massimo una ogni 15 s);
+    /// `false` se era troppo presto e non è partita.
     pub async fn update_location(
         &self,
         message_id: String,
         lat: f64,
         lon: f64,
         acc: Option<f32>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.run(move |c| {
             Box::pin(async move { Ok(c.update_location(&message_id, lat, lon, acc).await?) })
         })

@@ -1676,27 +1676,28 @@ impl Client {
     }
 
     /// Nuova posizione per una condivisione in tempo reale ancora attiva. Parte al massimo ogni
-    /// 15 s (le chiamate più fitte si ignorano) e non sveglia il telefono del contatto.
+    /// 15 s e non sveglia il telefono del contatto. `false`: troppo presto, non è partita (la
+    /// prossima porterà quella nuova).
     pub async fn update_location(
         &mut self,
         message_id: &str,
         lat: f64,
         lon: f64,
         acc: Option<f32>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.push_location(message_id, Some((lat, lon, acc))).await
     }
 
     /// Smette di condividere la posizione in tempo reale.
     pub async fn stop_location(&mut self, message_id: &str) -> Result<()> {
-        self.push_location(message_id, None).await
+        self.push_location(message_id, None).await.map(|_| ())
     }
 
     async fn push_location(
         &mut self,
         message_id: &str,
         update: Option<(f64, f64, Option<f32>)>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let t = now();
         let m = self
             .state
@@ -1712,7 +1713,7 @@ impl Client {
         let to = m.contact;
         // Troppo presto dopo l'ultimo aggiornamento: si salta, il prossimo porterà quella nuova.
         if update.is_some() && t < loc.updated_at + self.location_gap {
-            return Ok(());
+            return Ok(false);
         }
         let (lat, lon, acc) = update.unwrap_or((loc.lat, loc.lon, loc.acc));
         let live_until = if update.is_some() {
@@ -1757,7 +1758,7 @@ impl Client {
             None,
         )
         .await?;
-        Ok(())
+        Ok(true)
     }
 
     /// Una posizione ricevuta in una chat 1:1.

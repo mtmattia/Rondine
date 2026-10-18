@@ -150,7 +150,8 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
                             .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                             .setPrompt("Inquadra il codice QR di Rondine")
                             .setBeepEnabled(false)
-                            .setOrientationLocked(false),
+                            .setOrientationLocked(true)
+                            .setCaptureActivity(io.github.mtmattia.rondine.QrCaptureActivity::class.java),
                     )
                 }
             }

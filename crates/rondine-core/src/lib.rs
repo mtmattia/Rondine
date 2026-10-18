@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod envelope;
 pub mod error;
 pub mod identity;
+pub mod lan;
 pub mod permit;
 pub mod phone;
 pub mod safety;

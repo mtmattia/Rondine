@@ -56,3 +56,9 @@ Una riga per modifica: data, cosa è cambiato.
   nodo (niente sveglia, scade dopo 30 s; colonna `expires_at` con migrazione automatica). Il
   client limita a uno ogni 4 s e lo mostra per 6 s; test anche del buco MLS lasciato da un
   `typing` scaduto. App: in verde nell'intestazione della chat e nella lista. CLI `rondine scrive`.
+- 2026-10-18 — Rete locale e nodo facoltativo (SPEC §12): biglietto con nodo, casella e permesso
+  facoltativi; scoperta mDNS (`mdns-sd`) con `lan_id` giornaliero; consegna diretta HTTP
+  (`/lan/v1/deliver`, `/lan/v1/keypackage`); coda "in attesa" sul telefono finché il contatto
+  ricompare; con il nodo spento la rete locale va avanti. Client: `create_local`, `start_lan`.
+  CLI: `crea` senza `--nodo`, `rondine rete`. App: "Senza nodo" al benvenuto, MulticastLock,
+  "nella tua rete", spunta 🕓. Provato: test, mDNS tra due CLI, emulatore ↔ CLI senza nodo.

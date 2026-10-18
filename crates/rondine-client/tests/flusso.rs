@@ -545,3 +545,163 @@ async fn sta_scrivendo_effimero_e_senza_sveglia() -> R {
     );
     Ok(())
 }
+
+/// Due profili senza nodo che si vedono in rete locale. L'indirizzo qui si dà a mano: sul
+/// telefono lo trova mDNS (SPEC §12.1).
+async fn local_pair(
+    tmp: &TempDir,
+) -> Result<(Client, Client, std::net::SocketAddr, std::net::SocketAddr), Box<dyn std::error::Error>>
+{
+    let mut anna = Client::create_local(&tmp.path().join("Anna"), "Anna")?;
+    let mut bruno = Client::create_local(&tmp.path().join("Bruno"), "Bruno")?;
+    let a = anna.start_lan("127.0.0.1:0".parse()?, false).await?;
+    let b = bruno.start_lan("127.0.0.1:0".parse()?, false).await?;
+    anna.add_lan_peer(bruno.identity(), b);
+    bruno.add_lan_peer(anna.identity(), a);
+    Ok((anna, bruno, a, b))
+}
+
+#[tokio::test]
+async fn rete_locale_senza_nodo() -> R {
+    let tmp = TempDir::new()?;
+    let (mut anna, mut bruno, _, _) = local_pair(&tmp).await?;
+
+    // Bruno inquadra il QR di Anna: il link d'invito, senza nodo dentro.
+    let link = anna.share_link()?;
+    assert!(link.starts_with("rondine:invito/"), "{link}");
+    bruno.add(&link).await?;
+    let ev = anna.sync().await?;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::NewContact { name, .. } if name == "Bruno"))
+    );
+
+    // Messaggi diretti nei due versi, con le spunte.
+    let m = bruno.send_text(&anna.identity(), "ciao senza nodo").await?;
+    assert_eq!(m.status, Delivery::Sent);
+    assert_eq!(texts(&anna.sync().await?), ["ciao senza nodo"]);
+    anna.send_text(&bruno.identity(), "ricevuto").await?;
+    assert_eq!(texts(&bruno.sync().await?), ["ricevuto"]);
+    let stato = bruno
+        .messages_with(&anna.identity())
+        .iter()
+        .find(|x| x.id == m.id)
+        .map(|x| x.status);
+    assert_eq!(stato, Some(Delivery::Delivered));
+
+    // I servizi del nodo non ci sono: errore chiaro, niente panic.
+    let err = anna
+        .claim_username("anna")
+        .await
+        .err()
+        .ok_or("doveva fallire")?;
+    assert!(err.to_string().contains("nodo"), "{err}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn coda_finche_il_contatto_ricompare() -> R {
+    let tmp = TempDir::new()?;
+    let (mut anna, mut bruno, _, b) = local_pair(&tmp).await?;
+    bruno.add(&anna.share_link()?).await?;
+    anna.sync().await?;
+
+    // Bruno esce dalla rete: il messaggio di Anna resta in attesa sul telefono.
+    anna.forget_lan_peer(&bruno.identity());
+    let m = anna.send_text(&bruno.identity(), "quando torni").await?;
+    assert_eq!(m.status, Delivery::Pending);
+    anna.sync().await?;
+    assert!(texts(&bruno.sync().await?).is_empty());
+
+    // Anche dopo aver riaperto il profilo da disco, la coda c'è ancora.
+    drop(anna);
+    let mut anna = Client::open(&tmp.path().join("Anna"))?;
+    anna.start_lan("127.0.0.1:0".parse()?, false).await?;
+    // Bruno ricompare: alla prossima sincronizzazione il messaggio parte.
+    anna.add_lan_peer(bruno.identity(), b);
+    anna.sync().await?;
+    let stato = anna
+        .messages_with(&bruno.identity())
+        .iter()
+        .find(|x| x.id == m.id)
+        .map(|x| x.status);
+    assert_eq!(stato, Some(Delivery::Sent));
+    assert_eq!(texts(&bruno.sync().await?), ["quando torni"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn in_rete_locale_anche_chi_ha_il_nodo() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+
+    // In rete locale il messaggio va diretto, anche se entrambi hanno un nodo.
+    let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mattia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mattia.add_lan_peer(silvia.identity(), s);
+    mattia.send_text(&silvia.identity(), "diretto").await?;
+    assert_eq!(silvia.lan_queue_len(), 1, "doveva arrivare in rete locale");
+    assert_eq!(texts(&silvia.sync().await?), ["diretto"]);
+    Ok(())
+}
+
+/// Scoperta vera con mDNS: usa la rete multicast del computer, quindi non gira di default
+/// (`cargo test -- --ignored scoperta`).
+#[tokio::test]
+#[ignore = "usa la rete multicast vera del computer"]
+async fn scoperta_mdns_in_rete_locale() -> R {
+    let tmp = TempDir::new()?;
+    let mut anna = Client::create_local(&tmp.path().join("Anna"), "Anna")?;
+    let mut bruno = Client::create_local(&tmp.path().join("Bruno"), "Bruno")?;
+    anna.start_lan("0.0.0.0:0".parse()?, true).await?;
+    bruno.start_lan("0.0.0.0:0".parse()?, true).await?;
+    for _ in 0..100 {
+        if anna.on_lan(&bruno.identity()) && bruno.on_lan(&anna.identity()) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(anna.on_lan(&bruno.identity()), "Anna non trova Bruno");
+    bruno.add(&anna.share_link()?).await?;
+    anna.sync().await?;
+    bruno
+        .send_text(&anna.identity(), "trovata con mDNS")
+        .await?;
+    assert_eq!(texts(&anna.sync().await?), ["trovata con mDNS"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn nodo_spento_la_rete_locale_va_lo_stesso() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mattia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mattia.add_lan_peer(silvia.identity(), s);
+
+    // Il nodo di Silvia non risponde più (senza internet): quello che arriva in rete locale
+    // deve passare lo stesso.
+    let silvia_dir = tmp.path().join("Silvia");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(silvia_dir.join("stato.json"))?)?;
+    state["node"] = "http://127.0.0.1:9".into();
+    std::fs::write(silvia_dir.join("stato.json"), serde_json::to_vec(&state)?)?;
+    let mut silvia2 = Client::open(&silvia_dir)?;
+    let s2 = silvia2.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mattia.add_lan_peer(silvia2.identity(), s2);
+    drop(silvia);
+
+    mattia
+        .send_text(&silvia2.identity(), "anche senza internet")
+        .await?;
+    assert_eq!(texts(&silvia2.sync().await?), ["anche senza internet"]);
+    Ok(())
+}

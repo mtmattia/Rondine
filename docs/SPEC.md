@@ -92,6 +92,9 @@ Dice chi sei e come consegnarti messaggi. `Signed<Card>`, firmato dall'identità
 
 `username` è facoltativo. `permit` è il permesso di consegna per chi riceve questo biglietto.
 
+`node`, `inbox` e `permit` ci sono tutti e tre o mancano tutti e tre. Mancano nel biglietto di un
+profilo **senza nodo**, raggiungibile solo in rete locale (§12).
+
 ### 4.1 Link d'invito
 `rondine:invito/<b64 del JSON di Signed<Card>>`
 
@@ -268,3 +271,36 @@ Pagine per i link condivisi (HTML, fuori da `/v1`, nessun dato salvato):
 |---|---|
 | `GET /@{nome}` | pagina con "Apri in Rondine" → `rondine:@nome@nodo`; 404 se il nome non è valido |
 | `GET /invito` | pagina fissa: uno script legge il frammento `#…` e apre `rondine:invito/…` |
+
+## 12. Rete locale (P2P, nodo facoltativo)
+
+Due telefoni sulla stessa rete si scambiano i messaggi direttamente, senza nodo e senza internet.
+Un profilo può anche non avere un nodo: allora funziona solo in rete locale.
+
+### 12.1 Scoperta (mDNS)
+Ogni dispositivo annuncia il servizio `_rondine._tcp.local.` con nome d'istanza `r-<lan_id>` e la
+porta su cui ascolta. `lan_id` = b64 dei primi 16 byte di
+`blake3("rondine/v1/lan" || chiave_pubblica || giorno)`, con `giorno` = giorni UNIX (u64 big
+endian). Cambia ogni giorno e lo sa calcolare solo chi conosce già la chiave: chi è sulla rete
+vede che c'è un utente Rondine, non chi è. Si cercano gli id di oggi e di ieri.
+
+### 12.2 Consegna diretta
+HTTP in chiaro sulla rete locale: il contenuto è già cifrato da MLS, come nel nodo.
+
+| Metodo e percorso | Cosa fa |
+|---|---|
+| `POST /lan/v1/deliver` | `{blob}`: una busta (§6.1), come quelle depositate nel nodo → 202 |
+| `GET /lan/v1/keypackage` | `{keypackage}`: per avviare una chat (§7.1); l'ultimo resta e si riusa |
+
+Chi riceve tratta il `blob` esattamente come uno ritirato dalla casella: un mittente sconosciuto
+o bloccato viene scartato dopo la decifratura. Limiti: 256 KiB per busta, coda di 1000.
+
+### 12.3 Ordine di consegna
+1. Se il contatto è in rete locale, consegna diretta.
+2. Altrimenti, se il suo biglietto ha un nodo, deposito nella casella.
+3. Altrimenti il messaggio resta in coda sul telefono (spunta "in attesa") e parte appena il
+   contatto ricompare in rete locale. I depositi effimeri (§7.3) non si mettono in coda.
+
+Un profilo senza nodo non ha nome utente, sveglia push né ricerca in rubrica: sono servizi del
+nodo. Si aggiunge di persona con il link d'invito o il QR (`rondine:invito/…`).
+

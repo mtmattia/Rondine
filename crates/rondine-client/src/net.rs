@@ -10,7 +10,7 @@ use crate::{Error, Result};
 
 /// rustls con la crittografia di ring e i certificati di cui si fida il sistema operativo
 /// (su Android l'archivio di sistema, inizializzato dall'app con `rondine-ffi`).
-fn tls_config() -> Result<rustls::ClientConfig> {
+pub(crate) fn tls_config() -> Result<rustls::ClientConfig> {
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
     Ok(rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()?

@@ -215,6 +215,8 @@ private fun ChatList(
     modifier: Modifier,
 ) {
     val push by Repo.pushState.collectAsState()
+    // Senza nodo non c'è sveglia push: l'avviso non avrebbe senso.
+    val hasNode = Repo.profile.collectAsState().value?.hasNode != false
     var pushHidden by remember { mutableStateOf(Repo.pushBannerHidden()) }
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(Filter.Tutte) }
@@ -231,7 +233,7 @@ private fun ChatList(
     }
 
     LazyColumn(modifier.fillMaxSize()) {
-        if (!pushHidden && push in setOf(PushState.NoDistributor, PushState.NotChosen, PushState.Failed)) {
+        if (hasNode && !pushHidden && push in setOf(PushState.NoDistributor, PushState.NotChosen, PushState.Failed)) {
             item {
                 PushBanner(push, onPickPush) {
                     Repo.hidePushBanner()

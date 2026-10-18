@@ -113,6 +113,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val chats by Repo.chats.collectAsState()
     val typing = chats.any { it.contact.id == contactId && it.typing }
+    val onLan = chats.any { it.contact.id == contactId && it.onLan }
 
     DisposableEffect(contactId) {
         Repo.openChat = contactId
@@ -179,6 +180,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                                     c == null -> ""
                                     typing -> "sta scrivendo…"
                                     c.blocked -> "Bloccato"
+                                    onLan -> "nella tua rete"
                                     c.username != null -> "@${c.username}"
                                     !c.verified -> "Tocca per verificare"
                                     else -> c.shortId

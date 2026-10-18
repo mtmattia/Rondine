@@ -43,4 +43,5 @@
 | Scoperta a coppie con Argon2id | i numeri sono pochi: un hash del singolo numero si censisce in poche ore |
 | UnifiedPush prima di APNs | Android è la piattaforma principale ed è tutto open source |
 | JSON + base64url in rete | facile da leggere e da provare a mano; il volume è piccolo |
+| Rete locale con mDNS + HTTP in chiaro | il contenuto è già cifrato da MLS; l'id annunciato cambia ogni giorno e lo riconosce solo chi conosce la chiave. Niente libp2p per ora: in casa basta, e via internet serve comunque un punto d'incontro |
 | TLS: rustls + ring + certificati del sistema (`rustls-platform-verifier`) | niente elenco di CA dentro il binario (`webpki-roots` è CDLA, fuori dalle licenze ammesse) né `aws-lc` (licenza OpenSSL); su Android vale l'archivio del telefono. Il pezzo Kotlin della libreria è copiato in `android/` e compilato dal sorgente |

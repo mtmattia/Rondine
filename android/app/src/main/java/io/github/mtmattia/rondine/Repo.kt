@@ -2,6 +2,7 @@ package io.github.mtmattia.rondine
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.net.wifi.WifiManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import java.io.File
@@ -17,6 +18,7 @@ import uniffi.rondine_ffi.ChatRow
 import uniffi.rondine_ffi.Profile
 import uniffi.rondine_ffi.Rondine
 import uniffi.rondine_ffi.RondineException
+import uniffi.rondine_ffi.createLocalProfile
 import uniffi.rondine_ffi.createProfile
 import uniffi.rondine_ffi.openProfile
 
@@ -76,7 +78,10 @@ object Repo {
             try {
                 rondine = openProfile(profileDir)
                 ready.value = rondine != null
-                if (rondine != null) refresh()
+                if (rondine != null) {
+                    startLan()
+                    refresh()
+                }
             } catch (e: RondineException) {
                 ready.value = false
             } finally {
@@ -92,8 +97,47 @@ object Repo {
         if (!phone.isNullOrBlank()) r.setPhone(phone)
         rondine = r
         loaded.complete(Unit)
+        startLan()
         refresh()
         ready.value = true
+    }
+
+    /** Profilo senza nodo: solo rete locale (SPEC §12). */
+    suspend fun createLocal(name: String) {
+        val r = createLocalProfile(profileDir, name)
+        rondine = r
+        loaded.complete(Unit)
+        startLan()
+        refresh()
+        ready.value = true
+    }
+
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    /** Consegna diretta e scoperta mDNS in rete locale, finché il processo è vivo. Android
+     *  scarta i pacchetti multicast se nessuna app tiene il MulticastLock. */
+    private suspend fun startLan() {
+        val r = rondine ?: return
+        try {
+            val wifi = app.getSystemService(WifiManager::class.java)
+            multicastLock = wifi?.createMulticastLock("rondine-mdns")?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+            r.startLan(true)
+            // Prove sull'emulatore, dove mDNS non arriva: vicini dati a mano in files/vicini.txt,
+            // una riga `<chiave>=<ip:porta>`.
+            if (isDebug) {
+                File(app.filesDir, "vicini.txt").takeIf { it.exists() }?.readLines()?.forEach { line ->
+                    val (k, a) = line.split('=', limit = 2).takeIf { it.size == 2 } ?: return@forEach
+                    try { r.addLanPeer(k.trim(), a.trim()) } catch (_: RondineException) {}
+                }
+            }
+        } catch (e: RondineException) {
+            notice.value = "Rete locale non disponibile: ${e.userMessage}"
+        } catch (e: SecurityException) {
+            notice.value = "Rete locale non disponibile: ${e.message}"
+        }
     }
 
     suspend fun refresh() {
@@ -134,6 +178,7 @@ object Repo {
 
     fun onPushEndpoint(url: String) {
         scope.launch {
+            if (profile.value?.hasNode == false) return@launch
             try {
                 client().setPushEndpoint(url)
                 setPush(PushState.Active, "Attive")

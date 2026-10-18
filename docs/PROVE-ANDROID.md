@@ -58,3 +58,16 @@ tailscale serve --bg --https=443 http://127.0.0.1:8340
 
 Con `rondine.nodo=https://<macchina>.<tailnet>.ts.net` in `~/.gradle/gradle.properties` l'APK
 propone quel nodo al primo avvio sui telefoni veri (sull'emulatore resta `127.0.0.1:8330`).
+
+## Rete locale (P2P, SPEC §12)
+
+Sul computer mDNS funziona tra processi: `cargo test -p rondine-client -- --ignored scoperta`, o
+due `rondine -p <dir> rete` con profili creati senza `--nodo`.
+
+L'emulatore non riceve il multicast del computer: i vicini si danno a mano.
+1. L'app ascolta su una porta casuale: `cat /proc/<pid>/net/tcp` (riga `0A` su `00000000:`),
+   poi `adb forward tcp:47100 tcp:<porta>`.
+2. Nell'app (build di prova) il file `files/vicini.txt` con righe `<chiave>=<ip:porta>` aggiunge
+   vicini all'avvio: `adb shell "run-as io.github.mtmattia.rondine.debug sh -c 'echo <chiave>=10.0.2.2:47000 > files/vicini.txt'"`.
+3. Dalla CLI: `rondine -p <dir> rete --porta 47000 --vicino <chiave app>=127.0.0.1:47100`, poi da
+   tastiera `aggiungi <link>` e `scrivi <contatto> <testo>`.

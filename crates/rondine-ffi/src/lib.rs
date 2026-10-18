@@ -63,6 +63,8 @@ pub struct Profile {
     pub invite_link: String,
     /// Da mettere nel QR: link corto col nome utente se c'è, altrimenti il link d'invito.
     pub share_link: String,
+    /// Senza nodo il profilo funziona solo in rete locale.
+    pub has_node: bool,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -93,6 +95,8 @@ pub struct Message {
 
 #[derive(uniffi::Enum, Clone, Copy, PartialEq, Eq)]
 pub enum MessageStatus {
+    /// In coda sul telefono finché il contatto non è in rete locale.
+    Pending,
     Sent,
     Delivered,
     Read,
@@ -101,6 +105,7 @@ pub enum MessageStatus {
 impl From<Delivery> for MessageStatus {
     fn from(d: Delivery) -> Self {
         match d {
+            Delivery::Pending => MessageStatus::Pending,
             Delivery::Sent => MessageStatus::Sent,
             Delivery::Delivered => MessageStatus::Delivered,
             Delivery::Read => MessageStatus::Read,
@@ -116,6 +121,8 @@ pub struct ChatRow {
     pub unread: u32,
     /// Il contatto sta scrivendo adesso.
     pub typing: bool,
+    /// Il contatto è raggiungibile in rete locale adesso.
+    pub on_lan: bool,
 }
 
 #[derive(uniffi::Record)]
@@ -184,6 +191,15 @@ pub async fn create_profile(dir: String, name: String, node: String) -> Result<A
     Ok(Rondine::new(client))
 }
 
+/// Crea un profilo senza nodo: funziona solo in rete locale (SPEC §12).
+#[uniffi::export]
+pub fn create_local_profile(dir: String, name: String) -> Result<Arc<Rondine>> {
+    Ok(Rondine::new(Client::create_local(
+        &PathBuf::from(dir),
+        &name,
+    )?))
+}
+
 /// Numero in formato E.164 (prefisso predefinito +39).
 #[uniffi::export]
 pub fn normalize_phone(input: String) -> Result<String> {
@@ -249,6 +265,7 @@ impl Rondine {
             phone: s.phone.clone(),
             invite_link: c.invite_link()?,
             share_link: c.share_link()?,
+            has_node: c.has_node(),
         })
     }
 
@@ -262,6 +279,7 @@ impl Rondine {
                 last_ts: r.last_ts,
                 unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
                 typing: c.is_typing(&r.contact.identity),
+                on_lan: c.on_lan(&r.contact.identity),
             })
             .collect()
     }
@@ -287,6 +305,28 @@ impl Rondine {
         let k = key(&contact_id)?;
         let c = self.client.lock().await;
         Ok(c.messages_with(&k).into_iter().map(message).collect())
+    }
+
+    /// Avvia la rete locale (consegna diretta e, con `discovery`, mDNS). Restituisce la porta.
+    pub async fn start_lan(&self, discovery: bool) -> Result<u16> {
+        self.run(move |c| {
+            Box::pin(async move {
+                Ok(c.start_lan(([0, 0, 0, 0], 0).into(), discovery)
+                    .await?
+                    .port())
+            })
+        })
+        .await
+    }
+
+    /// Vicino dato a mano (`ip:porta`): per le prove sull'emulatore, dove mDNS non arriva.
+    pub async fn add_lan_peer(&self, key_b64: String, addr: String) -> Result<()> {
+        let k = key(&key_b64)?;
+        let a: std::net::SocketAddr = addr
+            .parse()
+            .map_err(|_| RondineError::Invalid(format!("indirizzo non valido: {addr}")))?;
+        self.client.lock().await.add_lan_peer(k, a);
+        Ok(())
     }
 
     /// "Sta scrivendo": si può chiamare a ogni tasto, il client limita la frequenza.

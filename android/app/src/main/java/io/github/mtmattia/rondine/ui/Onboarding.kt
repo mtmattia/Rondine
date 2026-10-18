@@ -1,6 +1,8 @@
 package io.github.mtmattia.rondine.ui
 
 import android.os.Build
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -53,6 +55,7 @@ fun Onboarding() {
     var name by rememberSaveable { mutableStateOf("") }
     var node by rememberSaveable { mutableStateOf(defaultNode()) }
     var phone by rememberSaveable { mutableStateOf("") }
+    var localOnly by rememberSaveable { mutableStateOf(false) }
     var busy by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -82,14 +85,26 @@ fun Onboarding() {
                     name, { name = it }, Modifier.fillMaxWidth(),
                     label = { Text("Il tuo nome") }, singleLine = true,
                 )
-                OutlinedTextField(
+                // Senza nodo: niente server, solo telefoni sulla stessa rete (SPEC §12).
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Senza nodo")
+                        Text(
+                            "Solo con chi è sulla tua stessa rete",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(localOnly, { localOnly = it })
+                }
+                if (!localOnly) OutlinedTextField(
                     phone, { phone = it }, Modifier.fillMaxWidth(),
                     label = { Text("Numero di telefono (facoltativo)") },
                     supportingText = { Text("Serve solo a farti trovare da chi ti ha in rubrica") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                 )
-                OutlinedTextField(
+                if (!localOnly) OutlinedTextField(
                     node, { node = it }, Modifier.fillMaxWidth(),
                     label = { Text("Nodo") },
                     supportingText = { Text("Il server che tiene la tua casella postale cifrata") },
@@ -103,7 +118,8 @@ fun Onboarding() {
                         error = null
                         scope.launch {
                             try {
-                                Repo.create(name.trim(), node.trim(), phone.trim().ifEmpty { null })
+                                if (localOnly) Repo.createLocal(name.trim())
+                                else Repo.create(name.trim(), node.trim(), phone.trim().ifEmpty { null })
                             } catch (e: RondineException) {
                                 error = e.userMessage
                             } finally {
@@ -111,7 +127,7 @@ fun Onboarding() {
                             }
                         }
                     },
-                    enabled = !busy && name.isNotBlank() && node.length > 8,
+                    enabled = !busy && name.isNotBlank() && (localOnly || node.length > 8),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Avanti")

@@ -26,8 +26,8 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Conferme di lettura, "sta scrivendo" | ✅ | spunte ✓ / ✓✓ / ✓✓ verdi (SPEC §7.2), "sta scrivendo" effimero senza sveglia (§7.3) |
 | Più dispositivi per persona | ⬜ | ogni dispositivo membro MLS |
 | Recupero dell'identità | ⬜ | frase di 24 parole o backup cifrato |
-| Collegamento diretto P2P | ⬜ | libp2p, M2 |
-| Rete locale senza internet | ⬜ | mDNS, M2 |
+| Collegamento diretto P2P | 🟡 | diretto in rete locale (SPEC §12); via internet serve ancora un nodo |
+| Rete locale senza internet | ✅ | mDNS + consegna diretta, profili anche senza nodo (SPEC §12) |
 | Mesh Bluetooth | ⬜ | M3 |
 | Chiamate vocali e video | ⬜ | WebRTC + TURN, dopo |
 | App Android | 🟡 | chat, nomi, rubrica, inviti, QR, impostazioni; provata su emulatore |
@@ -66,8 +66,14 @@ QR.
 - [ ] nodo pubblico sul Mac (Cloudflare Tunnel)
 - [ ] chiave di firma delle release e prima release su GitHub
 
-### M2 — Rete diretta
-libp2p: collegamento diretto quando entrambi sono online, rete locale senza internet.
+### M2 — Rete diretta (in corso)
+Collegamento diretto quando entrambi sono online, rete locale senza internet, nodo facoltativo.
+
+- [x] rete locale: scoperta mDNS con id che cambia ogni giorno, consegna diretta, coda in attesa
+- [x] profilo senza nodo (app: "Senza nodo"; CLI: `crea` senza `--nodo`, `rondine rete`)
+- [x] con il nodo spento, la rete locale continua a funzionare
+- [ ] P2P via internet (NAT traversal: serve comunque un punto d'incontro, per esempio il nodo)
+- [ ] annuncio mDNS rinnovato a mezzanotte (ora vale per il giorno di avvio e il successivo)
 
 ### M3 — Senza rete
 Mesh Bluetooth e Wi-Fi Direct, consegna differita.

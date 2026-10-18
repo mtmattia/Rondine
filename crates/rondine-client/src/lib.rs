@@ -1,6 +1,7 @@
 //! Client Rondine: tutto ciò che l'app sa fare, come funzioni (CLAUDE.md, regola 5).
 
 mod error;
+mod lan;
 mod net;
 mod state;
 
@@ -20,7 +21,7 @@ use rondine_mls::{Device, Received};
 use serde_json::json;
 
 pub use error::{Error, Result};
-pub use state::{ChatMessage, Contact, Delivery, GroupRef, Source, State};
+pub use state::{ChatMessage, Contact, Delivery, GroupRef, Outgoing, Source, State};
 
 use net::{Net, parse};
 
@@ -28,6 +29,8 @@ const STATE_FILE: &str = "stato.json";
 const MLS_FILE: &str = "mls.bin";
 /// Key package caricati sul nodo alla creazione (l'ultimo è di riserva).
 const KEYPACKAGE_BATCH: usize = 20;
+/// Key package offerti in rete locale a chi avvia una chat (SPEC §12.2).
+const LAN_KEYPACKAGES: usize = 5;
 /// Durata delle voci in bacheca: si ripubblicano prima che scadano.
 const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 
@@ -54,6 +57,17 @@ pub enum Event {
     Rejected(String),
 }
 
+/// Per dove è passata una busta (SPEC §12.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    Direct,
+    Node,
+    /// In coda sul telefono finché il contatto non ricompare in rete locale.
+    Queued,
+    /// Effimera senza strada: buttata.
+    Dropped,
+}
+
 /// Riga della lista chat.
 #[derive(Debug, Clone)]
 pub struct ChatSummary {
@@ -73,6 +87,8 @@ pub struct Client {
     typing: HashMap<PublicKey, u64>,
     /// Ultimo "sta scrivendo" mandato a ciascun contatto: (attivo, quando).
     typing_sent: HashMap<PublicKey, (bool, u64)>,
+    /// Rete locale, se avviata (SPEC §12).
+    lan: Option<lan::Lan>,
 }
 
 /// Ogni quanto si ripete "sta scrivendo" mentre si scrive, e per quanto lo si mostra.
@@ -126,21 +142,163 @@ impl Client {
                 username: None,
                 phone: None,
                 boards: vec![node],
-                invite_permit,
+                invite_permit: Some(invite_permit),
                 public_permit: None,
                 directory_permit: None,
                 contacts: Vec::new(),
                 messages: Vec::new(),
+                outbox: Vec::new(),
             },
             identity,
             device,
             net,
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
+            lan: None,
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
         client.save()?;
         Ok(client)
+    }
+
+    /// Crea un profilo **senza nodo**, che funziona solo in rete locale (SPEC §12). Non serve
+    /// la rete per crearlo.
+    pub fn create_local(dir: &Path, display_name: &str) -> Result<Self> {
+        let display_name = display_name.trim();
+        if display_name.is_empty() {
+            return Err(Error::Invalid("il nome non può essere vuoto".into()));
+        }
+        std::fs::create_dir_all(dir)?;
+        let identity = Identity::generate();
+        let device = Device::new(&identity);
+        let client = Self {
+            dir: dir.to_path_buf(),
+            state: State {
+                v: 1,
+                seed: b64::encode(identity.seed()),
+                display_name: display_name.to_string(),
+                node: String::new(),
+                inbox: String::new(),
+                username: None,
+                phone: None,
+                boards: Vec::new(),
+                invite_permit: None,
+                public_permit: None,
+                directory_permit: None,
+                contacts: Vec::new(),
+                messages: Vec::new(),
+                outbox: Vec::new(),
+            },
+            identity,
+            device,
+            net: Net::new()?,
+            typing: HashMap::new(),
+            typing_sent: HashMap::new(),
+            lan: None,
+        };
+        client.save()?;
+        Ok(client)
+    }
+
+    /// Il profilo ha un nodo? Senza, niente casella, nomi utente, push né rubrica.
+    pub fn has_node(&self) -> bool {
+        !self.state.node.is_empty()
+    }
+
+    fn require_node(&self) -> Result<()> {
+        if self.has_node() {
+            Ok(())
+        } else {
+            Err(Error::Invalid(
+                "questo profilo non ha un nodo: funziona solo in rete locale".into(),
+            ))
+        }
+    }
+
+    // ---------- rete locale (SPEC §12) ----------
+
+    /// Avvia la consegna diretta in rete locale; con `discovery` anche l'annuncio e la ricerca
+    /// mDNS. Restituisce l'indirizzo su cui ascolta.
+    pub async fn start_lan(
+        &mut self,
+        bind: std::net::SocketAddr,
+        discovery: bool,
+    ) -> Result<std::net::SocketAddr> {
+        let kps = self
+            .device
+            .key_packages(LAN_KEYPACKAGES)?
+            .into_iter()
+            .map(b64::encode)
+            .collect();
+        // I key package nuovi stanno nell'archivio MLS: va salvato.
+        self.save()?;
+        let lan = lan::Lan::start(bind, &self.identity.public(), kps, discovery).await?;
+        let addr = lan.addr();
+        self.lan = Some(lan);
+        Ok(addr)
+    }
+
+    /// Indirizzo di un contatto in rete locale dato a mano (test, CLI): sul telefono lo trova mDNS.
+    pub fn add_lan_peer(&mut self, id: PublicKey, addr: std::net::SocketAddr) {
+        if let Some(l) = self.lan.as_mut() {
+            l.add_peer(id, addr);
+        }
+    }
+
+    pub fn forget_lan_peer(&mut self, id: &PublicKey) {
+        if let Some(l) = self.lan.as_mut() {
+            l.forget_peer(id);
+        }
+    }
+
+    /// Il contatto è raggiungibile in rete locale adesso?
+    pub fn on_lan(&self, id: &PublicKey) -> bool {
+        self.lan.as_ref().is_some_and(|l| l.peer(id).is_some())
+    }
+
+    /// Dispositivi Rondine visti in rete locale (anche non contatti).
+    pub fn lan_neighbours(&self) -> usize {
+        self.lan.as_ref().map(|l| l.neighbours()).unwrap_or(0)
+    }
+
+    /// Buste arrivate in rete locale e non ancora elaborate (per i test).
+    pub fn lan_queue_len(&self) -> usize {
+        self.lan.as_ref().map(|l| l.queue_len()).unwrap_or(0)
+    }
+
+    /// Prova a consegnare la coda ai contatti tornati raggiungibili. Restituisce le spunte
+    /// avanzate da "in attesa" a "inviato".
+    async fn flush_outbox(&mut self) -> Vec<Event> {
+        let Some(lan) = self.lan.as_ref() else {
+            return Vec::new();
+        };
+        let mut sent = Vec::new();
+        let mut keep = Vec::new();
+        for o in std::mem::take(&mut self.state.outbox) {
+            match lan.peer(&o.to) {
+                Some(addr) if lan.deliver(addr, &o.blob).await.is_ok() => sent.push(o),
+                _ => keep.push(o),
+            }
+        }
+        self.state.outbox = keep;
+        let mut events = Vec::new();
+        for o in sent {
+            if let Some(id) = o.message_id
+                && let Some(m) = self
+                    .state
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == id && m.status == Delivery::Pending)
+            {
+                m.status = Delivery::Sent;
+                events.push(Event::Receipt {
+                    contact: o.to,
+                    status: Delivery::Sent,
+                    ids: vec![id],
+                });
+            }
+        }
+        events
     }
 
     /// C'è già un profilo in questa cartella?
@@ -163,6 +321,7 @@ impl Client {
             net: Net::new()?,
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
+            lan: None,
         })
     }
 
@@ -186,7 +345,16 @@ impl Client {
         self.identity.public()
     }
 
-    fn card_with(&self, permit: &SignedPermit) -> Result<SignedCard> {
+    /// Il mio biglietto con un permesso; senza nodo, senza nodo, casella né permesso (SPEC §4).
+    fn card_with(&self, permit: Option<&SignedPermit>) -> Result<SignedCard> {
+        let (node, inbox, permit) = match permit {
+            Some(p) if self.has_node() => (
+                Some(self.state.node.clone()),
+                Some(self.state.inbox.clone()),
+                Some(p.clone()),
+            ),
+            _ => (None, None, None),
+        };
         Ok(Signed::sign(
             &self.identity,
             &Card {
@@ -194,9 +362,9 @@ impl Client {
                 identity: self.identity.public(),
                 display_name: self.state.display_name.clone(),
                 username: self.state.username.clone(),
-                node: self.state.node.clone(),
-                inbox: self.state.inbox.clone(),
-                permit: permit.clone(),
+                node,
+                inbox,
+                permit,
                 issued_at: now(),
             },
         )?)
@@ -204,12 +372,18 @@ impl Client {
 
     /// Link `rondine:invito/…` da condividere (SMS, QR).
     pub fn invite_link(&self) -> Result<String> {
-        Ok(invite_link(&self.card_with(&self.state.invite_permit)?)?)
+        Ok(invite_link(
+            &self.card_with(self.state.invite_permit.as_ref())?,
+        )?)
     }
 
     /// Link da condividere (SMS, chat, QR), cliccabile ovunque: `<nodo>/@nome` se c'è un nome
     /// utente, altrimenti l'invito web `<nodo>/invito#…` (SPEC §3.2, §4.1).
     pub fn share_link(&self) -> Result<String> {
+        // Senza nodo non c'è una pagina web: si condivide il link `rondine:` (SPEC §12).
+        if !self.has_node() {
+            return self.invite_link();
+        }
         match &self.state.username {
             Some(handle) => {
                 let h = Handle::parse(handle)?;
@@ -228,14 +402,17 @@ impl Client {
 
     /// Revoca il link d'invito attuale e ne crea uno nuovo.
     pub async fn reset_invite(&mut self) -> Result<String> {
-        self.revoke_permit(&self.state.invite_permit.verify()?.id)
-            .await?;
-        self.state.invite_permit = self.new_permit("invito").await?;
+        self.require_node()?;
+        if let Some(p) = &self.state.invite_permit {
+            self.revoke_permit(&p.verify()?.id).await?;
+        }
+        self.state.invite_permit = Some(self.new_permit("invito").await?);
         self.save()?;
         self.invite_link()
     }
 
     async fn new_permit(&self, label: &str) -> Result<SignedPermit> {
+        self.require_node()?;
         issue_permit(
             &self.net,
             &self.identity,
@@ -247,6 +424,7 @@ impl Client {
     }
 
     async fn revoke_permit(&self, id: &str) -> Result<()> {
+        self.require_node()?;
         let path = format!("/v1/inboxes/{}/permits/revoke", self.state.inbox);
         self.net
             .owner(
@@ -284,6 +462,7 @@ impl Client {
 
     /// Registra `nome@mio-nodo` (SPEC §3.2).
     pub async fn claim_username(&mut self, name: &str) -> Result<String> {
+        self.require_node()?;
         let name = normalize_name(name)?;
         let handle = format!("{name}@{}", node_host(&self.state.node)?);
         let permit = match &self.state.public_permit {
@@ -294,7 +473,7 @@ impl Client {
         let claim = NameClaim {
             v: 1,
             name: name.clone(),
-            card: self.card_with(&permit)?,
+            card: self.card_with(Some(&permit))?,
             issued_at: now(),
         };
         let signed = Signed::sign(&self.identity, &claim)?;
@@ -318,6 +497,7 @@ impl Client {
 
     /// Libera il nome utente.
     pub async fn release_username(&mut self) -> Result<()> {
+        self.require_node()?;
         let Some(handle) = self.state.username.clone() else {
             return Ok(());
         };
@@ -560,34 +740,50 @@ impl Client {
             .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
         let their = verify_card(&contact.card)?;
 
-        let claimed: serde_json::Value = parse(
-            &self
-                .net
-                .call(
-                    Method::POST,
-                    &their.node,
-                    &format!("/v1/inboxes/{}/keypackages/claim", their.inbox),
-                    &json!({ "permit": their.permit }),
-                )
-                .await?,
-        )?;
-        let kp = b64::decode(
-            claimed["keypackage"]
-                .as_str()
-                .ok_or_else(|| Error::Invalid("risposta senza key package".into()))?,
-        )?;
+        // Key package: dal contatto stesso in rete locale, altrimenti dal suo nodo (SPEC §12.3).
+        let mut kp_b64 = None;
+        if let Some(lan) = &self.lan
+            && let Some(addr) = lan.peer(peer)
+        {
+            kp_b64 = lan.fetch_keypackage(addr).await.ok();
+        }
+        let kp_b64 = match (kp_b64, their.mailbox()) {
+            (Some(kp), _) => kp,
+            (None, Some((node, inbox, permit))) => {
+                let claimed: serde_json::Value = parse(
+                    &self
+                        .net
+                        .call(
+                            Method::POST,
+                            node,
+                            &format!("/v1/inboxes/{inbox}/keypackages/claim"),
+                            &json!({ "permit": permit }),
+                        )
+                        .await?,
+                )?;
+                claimed["keypackage"]
+                    .as_str()
+                    .ok_or_else(|| Error::Invalid("risposta senza key package".into()))?
+                    .to_string()
+            }
+            (None, None) => {
+                return Err(Error::Invalid(format!(
+                    "{} non è raggiungibile: la prima volta dovete essere sulla stessa rete",
+                    their.display_name
+                )));
+            }
+        };
+        let kp = b64::decode(&kp_b64)?;
 
         let permit = match &contact.my_permit_id {
             Some(_) => None,
-            None => Some(
+            None if self.has_node() => Some(
                 self.new_permit(&format!("contatto:{}", peer.short()))
                     .await?,
             ),
+            None => None,
         };
-        let my_card = match &permit {
-            Some(p) => self.card_with(p)?,
-            None => self.card_with(&self.state.invite_permit)?,
-        };
+        let my_card = self.card_with(permit.as_ref().or(self.state.invite_permit.as_ref()))?;
 
         let (group_id, welcome) = self.device.start_dm(&kp, peer)?;
         let hello = serde_json::to_vec(&AppMessage::Hello {
@@ -615,31 +811,52 @@ impl Client {
         self.save()
     }
 
-    async fn deposit(&self, card: &SignedCard, envelope: &Envelope) -> Result<()> {
-        self.deposit_with(card, envelope, false).await
+    async fn deposit(&mut self, card: &SignedCard, envelope: &Envelope) -> Result<Route> {
+        self.deposit_with(card, envelope, false, None).await
     }
 
-    /// `ephemeral`: niente sveglia, e il nodo lo butta se non viene ritirato presto (SPEC §6).
+    /// Consegna una busta (SPEC §12.3): diretta in rete locale, altrimenti nel nodo del
+    /// contatto, altrimenti in coda sul telefono. `ephemeral`: niente sveglia e niente coda (§6).
     async fn deposit_with(
-        &self,
+        &mut self,
         card: &SignedCard,
         envelope: &Envelope,
         ephemeral: bool,
-    ) -> Result<()> {
+        message_id: Option<&str>,
+    ) -> Result<Route> {
         let info = verify_card(card)?;
-        self.net
-            .call(
-                Method::POST,
-                &info.node,
-                &format!("/v1/inboxes/{}/messages", info.inbox),
-                &json!({
-                    "permit": info.permit,
-                    "blob": b64::encode(serde_json::to_vec(envelope)?),
-                    "ephemeral": ephemeral,
-                }),
-            )
-            .await?;
-        Ok(())
+        let blob = b64::encode(serde_json::to_vec(envelope)?);
+        if let Some(lan) = &self.lan
+            && let Some(addr) = lan.peer(&info.identity)
+            && lan.deliver(addr, &blob).await.is_ok()
+        {
+            return Ok(Route::Direct);
+        }
+        if let Some((node, inbox, permit)) = info.mailbox() {
+            self.net
+                .call(
+                    Method::POST,
+                    node,
+                    &format!("/v1/inboxes/{inbox}/messages"),
+                    &json!({
+                        "permit": permit,
+                        "blob": blob,
+                        "ephemeral": ephemeral,
+                    }),
+                )
+                .await?;
+            return Ok(Route::Node);
+        }
+        if ephemeral {
+            return Ok(Route::Dropped);
+        }
+        self.state.outbox.push(Outgoing {
+            to: info.identity,
+            blob,
+            message_id: message_id.map(str::to_string),
+        });
+        self.save()?;
+        Ok(Route::Queued)
     }
 
     /// Gruppo su cui scrivere: quello creato dalla chiave più bassa (SPEC §7.1).
@@ -692,7 +909,14 @@ impl Client {
             ts: msg.ts,
             body: msg.body.clone(),
         };
-        self.send_app(&contact, &app).await?;
+        let mut msg = msg;
+        if self
+            .send_app_with(&contact, &app, false, Some(&msg.id))
+            .await?
+            == Route::Queued
+        {
+            msg.status = Delivery::Pending;
+        }
         // Chi riceve il messaggio smette da solo di mostrare "sta scrivendo".
         self.typing_sent.remove(to);
         self.state.messages.push(msg.clone());
@@ -701,8 +925,8 @@ impl Client {
     }
 
     /// Cifra un messaggio applicativo nella chat con il contatto e lo deposita nella sua casella.
-    async fn send_app(&mut self, contact: &Contact, app: &AppMessage) -> Result<()> {
-        self.send_app_with(contact, app, false).await
+    async fn send_app(&mut self, contact: &Contact, app: &AppMessage) -> Result<Route> {
+        self.send_app_with(contact, app, false, None).await
     }
 
     async fn send_app_with(
@@ -710,7 +934,8 @@ impl Client {
         contact: &Contact,
         app: &AppMessage,
         ephemeral: bool,
-    ) -> Result<()> {
+        message_id: Option<&str>,
+    ) -> Result<Route> {
         let group = self
             .preferred_group(contact)
             .ok_or_else(|| Error::Invalid("nessuna chat con questo contatto".into()))?;
@@ -724,6 +949,7 @@ impl Client {
                 msg: b64::encode(ct),
             },
             ephemeral,
+            message_id,
         )
         .await
     }
@@ -757,7 +983,8 @@ impl Client {
             active,
             ts: t,
         };
-        self.send_app_with(&contact, &app, true).await
+        self.send_app_with(&contact, &app, true, None).await?;
+        Ok(())
     }
 
     /// Il contatto sta scrivendo adesso?
@@ -782,26 +1009,46 @@ impl Client {
             return Ok(());
         };
         self.send_app(&contact, &AppMessage::Receipt { v: 1, status, ids })
-            .await
+            .await?;
+        Ok(())
     }
 
-    /// Ritira i messaggi dalla casella, li elabora e li conferma al nodo.
+    /// Consegna la coda a chi è tornato raggiungibile, ritira i messaggi dalla casella del nodo e
+    /// dalla rete locale, li elabora e li conferma al nodo.
     pub async fn sync(&mut self) -> Result<Vec<Event>> {
+        let mut events = self.flush_outbox().await;
         let path = format!("/v1/inboxes/{}/messages", self.state.inbox);
-        let items: Vec<serde_json::Value> = parse(
-            &self
+        let mut ids = Vec::new();
+        let mut blobs = Vec::new();
+        if self.has_node() {
+            let fetched = self
                 .net
                 .owner::<()>(&self.identity, Method::GET, &self.state.node, &path, None)
-                .await?,
-        )?;
-        let mut events = Vec::new();
-        let mut ids = Vec::new();
-        for item in items {
-            let (Some(id), Some(blob)) = (item["id"].as_str(), item["blob"].as_str()) else {
-                continue;
+                .await
+                .and_then(|b| parse::<Vec<serde_json::Value>>(&b));
+            // Senza nodo raggiungibile (per esempio senza internet) la rete locale va avanti:
+            // l'errore si segnala e basta. Senza rete locale resta un errore.
+            let items = match fetched {
+                Ok(items) => items,
+                Err(e) if self.lan.is_some() => {
+                    events.push(Event::Rejected(format!("nodo non raggiungibile: {e}")));
+                    Vec::new()
+                }
+                Err(e) => return Err(e),
             };
-            ids.push(id.to_string());
-            match self.handle_blob(blob) {
+            for item in items {
+                let (Some(id), Some(blob)) = (item["id"].as_str(), item["blob"].as_str()) else {
+                    continue;
+                };
+                ids.push(id.to_string());
+                blobs.push(blob.to_string());
+            }
+        }
+        if let Some(lan) = &self.lan {
+            blobs.extend(lan.take_incoming());
+        }
+        for blob in blobs {
+            match self.handle_blob(&blob) {
                 Ok(mut evs) => events.append(&mut evs),
                 Err(e) => events.push(Event::Rejected(e.to_string())),
             }
@@ -1017,6 +1264,7 @@ impl Client {
 
     /// Registra l'endpoint UnifiedPush del telefono sul mio nodo.
     pub async fn set_push_endpoint(&self, endpoint: &str) -> Result<()> {
+        self.require_node()?;
         self.net
             .owner(
                 &self.identity,
@@ -1030,6 +1278,7 @@ impl Client {
     }
 
     pub async fn clear_push_endpoint(&self) -> Result<()> {
+        self.require_node()?;
         self.net
             .owner::<()>(
                 &self.identity,
@@ -1082,6 +1331,7 @@ impl Client {
     /// Pubblica il mio biglietto, cifrato, per ogni numero della rubrica (SPEC §9).
     /// Restituisce quante voci sono state pubblicate.
     pub async fn publish_contacts(&mut self, numbers: &[String]) -> Result<usize> {
+        self.require_node()?;
         let mine = self.my_phone()?;
         let permit = match &self.state.directory_permit {
             Some(p) => p.clone(),
@@ -1095,7 +1345,7 @@ impl Client {
         let record = DiscoveryRecord {
             v: 1,
             phone: mine.clone(),
-            card: self.card_with(&permit)?,
+            card: self.card_with(Some(&permit))?,
         };
         let expires_at = now() + BOARD_TTL_SECS;
         let mut published = 0;
@@ -1127,6 +1377,7 @@ impl Client {
     /// I contatti trovati sono aggiunti come non verificati. Avvia la chat solo chi ha la
     /// chiave più bassa, per non creare due gruppi.
     pub async fn discover(&mut self, numbers: &[String]) -> Result<Vec<Contact>> {
+        self.require_node()?;
         let mine = self.my_phone()?;
         let me = self.identity.public();
         let mut found = Vec::new();

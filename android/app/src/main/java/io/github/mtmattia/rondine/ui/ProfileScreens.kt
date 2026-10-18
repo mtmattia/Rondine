@@ -290,7 +290,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             SettingRow(Icons.Filled.Phone, "Numero di telefono", p.phone ?: "Non impostato") { dialog = SettingsDialog.Phone }
             SettingRow(Icons.Filled.QrCode2, "Link d'invito e QR", "Condividi o reimposta", onMyQr)
             SettingRow(Icons.Filled.Notifications, "Notifiche", "$push · tocca per scegliere il distributore UnifiedPush", onPickPush)
-            SettingRow(Icons.Filled.Dns, "Nodo", p.node) {}
+            SettingRow(Icons.Filled.Dns, "Nodo", if (p.hasNode) p.node else "Nessuno: solo rete locale") {}
             SettingRow(Icons.Filled.Code, "Codice sorgente", "Rondine è open source (MIT o Apache-2.0)") {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mtmattia/Rondine")))
             }

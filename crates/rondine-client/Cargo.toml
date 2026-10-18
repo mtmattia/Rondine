@@ -9,6 +9,8 @@ license.workspace = true
 rondine-core.workspace = true
 rondine-mls.workspace = true
 reqwest.workspace = true
+axum.workspace = true
+mdns-sd.workspace = true
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
 serde.workspace = true
@@ -19,7 +21,6 @@ tokio.workspace = true
 [dev-dependencies]
 rondine-nodo.workspace = true
 tempfile.workspace = true
-axum.workspace = true
 
 [lints]
 workspace = true

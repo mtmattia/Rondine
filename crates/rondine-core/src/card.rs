@@ -11,10 +11,25 @@ pub struct Card {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
-    pub node: String,
-    pub inbox: String,
-    pub permit: SignedPermit,
+    /// Nodo, casella e permesso: tutti e tre, o nessuno per un profilo solo in rete locale
+    /// (SPEC §4, §12).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permit: Option<SignedPermit>,
     pub issued_at: u64,
+}
+
+impl Card {
+    /// Dove consegnare via nodo: `(nodo, casella, permesso)`, se il profilo ha un nodo.
+    pub fn mailbox(&self) -> Option<(&str, &str, &SignedPermit)> {
+        match (&self.node, &self.inbox, &self.permit) {
+            (Some(n), Some(i), Some(p)) => Some((n, i, p)),
+            _ => None,
+        }
+    }
 }
 
 impl Signable for Card {
@@ -30,8 +45,14 @@ pub fn verify_card(card: &SignedCard) -> Result<Card> {
     if c.identity != card.signer {
         return Err(Error::BadSignature);
     }
-    if c.permit.verify()?.inbox != c.inbox {
-        return Err(Error::Invalid("il permesso non è per questa casella"));
+    match (&c.node, &c.inbox, &c.permit) {
+        (Some(_), Some(inbox), Some(permit)) => {
+            if &permit.verify()?.inbox != inbox {
+                return Err(Error::Invalid("il permesso non è per questa casella"));
+            }
+        }
+        (None, None, None) => {}
+        _ => return Err(Error::Invalid("nodo, casella e permesso vanno insieme")),
     }
     Ok(c)
 }
@@ -82,9 +103,9 @@ pub(crate) mod tests {
                 identity: owner.public(),
                 display_name: "Mattia".into(),
                 username: Some("mattia@nodo.example".into()),
-                node: "https://nodo.example".into(),
-                inbox: inbox.into(),
-                permit,
+                node: Some("https://nodo.example".into()),
+                inbox: Some(inbox.into()),
+                permit: Some(permit),
                 issued_at: now(),
             },
         )
@@ -105,6 +126,21 @@ pub(crate) mod tests {
         let card = sample_card(&owner, &Identity::generate(), "casella")?;
         let forged = Signed::<Card>::sign(&Identity::generate(), &card.verify()?)?;
         assert!(verify_card(&forged).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn biglietto_senza_nodo_valido_ma_non_a_meta() -> Result<()> {
+        let owner = Identity::generate();
+        let mut card = sample_card(&owner, &Identity::generate(), "casella")?.verify()?;
+        let (node, inbox, permit) = (card.node.take(), card.inbox.take(), card.permit.take());
+        let local = Signed::sign(&owner, &card)?;
+        assert_eq!(verify_card(&local)?.mailbox(), None);
+        assert!(!serde_json::to_string(&local)?.contains("\"node\""));
+        card.node = node;
+        card.permit = permit;
+        assert!(inbox.is_some());
+        assert!(verify_card(&Signed::sign(&owner, &card)?).is_err());
         Ok(())
     }
 

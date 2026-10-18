@@ -59,6 +59,8 @@ pub struct ChatMessage {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Delivery {
+    /// In coda sul telefono: il contatto non è raggiungibile (SPEC §12.3).
+    Pending,
     #[default]
     Sent,
     Delivered,
@@ -79,8 +81,9 @@ pub struct State {
     /// Bacheche per la scoperta dalla rubrica (SPEC §9); il proprio nodo è sempre incluso.
     #[serde(default)]
     pub boards: Vec<String>,
-    /// Permesso per il link d'invito.
-    pub invite_permit: SignedPermit,
+    /// Permesso per il link d'invito (assente nei profili senza nodo).
+    #[serde(default)]
+    pub invite_permit: Option<SignedPermit>,
     /// Permesso pubblicato col nome utente.
     #[serde(default)]
     pub public_permit: Option<SignedPermit>,
@@ -91,4 +94,17 @@ pub struct State {
     pub contacts: Vec<Contact>,
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// Buste in attesa che il contatto ricompaia in rete locale (SPEC §12.3).
+    #[serde(default)]
+    pub outbox: Vec<Outgoing>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Outgoing {
+    pub to: PublicKey,
+    /// Busta (§6.1) già cifrata, in b64.
+    pub blob: String,
+    /// Messaggio di testo a cui si riferisce, per aggiornarne le spunte.
+    #[serde(default)]
+    pub message_id: Option<String>,
 }

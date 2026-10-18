@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -103,6 +104,7 @@ fun dayLabel(d: LocalDate): String {
 @Composable
 fun MessageTicks(status: MessageStatus, tint: Color, size: Dp) {
     when (status) {
+        MessageStatus.PENDING -> Icon(Icons.Filled.Schedule, "In attesa della rete locale", Modifier.size(size), tint = tint)
         MessageStatus.SENT -> Icon(Icons.Filled.Done, "Inviato", Modifier.size(size), tint = tint)
         MessageStatus.DELIVERED -> Icon(Icons.Filled.DoneAll, "Consegnato", Modifier.size(size), tint = tint)
         MessageStatus.READ ->

@@ -18,13 +18,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Crea un profilo nuovo su un nodo.
+    /// Crea un profilo nuovo, su un nodo o (senza --nodo) solo per la rete locale.
     Crea {
         #[arg(long)]
         nome: String,
-        /// URL del nodo, es. https://rondine.example
+        /// URL del nodo, es. https://rondine.example. Senza: profilo solo rete locale.
         #[arg(long)]
-        nodo: String,
+        nodo: Option<String>,
+    },
+    /// Resta in rete locale: si annuncia, consegna e ritira i messaggi. Da tastiera:
+    /// `scrivi <contatto> <testo>`, `aggiungi <link>`, `esci`.
+    Rete {
+        /// Porta su cui ascoltare (0 = una libera).
+        #[arg(long, default_value_t = 0)]
+        porta: u16,
+        /// Vicino dato a mano, `<chiave>=<ip:porta>` (senza mDNS).
+        #[arg(long)]
+        vicino: Vec<String>,
+        /// Ferma dopo questi secondi (0 = mai).
+        #[arg(long, default_value_t = 0)]
+        secondi: u64,
     },
     /// Mostra chi sei e il tuo link d'invito.
     Io,
@@ -157,6 +170,7 @@ fn describe(c: &Contact) -> String {
 /// Spunte come nell'app: ✓ inviato, ✓✓ consegnato, ✓✓ letto (verdi nell'app).
 fn ticks(status: Delivery) -> &'static str {
     match status {
+        Delivery::Pending => "🕓",
         Delivery::Sent => "✓",
         Delivery::Delivered => "✓✓",
         Delivery::Read => "✓✓ letto",
@@ -192,6 +206,7 @@ fn print_events(events: &[Event], client: &Client) {
                     .unwrap_or("?");
                 let what = match status {
                     Delivery::Read => "letti da",
+                    Delivery::Sent => "partiti dalla coda verso",
                     _ => "consegnati a",
                 };
                 println!("{} {} messaggi {what} {to}", ticks(*status), ids.len());
@@ -207,7 +222,7 @@ fn print_events(events: &[Event], client: &Client) {
                     println!("… {who} sta scrivendo");
                 }
             }
-            Event::Rejected(why) => eprintln!("! messaggio scartato: {why}"),
+            Event::Rejected(why) => eprintln!("! {why}"),
         }
     }
 }
@@ -221,7 +236,10 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if let Cmd::Crea { nome, nodo } = &cli.cmd {
-        let c = Client::create(&dir, nome, nodo).await?;
+        let c = match nodo {
+            Some(nodo) => Client::create(&dir, nome, nodo).await?,
+            None => Client::create_local(&dir, nome)?,
+        };
         println!("Profilo creato in {}", dir.display());
         println!("Chiave: {}", c.identity());
         println!("Link d'invito:\n{}", c.invite_link()?);
@@ -237,11 +255,23 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.cmd {
         Cmd::Crea { .. } => {}
+        Cmd::Rete {
+            porta,
+            vicino,
+            secondi,
+        } => rete(&mut c, porta, &vicino, secondi).await?,
         Cmd::Io => {
             let s = c.state();
             println!("Nome:     {}", s.display_name);
             println!("Chiave:   {}", c.identity());
-            println!("Nodo:     {}", s.node);
+            println!(
+                "Nodo:     {}",
+                if c.has_node() {
+                    s.node.as_str()
+                } else {
+                    "nessuno (solo rete locale)"
+                }
+            );
             println!(
                 "Utente:   {}",
                 s.username
@@ -361,4 +391,70 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// `rondine rete`: resta acceso in rete locale (SPEC §12), con comandi da tastiera.
+async fn rete(c: &mut Client, porta: u16, vicini: &[String], secondi: u64) -> anyhow::Result<()> {
+    use tokio::io::AsyncBufReadExt;
+
+    let addr = c
+        .start_lan(std::net::SocketAddr::from(([0, 0, 0, 0], porta)), true)
+        .await?;
+    for v in vicini {
+        let (key, at) = v
+            .split_once('=')
+            .context("vicino: serve <chiave>=<ip:porta>")?;
+        c.add_lan_peer(rondine_core::PublicKey::from_b64(key)?, at.parse()?);
+    }
+    println!(
+        "In rete locale sulla porta {}. Comandi: scrivi <contatto> <testo> · aggiungi <link> · esci",
+        addr.port()
+    );
+    let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+    let deadline = (secondi > 0)
+        .then(|| tokio::time::Instant::now() + std::time::Duration::from_secs(secondi));
+    let mut stdin_open = true;
+    loop {
+        if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
+            return Ok(());
+        }
+        tokio::select! {
+            _ = tick.tick() => {
+                let events = c.sync().await?;
+                if !events.is_empty() {
+                    print_events(&events, c);
+                }
+            }
+            line = lines.next_line(), if stdin_open => {
+                let Some(line) = line? else {
+                    stdin_open = false;
+                    continue;
+                };
+                let line = line.trim();
+                let (cmd, rest) = line.split_once(' ').unwrap_or((line, ""));
+                let result: anyhow::Result<()> = async {
+                    match cmd {
+                        "" => {}
+                        "esci" => return Err(anyhow::anyhow!("esci")),
+                        "scrivi" => {
+                            let (who, text) = rest.split_once(' ').context("scrivi <contatto> <testo>")?;
+                            let id = c.find_contact(who)?.identity;
+                            let m = c.send_text(&id, text).await?;
+                            println!("{}", if m.status == Delivery::Pending { "In coda: parte quando è in rete." } else { "Inviato." });
+                        }
+                        "aggiungi" => println!("Aggiunto: {}", describe(&c.add(rest).await?)),
+                        other => println!("comando sconosciuto: {other}"),
+                    }
+                    Ok(())
+                }
+                .await;
+                match result {
+                    Err(e) if e.to_string() == "esci" => return Ok(()),
+                    Err(e) => println!("errore: {e:#}"),
+                    Ok(()) => {}
+                }
+            }
+        }
+    }
 }

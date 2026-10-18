@@ -28,7 +28,9 @@ Leggi questo file prima di toccare il codice, poi `docs/SPEC.md` per il protocol
    `crates/rondine-client/tests/`, con un nodo vero in-process e più client), poi il codice.
 7. **Licenze.** Solo dipendenze MIT, Apache-2.0, BSD, ISC, Zlib, Unicode o MPL-2.0. Niente GPL/AGPL
    (esclude per esempio `libsignal`). Con più licenze in alternativa basta che una sia ammessa
-   (per esempio JNA, "LGPL-2.1 OR Apache-2.0", si usa con Apache-2.0).
+   (per esempio JNA, "LGPL-2.1 OR Apache-2.0", si usa con Apache-2.0). Unica eccezione, scelta da
+   Mattia il 18 ottobre 2026: Firebase Messaging (non libero) solo nella versione `play` dell'app,
+   per le notifiche su Google Play; mai nei crate né nella versione `foss`.
 
 ## Quando fermarsi e chiedere a un umano
 
@@ -71,9 +73,12 @@ coprono.
 ## App Android
 
 - Application ID: `io.github.mtmattia.rondine` (non cambiarlo: romperebbe gli aggiornamenti).
-- Nessuna dipendenza Google o non libera: deve restare pubblicabile su F-Droid. Notifiche solo
-  UnifiedPush. Metadati per gli store in `fastlane/metadata/android/`.
+- Due versioni con lo stesso pacchetto e la stessa firma (si aggiornano a vicenda):
+  - `foss` (GitHub, F-Droid): nessuna dipendenza Google o non libera, notifiche solo UnifiedPush;
+  - `play` (Google Play): in più FCM, attraverso il ripetitore del nido (SPEC §8.1), solo quando
+    manca un distributore UnifiedPush. Codice in `android/app/src/play/`.
+  Metadati per gli store in `fastlane/metadata/android/`.
 - Interfaccia ispirata alla struttura di WhatsApp (schede, lista chat, bolle), ma con colori,
   logo e nome propri: niente elementi del marchio WhatsApp.
-- Build: `cd android && ./gradlew assembleDebug` (servono SDK, NDK 29, `cargo-ndk` e i target
+- Build: `cd android && ./gradlew assembleFossDebug` (o `assemblePlayDebug`; servono SDK, NDK 29, `cargo-ndk` e i target
   Rust `aarch64-linux-android` e `x86_64-linux-android`).

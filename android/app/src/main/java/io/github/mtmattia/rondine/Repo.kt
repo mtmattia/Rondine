@@ -175,12 +175,15 @@ object Repo {
         }
     }
 
-    fun onPushEndpoint(url: String) {
+    /** Endpoint della sveglia (UnifiedPush, o il ripetitore FCM nella versione Play). */
+    fun onPushEndpoint(url: String, via: String = "UnifiedPush") {
         scope.launch {
-            if (profile.value?.hasNode == false) return@launch
+            // Il token FCM può arrivare prima che il profilo sia aperto.
+            loaded.await()
+            if (rondine == null || profile.value?.hasNode == false) return@launch
             try {
                 client().setPushEndpoint(url)
-                setPush(PushState.Active, "Attive")
+                setPush(PushState.Active, "Attive ($via)")
             } catch (e: Exception) {
                 setPush(PushState.Failed, "Errore: ${e.userMessage}")
             }

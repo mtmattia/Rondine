@@ -29,6 +29,33 @@ android {
         // ~/.gradle/gradle.properties o `-Prondine.nodo=…`; vuoto per non proporne nessuno.
         val defaultNode = (findProperty("rondine.nodo") as String?) ?: "https://cachyos-mattia.tail9cc49c.ts.net"
         buildConfigField("String", "DEFAULT_NODE", "\"$defaultNode\"")
+        // Ripetitore FCM della versione Play (SPEC §8.1): il nido con le credenziali Firebase.
+        val relay = (findProperty("rondine.ripetitore") as String?) ?: "https://cachyos-mattia.tail9cc49c.ts.net"
+        buildConfigField("String", "PUSH_RELAY", "\"$relay\"")
+    }
+
+    // Due versioni con lo stesso pacchetto e la stessa firma, quindi aggiornabili a vicenda
+    // (docs/PUBBLICAZIONE.md):
+    // - foss: GitHub e F-Droid, solo software libero, notifiche con UnifiedPush;
+    // - play: Google Play, in più FCM (non libero) quando manca un distributore UnifiedPush.
+    flavorDimensions += "canale"
+    productFlavors {
+        create("foss") { dimension = "canale" }
+        create("play") {
+            dimension = "canale"
+            // Dati pubblici del progetto Firebase, letti da src/play/google-services.json senza il
+            // plugin di Google (che vorrebbe un'app Firebase anche per il pacchetto .debug).
+            @Suppress("UNCHECKED_CAST")
+            val gs = groovy.json.JsonSlurper().parse(file("src/play/google-services.json")) as Map<String, Any>
+            val project = gs["project_info"] as Map<String, String>
+            val client = (gs["client"] as List<Map<String, Any>>).first()
+            val appId = (client["client_info"] as Map<String, String>)["mobilesdk_app_id"]
+            val apiKey = (client["api_key"] as List<Map<String, String>>).first()["current_key"]
+            buildConfigField("String", "FIREBASE_PROJECT_ID", "\"${project["project_id"]}\"")
+            buildConfigField("String", "FIREBASE_SENDER_ID", "\"${project["project_number"]}\"")
+            buildConfigField("String", "FIREBASE_APP_ID", "\"$appId\"")
+            buildConfigField("String", "FIREBASE_API_KEY", "\"$apiKey\"")
+        }
     }
 
     // Firma della versione release per Google Play (chiave di caricamento). Chiave e password
@@ -82,6 +109,14 @@ android {
     dependenciesInfo {
         includeInApk = false
         includeInBundle = false
+    }
+}
+
+// La versione Play di prova ha il pacchetto vero: l'app Firebase è registrata per quello, e FCM
+// lo controlla. Non si installa quindi accanto alla release Play (la foss di prova sì).
+androidComponents {
+    onVariants(selector().withBuildType("debug").withFlavor("canale" to "play")) { v ->
+        v.applicationId.set("io.github.mtmattia.rondine")
     }
 }
 
@@ -146,4 +181,7 @@ dependencies {
     implementation(libs.zxing.core)
     // Lettore QR con la fotocamera (Apache-2.0, nessun servizio Google).
     implementation(libs.zxing.embedded)
+    // Solo versione Play: FCM tramite il ripetitore del nido (SPEC §8.1).
+    "playImplementation"(libs.firebase.messaging)
+    "playImplementation"(libs.androidx.fragment)
 }

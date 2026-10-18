@@ -108,6 +108,8 @@ class MainActivity : ComponentActivity() {
     private fun setupPush(interactive: Boolean) {
         val distributors = UnifiedPush.getDistributors(this)
         if (distributors.isEmpty()) {
+            // Versione Play: FCM attraverso il ripetitore del nido. Versione foss: serve ntfy.
+            if (io.github.mtmattia.rondine.push.PlatformPush.register(this)) return
             Repo.setPush(PushState.NoDistributor, "Nessun distributore: installa ntfy da F-Droid")
             return
         }

@@ -10,8 +10,12 @@ disinstallare e senza perdere chat e identità. Android lo permette solo con:
    (`android/app/build.gradle.kts`: a ogni versione si alzano insieme `versionCode` e
    `versionName`, poi si crea il tag `v<versionName>`).
 
-Per questo c'è **un solo APK**, uguale ovunque: niente varianti con componenti diversi per un
-canale (per esempio FCM solo su Play), che F-Droid non potrebbe compilare uguale.
+Le versioni sono due, `foss` e `play` (`android/app/build.gradle.kts`): stesso pacchetto, stessa
+firma, stesso `versionCode`, quindi si aggiornano a vicenda anche se il contenuto è diverso.
+- **foss** (GitHub Releases e F-Droid): solo software libero, notifiche UnifiedPush. È la build
+  riproducibile che F-Droid confronta con la nostra.
+- **play** (Google Play): in più Firebase Messaging, per le notifiche di chi non ha un
+  distributore UnifiedPush, attraverso il ripetitore FCM del nido (SPEC §8.1).
 
 I passi con 👤 li fa una persona (account, pagamenti, segreti); il resto è pronto nel repository.
 
@@ -55,7 +59,7 @@ release non firmate da due cartelle diverse devono avere lo stesso `sha256sum` (
    chiave di firma dell'app (non quella generata da Google), caricandola con lo strumento PEPK
    che Play Console indica. È il passo da cui dipende l'aggiornamento tra i canali, e dopo non si
    può più cambiare facilmente.
-3. Caricare l'AAB della Release (`rondine-v<versione>.aab`).
+3. Caricare l'AAB della Release (`rondine-v<versione>-play.aab`).
 4. 👤 **Scheda e moduli**:
    - informativa sulla privacy: `https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md`;
    - testi e immagini: `fastlane/metadata/android/`;
@@ -80,11 +84,14 @@ della nostra Release (`Binaries:`) e, se coincidono, pubblica il nostro con la n
 `keytool -list -v -keystore rondine.jks`). Testi e immagini sono già in
 `fastlane/metadata/android/`.
 
-## Notifiche fuori da Google
+## Notifiche nella versione Play
 
-Senza FCM, le notifiche arrivano con UnifiedPush: chi installa da Play di solito non ha un
-distributore come ntfy. Per tenere un solo APK uguale ovunque, la strada è una connessione
-propria al nido quando manca un distributore (da fare), non una variante con FCM.
+👤 Progetto Firebase `rondine-7437f` (gratis): i suoi dati pubblici sono in
+`android/app/src/play/google-services.json`. La chiave del service account (Impostazioni
+progetto → Account di servizio → Genera nuova chiave privata) è **segreta**: sta solo sul nido
+che fa da ripetitore, avviato con `rondine-nodo --fcm-credenziali ~/.config/rondine/fcm.json`.
+L'app Play la usa attraverso `https://<nido>/v1/fcm/<token>` (`rondine.ripetitore` in Gradle,
+di serie il nido di Mattia).
 
 ## Verifica degli sviluppatori Android
 

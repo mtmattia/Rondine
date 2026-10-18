@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1039652721166",
+    "project_id": "rondine-7437f",
+    "storage_bucket": "rondine-7437f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1039652721166:android:36691a1ed8acc4cf7ce25f",
+        "android_client_info": {
+          "package_name": "io.github.mtmattia.rondine"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCiZ18A_P2fUuhztPdhrvQf-A67C_U76RM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

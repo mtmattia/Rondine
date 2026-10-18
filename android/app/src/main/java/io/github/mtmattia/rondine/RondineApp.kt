@@ -7,6 +7,7 @@ class RondineApp : Application() {
         super.onCreate()
         Tls.init(this)
         Notifier.createChannel(this)
+        io.github.mtmattia.rondine.push.PlatformPush.init(this)
         Repo.init(this)
     }
 }

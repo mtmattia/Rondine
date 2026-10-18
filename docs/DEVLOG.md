@@ -138,3 +138,8 @@ Una riga per modifica: data, cosa è cambiato.
   tenuto da `sync` per tutta la durata della rete. All'avvio la lista si carica prima della rete
   locale. Con un nido che non risponde la lista compariva dopo 33 s, ora insieme al titolo (~3,5 s
   di avvio a freddo sull'emulatore).
+- 2026-10-18 — App in due versioni, `foss` (GitHub, F-Droid: solo UnifiedPush, nessun codice
+  Google) e `play` (in più FCM attraverso il ripetitore del nido, solo se manca un distributore
+  UnifiedPush), stesso pacchetto e stessa firma. Provato sull'emulatore: la versione play ottiene
+  il token FCM e registra `…/v1/fcm/<token>` sul nodo; foss → play → foss si installano una sopra
+  l'altra tenendo il profilo. La Action pubblica APK foss e AAB play.

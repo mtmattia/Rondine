@@ -12,6 +12,10 @@ jna = "5.19.1"
 unifiedpush = "3.3.5"
 zxing = "3.5.4"
 zxingEmbedded = "4.3.0"
+# Solo nella versione Play (FCM, SPEC §8.1): non libera, mai nella versione foss.
+firebaseMessaging = "26.0.0"
+# Firebase porta una versione vecchia di fragment: serve almeno la 1.3 con le Activity Result API.
+fragment = "1.9.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -28,6 +32,8 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 unifiedpush-connector = { module = "org.unifiedpush.android:connector", version.ref = "unifiedpush" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
+firebase-messaging = { module = "com.google.firebase:firebase-messaging", version.ref = "firebaseMessaging" }
 zxing-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxingEmbedded" }
 
 [plugins]

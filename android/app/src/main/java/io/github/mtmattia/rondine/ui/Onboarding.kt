@@ -93,7 +93,6 @@ fun Onboarding() {
                 OutlinedTextField(
                     node, { node = it }, Modifier.fillMaxWidth(),
                     label = { Text("Nodo") },
-                    supportingText = { Text("Il server che tiene la tua casella postale cifrata") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 )

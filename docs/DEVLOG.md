@@ -68,3 +68,4 @@ Una riga per modifica: data, cosa è cambiato.
   fino a 4 passaggi). Coda ritentata ogni 5 minuti o subito; doppioni scartati per hash. Tolto
   l'interruttore "Senza nodo" dall'app. Ascolto IPv6+IPv4. 20 test di accettazione.
 - 2026-10-18 — App: la chat scorre da sola all'ultimo messaggio quando ne mandi uno, o quando ne arriva uno mentre sei in fondo.
+- 2026-10-18 — Benvenuto: tolta la spiegazione imprecisa sotto il campo Nodo.

@@ -52,7 +52,7 @@ impl From<rondine_core::Error> for RondineError {
 
 type Result<T> = std::result::Result<T, RondineError>;
 
-#[derive(uniffi::Record)]
+#[derive(uniffi::Record, Clone)]
 pub struct Profile {
     pub name: String,
     pub id: String,
@@ -81,7 +81,7 @@ pub struct ContactInfo {
     pub source: String,
 }
 
-#[derive(uniffi::Record)]
+#[derive(uniffi::Record, Clone)]
 pub struct Message {
     pub id: String,
     pub contact_id: String,
@@ -97,7 +97,7 @@ pub struct Message {
     pub location: Option<LocationInfo>,
 }
 
-#[derive(uniffi::Record)]
+#[derive(uniffi::Record, Clone)]
 pub struct LocationInfo {
     pub lat: f64,
     pub lon: f64,
@@ -107,7 +107,7 @@ pub struct LocationInfo {
     pub updated_at: u64,
 }
 
-#[derive(uniffi::Record)]
+#[derive(uniffi::Record, Clone)]
 pub struct AttachmentInfo {
     pub name: String,
     pub mime: String,
@@ -141,14 +141,14 @@ impl From<Delivery> for MessageStatus {
 }
 
 /// Una mia condivisione della posizione in tempo reale ancora attiva.
-#[derive(uniffi::Record)]
+#[derive(uniffi::Record, Clone)]
 pub struct LiveShare {
     pub message_id: String,
     pub contact_id: String,
     pub until: u64,
 }
 
-#[derive(uniffi::Record)]
+#[derive(uniffi::Record, Clone)]
 pub struct ChatRow {
     pub contact: ContactInfo,
     pub last: Option<Message>,
@@ -160,7 +160,7 @@ pub struct ChatRow {
     pub on_lan: bool,
 }
 
-#[derive(uniffi::Record)]
+#[derive(uniffi::Record, Clone)]
 pub struct SyncResult {
     pub new_contacts: Vec<String>,
     pub messages: Vec<Message>,
@@ -265,6 +265,78 @@ pub fn normalize_phone(input: String) -> Result<String> {
 #[derive(uniffi::Object)]
 pub struct Rondine {
     client: Arc<Mutex<Client>>,
+    /// Fotografia dello stato per le schermate, rifatta alla fine di ogni operazione: chi legge
+    /// non aspetta mai il client, che durante una sincronizzazione resta occupato dalla rete
+    /// anche per decine di secondi.
+    view: Arc<std::sync::RwLock<View>>,
+}
+
+/// Ciò che le schermate leggono, già pronto.
+#[derive(Default)]
+struct View {
+    profile: Option<Profile>,
+    chats: Vec<ChatRow>,
+    contacts: Vec<ContactInfo>,
+    /// Messaggi per contatto (chiave in b64), nell'ordine del client.
+    messages: std::collections::HashMap<String, Vec<Message>>,
+    live: Vec<LiveShare>,
+}
+
+fn view_of(c: &Client) -> View {
+    let s = c.state();
+    let profile = (|| -> Result<Profile> {
+        Ok(Profile {
+            name: s.display_name.clone(),
+            id: c.identity().to_b64(),
+            short_id: c.identity().short(),
+            node: s.node.clone(),
+            username: s.username.clone(),
+            phone: s.phone.clone(),
+            invite_link: c.invite_link()?,
+            share_link: c.share_link()?,
+            has_node: c.has_node(),
+        })
+    })()
+    .ok();
+    let chats = c
+        .chats()
+        .iter()
+        .map(|r| ChatRow {
+            contact: contact_info(&r.contact),
+            last: r.last.as_ref().map(message),
+            last_ts: r.last_ts,
+            unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
+            typing: c.is_typing(&r.contact.identity),
+            on_lan: c.on_lan(&r.contact.identity),
+        })
+        .collect();
+    let mut contacts: Vec<ContactInfo> = c.contacts().iter().map(contact_info).collect();
+    contacts.sort_by_key(|c| c.name.to_lowercase());
+    let mut messages: std::collections::HashMap<String, Vec<Message>> = Default::default();
+    for m in &s.messages {
+        messages
+            .entry(m.contact.to_b64())
+            .or_default()
+            .push(message(m));
+    }
+    let t = rondine_core::now();
+    let live = s
+        .messages
+        .iter()
+        .filter(|m| m.outgoing && m.location.as_ref().is_some_and(|l| l.is_live(t)))
+        .map(|m| LiveShare {
+            message_id: m.id.clone(),
+            contact_id: m.contact.to_b64(),
+            until: m.location.as_ref().and_then(|l| l.live_until).unwrap_or(t),
+        })
+        .collect();
+    View {
+        profile,
+        chats,
+        contacts,
+        messages,
+        live,
+    }
 }
 
 /// Esegue un'operazione sui thread del runtime tokio. UniFFI fa girare il futuro sul thread che
@@ -282,9 +354,27 @@ where
 
 impl Rondine {
     fn new(client: Client) -> Arc<Self> {
+        let view = view_of(&client);
         Arc::new(Self {
             client: Arc::new(Mutex::new(client)),
+            view: Arc::new(std::sync::RwLock::new(view)),
         })
+    }
+
+    /// Legge la fotografia (mai bloccata dalla rete).
+    fn read<T>(&self, f: impl FnOnce(&View) -> T) -> T {
+        match self.view.read() {
+            Ok(v) => f(&v),
+            Err(poisoned) => f(&poisoned.into_inner()),
+        }
+    }
+
+    /// Operazione veloce sul client, poi fotografia nuova.
+    async fn with<T>(&self, f: impl FnOnce(&mut Client) -> T) -> T {
+        let mut c = self.client.lock().await;
+        let out = f(&mut c);
+        refresh_view(&self.view, &c);
+        out
     }
 
     /// Operazione di rete sul client, fuori dal thread del chiamante.
@@ -294,11 +384,23 @@ impl Rondine {
         F: for<'a> FnOnce(&'a mut Client) -> BoxFuture<'a, Result<T>> + Send + 'static,
     {
         let client = self.client.clone();
+        let view = self.view.clone();
         on_runtime(async move {
             let mut c = client.lock().await;
-            f(&mut c).await
+            let out = f(&mut c).await;
+            // Anche dopo un errore: la parte riuscita (per esempio messaggi ritirati) si vede.
+            refresh_view(&view, &c);
+            out
         })
         .await
+    }
+}
+
+fn refresh_view(view: &std::sync::RwLock<View>, c: &Client) {
+    let fresh = view_of(c);
+    match view.write() {
+        Ok(mut v) => *v = fresh,
+        Err(poisoned) => *poisoned.into_inner() = fresh,
     }
 }
 
@@ -307,57 +409,32 @@ type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 #[uniffi::export(async_runtime = "tokio")]
 impl Rondine {
     pub async fn profile(&self) -> Result<Profile> {
+        if let Some(p) = self.read(|v| v.profile.clone()) {
+            return Ok(p);
+        }
+        // Il link d'invito non si è potuto fare: si ripete per avere l'errore vero.
         let c = self.client.lock().await;
-        let s = c.state();
-        Ok(Profile {
-            name: s.display_name.clone(),
-            id: c.identity().to_b64(),
-            short_id: c.identity().short(),
-            node: s.node.clone(),
-            username: s.username.clone(),
-            phone: s.phone.clone(),
-            invite_link: c.invite_link()?,
-            share_link: c.share_link()?,
-            has_node: c.has_node(),
-        })
+        c.invite_link()?;
+        c.share_link()?;
+        Err(RondineError::Internal("profilo non leggibile".into()))
     }
 
     pub async fn chats(&self) -> Vec<ChatRow> {
-        let c = self.client.lock().await;
-        c.chats()
-            .iter()
-            .map(|r| ChatRow {
-                contact: contact_info(&r.contact),
-                last: r.last.as_ref().map(message),
-                last_ts: r.last_ts,
-                unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
-                typing: c.is_typing(&r.contact.identity),
-                on_lan: c.on_lan(&r.contact.identity),
-            })
-            .collect()
+        self.read(|v| v.chats.clone())
     }
 
     pub async fn contacts(&self) -> Vec<ContactInfo> {
-        let c = self.client.lock().await;
-        let mut v: Vec<ContactInfo> = c.contacts().iter().map(contact_info).collect();
-        v.sort_by_key(|c| c.name.to_lowercase());
-        v
+        self.read(|v| v.contacts.clone())
     }
 
     pub async fn contact(&self, id: String) -> Result<ContactInfo> {
-        let k = key(&id)?;
-        let c = self.client.lock().await;
-        c.contacts()
-            .iter()
-            .find(|x| x.identity == k)
-            .map(contact_info)
+        self.read(|v| v.contacts.iter().find(|c| c.id == id).cloned())
             .ok_or_else(|| RondineError::NotFound("contatto sconosciuto".into()))
     }
 
     pub async fn messages(&self, contact_id: String) -> Result<Vec<Message>> {
-        let k = key(&contact_id)?;
-        let c = self.client.lock().await;
-        Ok(c.messages_with(&k).into_iter().map(message).collect())
+        key(&contact_id)?;
+        Ok(self.read(|v| v.messages.get(&contact_id).cloned().unwrap_or_default()))
     }
 
     /// Aggiunge un nodo a un profilo che non l'aveva (SPEC §12.7).
@@ -388,7 +465,7 @@ impl Rondine {
         let a: std::net::SocketAddr = addr
             .parse()
             .map_err(|_| RondineError::Invalid(format!("indirizzo non valido: {addr}")))?;
-        self.client.lock().await.add_lan_peer(k, a);
+        self.with(|c| c.add_lan_peer(k, a)).await;
         Ok(())
     }
 
@@ -407,7 +484,7 @@ impl Rondine {
 
     pub async fn set_favorite(&self, contact_id: String, favorite: bool) -> Result<()> {
         let k = key(&contact_id)?;
-        Ok(self.client.lock().await.set_favorite(&k, favorite)?)
+        Ok(self.with(|c| c.set_favorite(&k, favorite)).await?)
     }
 
     pub async fn send_text(&self, contact_id: String, body: String) -> Result<Message> {
@@ -484,20 +561,10 @@ impl Rondine {
             .await
     }
 
-    /// Le mie posizioni in tempo reale ancora attive: (id del messaggio, fino a quando).
+    /// Le mie posizioni in tempo reale ancora attive (alla fine dell'ultima operazione).
     pub async fn live_locations(&self) -> Vec<LiveShare> {
-        let c = self.client.lock().await;
         let t = rondine_core::now();
-        c.state()
-            .messages
-            .iter()
-            .filter(|m| m.outgoing && m.location.as_ref().is_some_and(|l| l.is_live(t)))
-            .map(|m| LiveShare {
-                message_id: m.id.clone(),
-                contact_id: m.contact.to_b64(),
-                until: m.location.as_ref().and_then(|l| l.live_until).unwrap_or(t),
-            })
-            .collect()
+        self.read(|v| v.live.iter().filter(|l| l.until > t).cloned().collect())
     }
 
     /// Scarica di nuovo il file di un messaggio ricevuto; restituisce il percorso.
@@ -579,11 +646,11 @@ impl Rondine {
     }
 
     pub async fn set_phone(&self, number: String) -> Result<String> {
-        Ok(self.client.lock().await.set_phone(&number)?)
+        Ok(self.with(|c| c.set_phone(&number)).await?)
     }
 
     pub async fn add_board(&self, url: String) -> Result<()> {
-        Ok(self.client.lock().await.add_board(&url)?)
+        Ok(self.with(|c| c.add_board(&url)).await?)
     }
 
     /// Pubblica e cerca in un colpo solo: è ciò che fa l'app quando legge la rubrica.
@@ -606,7 +673,7 @@ impl Rondine {
 
     pub async fn mark_verified(&self, contact_id: String) -> Result<()> {
         let k = key(&contact_id)?;
-        Ok(self.client.lock().await.mark_verified(&k)?)
+        Ok(self.with(|c| c.mark_verified(&k)).await?)
     }
 
     pub async fn safety_number(&self, contact_id: String) -> Result<String> {

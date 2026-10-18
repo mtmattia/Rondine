@@ -77,11 +77,10 @@ object Repo {
         scope.launch {
             try {
                 rondine = openProfile(profileDir)
+                // Prima la lista delle chat (dalla fotografia del client, subito), poi la rete.
+                if (rondine != null) refresh()
                 ready.value = rondine != null
-                if (rondine != null) {
-                    startLan()
-                    refresh()
-                }
+                if (rondine != null) startLan()
             } catch (e: RondineException) {
                 ready.value = false
             } finally {

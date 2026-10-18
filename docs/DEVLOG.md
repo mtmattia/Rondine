@@ -132,3 +132,9 @@ Una riga per modifica: data, cosa è cambiato.
   `--fcm-credenziali <service account>`, `POST /v1/fcm/{token}` che i nodi chiamano come un
   endpoint UnifiedPush; JWT RS256 firmato con `ring`. 1 test di accettazione con un finto Google
   che verifica la firma.
+- 2026-10-18 — App: la lista delle chat non aspetta più la rete. Il ponte UniFFI tiene una
+  fotografia dello stato (chat, profilo, contatti, messaggi, posizioni attive) rifatta alla fine
+  di ogni operazione, e le schermate leggono quella invece di aspettare il lucchetto del client,
+  tenuto da `sync` per tutta la durata della rete. All'avvio la lista si carica prima della rete
+  locale. Con un nido che non risponde la lista compariva dopo 33 s, ora insieme al titolo (~3,5 s
+  di avvio a freddo sull'emulatore).

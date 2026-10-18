@@ -1,6 +1,10 @@
-# APK di prova scaricabile: a ogni tag `v*`, e a ogni push sui branch di lavoro `ccr-*`, compila
-# l'app (Rust con cargo-ndk + Gradle) e la allega a una Release di GitHub (pre-release). È la build debug, firmata con una chiave di debug generata
-# qui: per una build firmata con la chiave del progetto servono i segreti del keystore.
+# App Android (Rust con cargo-ndk + Gradle).
+# - Tag `v*`: versione vera, firmata con la chiave unica del progetto (segreti
+#   RONDINE_FIRMA_KEYSTORE_B64 e RONDINE_FIRMA_PASSWORD): APK nella Release di GitHub e AAB per
+#   Google Play. È lo stesso APK, byte per byte, che compila F-Droid: tutti i canali hanno la
+#   stessa firma e si aggiornano a vicenda (docs/PUBBLICAZIONE.md).
+# - Branch di lavoro `ccr-*`: APK di prova (debug, chiave di debug di ogni build) in una
+#   pre-release.
 name: APK
 
 on:
@@ -31,18 +35,44 @@ jobs:
           yes | "$sdkm" --licenses > /dev/null || true
           "$sdkm" --install "ndk;29.0.14206865"
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,x86_64-linux-android
+      # La versione di Rust è quella di rust-toolchain.toml (rustup la installa da sé).
+      - name: Rust
+        run: rustup show active-toolchain
 
       - name: cargo-ndk
-        run: cargo install cargo-ndk --locked
+        run: cargo install cargo-ndk --version 4.1.2 --locked
 
-      - name: Compila l'APK
+      - name: Versione firmata
+        if: github.ref_type == 'tag'
+        working-directory: android
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEYSTORE_B64: ${{ secrets.RONDINE_FIRMA_KEYSTORE_B64 }}
+          RONDINE_FIRMA_PASSWORD: ${{ secrets.RONDINE_FIRMA_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$RONDINE_FIRMA_PASSWORD" ]; then
+            echo "Mancano i segreti della chiave di firma: vedi docs/PUBBLICAZIONE.md" >&2
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/rondine.jks"
+          export RONDINE_FIRMA_KEYSTORE="$RUNNER_TEMP/rondine.jks"
+          ./gradlew --no-daemon assembleRelease bundleRelease
+          rm "$RUNNER_TEMP/rondine.jks"
+          tag="$GITHUB_REF_NAME"
+          cp app/build/outputs/apk/release/app-release.apk "../rondine-${tag}.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "../rondine-${tag}.aab"
+          cd .. && gh release create "$tag" "rondine-${tag}.apk" "rondine-${tag}.aab" \
+            --target "$GITHUB_SHA" --title "Rondine ${tag}" \
+            --notes "Rondine ${tag}. L'APK è firmato con la stessa chiave di Google Play e F-Droid: si aggiorna sopra le altre versioni senza perdere niente. L'AAB è per Google Play."
+        shell: bash
+
+      - name: Compila l'APK di prova
+        if: github.ref_type != 'tag'
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug
 
-      - name: Pubblica nella Release
+      - name: Pubblica l'APK di prova
+        if: github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

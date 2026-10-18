@@ -124,3 +124,7 @@ Una riga per modifica: data, cosa è cambiato.
   dal repository (senza: non firmata, per F-Droid), guida `docs/PUBBLICAZIONE.md`. Provati
   `bundleRelease` e `assembleRelease` con una chiave usa e getta: AAB e APK firmati, e l'APK
   minificato crea il profilo sull'emulatore.
+- 2026-10-18 — Una sola firma per GitHub, Google Play e F-Droid, così le app si aggiornano a
+  vicenda: Rust fissato in `rust-toolchain.toml` (1.99.0) e cargo-ndk nella Action; build
+  release riproducibile (due cartelle diverse, stesso sha256); la Action firma con la chiave dai
+  segreti a ogni tag `v*` (APK e AAB nella Release); guida aggiornata in `docs/PUBBLICAZIONE.md`.

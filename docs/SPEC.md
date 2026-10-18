@@ -301,6 +301,10 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `DELETE /v1/names/{nome}` | proprietario | libera il nome (auth con la chiave dell'identità) |
 | `PUT /v1/board/{loc}` | firma nella voce | `{owner, blob, expires_at, sig}` |
 | `GET /v1/board/{loc}` | — | `[{owner, blob, expires_at}]` |
+| `POST /v1/inboxes/{inbox}/phone` | proprietario | `{phone}`: manda il codice per SMS (§13.2) |
+| `POST /v1/inboxes/{inbox}/phone/confirm` | proprietario | `{code, card}` → `Signed<PhoneClaim>` |
+| `DELETE /v1/inboxes/{inbox}/phone` | proprietario | toglie il numero dall'elenco |
+| `GET /v1/phone/{phone_hash}` | — | `{card, claim}` (§13.3) |
 
 Gli errori sono `{"error": "<codice>", "message": "<testo>"}` con lo stato HTTP adatto.
 
@@ -402,3 +406,47 @@ con le vie dirette e la mesh. Nell'app il campo "Nodo" è facoltativo.
 d'invito e i key package, poi manda a ogni contatto un `hello` (§7) con il nuovo biglietto e un
 permesso suo (etichetta `contatto:…`, da revocare per bloccarlo). Chi lo riceve aggiorna il
 biglietto e da lì consegna anche nel nodo. Cambiare nodo a chi ne ha già uno non è ancora previsto.
+
+## 13. Numero verificato
+
+Chi ha il tuo numero ti trova sempre, e sa che quel numero l'hai confermato tu: come su WhatsApp,
+con un codice di 6 cifre via SMS. È facoltativo.
+
+**Eccezione alla regola "il nodo non vede i numeri":** per mandare l'SMS il **proprio** nodo
+vede il numero una volta. Poi conserva solo `phone_hash`. Gli altri nodi non lo vedono mai.
+
+### 13.1 Hash del numero
+`phone_hash` = b64 di `Argon2id(numero E.164, sale = "rondine/v1/numero", m = 19456 KiB, t = 2,
+p = 1, 32 byte)`. Lento apposta: chi volesse provare tutti i numeri deve pagare ogni tentativo.
+
+### 13.2 Verifica
+1. `POST /v1/inboxes/{inbox}/phone` (proprietario) `{phone}`: il nodo genera un codice di 6 cifre
+   valido 10 minuti e lo manda per SMS al numero. Al massimo una richiesta al minuto e 5 al giorno
+   per casella.
+2. `POST /v1/inboxes/{inbox}/phone/confirm` (proprietario) `{code, card}`: con il codice giusto
+   (al massimo 5 tentativi) il nodo firma l'attestazione e la pubblica nell'elenco dei numeri,
+   insieme al biglietto. Un numero già verificato da un altro passa a chi lo conferma adesso
+   (come quando una SIM cambia proprietario).
+
+```json
+Signed<PhoneClaim>, firmato dal nodo:
+{ "v": 1, "phone_hash": "<b64>", "identity": "<b64 chiave>", "node": "https://nodo.example",
+  "issued_at": 1792240000 }
+```
+
+3. `DELETE /v1/inboxes/{inbox}/phone` (proprietario): toglie il numero dall'elenco.
+
+### 13.3 Ricerca
+`GET /v1/phone/{phone_hash}` → `{card, claim}` oppure 404. Il client chiede al proprio nodo e
+alle bacheche del suo elenco (§9). Controlla le firme, che `claim.identity` sia chi firma il
+biglietto, che `claim` sia firmata con la `node_key` di `GET /v1/info` del nodo interrogato e che
+`claim.node` sia quel nodo, e che `claim.phone_hash` sia l'hash del numero cercato; mostra "numero verificato da
+<nodo>". La fiducia è nel nodo che ha mandato l'SMS.
+
+### 13.4 Invio degli SMS
+Per ora solo **in prova**: il nodo scrive il codice nel suo log invece di spedirlo. Il canale vero
+(telefono Android del nodo con un gateway SMS, o un servizio a pagamento) si sceglierà dopo.
+
+Limite noto: chi gestisce un nodo vede i numeri che verifica e potrebbe provare tutti i numeri
+contro il proprio elenco; l'Argon2id lo rallenta, non lo impedisce.
+

@@ -86,3 +86,7 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-18 — GitHub Actions (`.github/workflows/apk.yml`): a ogni tag `v*` compila l'APK di prova
   (debug) e lo pubblica in una Release scaricabile; anche a ogni push sui branch `ccr-*`, con un
   tag di prova creato dalla Action (il push di tag da qui è bloccato dal proxy).
+- 2026-10-18 — Numero verificato via SMS (SPEC §13): codice di 6 cifre dal proprio nodo (10 minuti,
+  5 tentativi, 1 al minuto e 5 al giorno), attestazione firmata dal nodo ed elenco per hash
+  Argon2id; `rondine aggiungi <numero>` trova chi l'ha verificato. CLI `rondine numero --sms` e
+  `rondine codice`. SMS solo "in prova", nel log del nodo. 1 test unitario e 2 di accettazione.

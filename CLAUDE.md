@@ -12,7 +12,9 @@ Leggi questo file prima di toccare il codice, poi `docs/SPEC.md` per il protocol
    per le derivazioni. Nuove primitive o nuovi schemi vanno prima descritti in `docs/SPEC.md`.
 2. **Il nodo non deve poter leggere niente.** Tutto ciò che un nodo conserva o inoltra è cifrato
    o è un identificativo opaco. Se una modifica fa vedere al nodo testo, rubrica, numeri di
-   telefono o chi parla con chi, è sbagliata.
+   telefono o chi parla con chi, è sbagliata. Unica eccezione, scelta dall'utente: per mandare
+   l'SMS di verifica del numero (SPEC §13) il **proprio** nodo vede il numero una volta; poi ne
+   conserva solo l'hash.
 3. **Niente panic nel codice di produzione.** Niente `unwrap()`/`expect()` fuori dai test: si
    restituiscono errori (`thiserror` nelle librerie, `anyhow` nei binari). Ogni bug corretto
    porta con sé un test che lo riproduce.

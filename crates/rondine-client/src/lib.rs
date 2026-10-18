@@ -184,6 +184,7 @@ impl Client {
                 contacts: Vec::new(),
                 messages: Vec::new(),
                 outbox: Vec::new(),
+                phone_verified: false,
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -230,6 +231,7 @@ impl Client {
                 contacts: Vec::new(),
                 messages: Vec::new(),
                 outbox: Vec::new(),
+                phone_verified: false,
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -782,6 +784,12 @@ impl Client {
     /// `<nodo>/invito#…`), link `rondine:` o nome utente scritto a mano, anche dentro un
     /// messaggio incollato per intero.
     pub async fn add(&mut self, input: &str) -> Result<Contact> {
+        // Tutto il testo è un numero di telefono (scritto come capita): numero verificato.
+        if looks_like_phone(input)
+            && let Ok(n) = phone::normalize(input, phone::DEFAULT_COUNTRY)
+        {
+            return self.add_by_phone(&n).await;
+        }
         for token in input.split_whitespace() {
             let t = token.trim_matches(|c: char| "<>\"'(),;".contains(c) || c == '.');
             match parse_target(t) {
@@ -952,6 +960,7 @@ impl Client {
                 added_at: now(),
                 favorite: false,
                 addrs: Vec::new(),
+                phone_verified_by: None,
             });
         }
         self.start_chat(&info.identity).await?;
@@ -1591,6 +1600,7 @@ impl Client {
                     added_at: now(),
                     favorite: false,
                     addrs: Vec::new(),
+                    phone_verified_by: None,
                 });
             }
         }
@@ -1818,6 +1828,120 @@ impl Client {
         Ok(n)
     }
 
+    // ---------- numero verificato (SPEC §13) ----------
+
+    /// Chiede al mio nodo di mandarmi il codice per SMS.
+    pub async fn request_phone(&mut self, number: &str) -> Result<String> {
+        self.require_node()?;
+        let n = phone::normalize(number, phone::DEFAULT_COUNTRY)?;
+        let path = format!("/v1/inboxes/{}/phone", self.state.inbox);
+        self.net
+            .owner(
+                &self.identity,
+                Method::POST,
+                &self.state.node,
+                &path,
+                Some(&json!({ "phone": n })),
+            )
+            .await?;
+        self.state.phone = Some(n.clone());
+        self.state.phone_verified = false;
+        self.save()?;
+        Ok(n)
+    }
+
+    /// Conferma il numero con il codice ricevuto: da qui chi ha il numero mi trova.
+    pub async fn confirm_phone(&mut self, code: &str) -> Result<()> {
+        self.require_node()?;
+        let permit = match &self.state.public_permit {
+            Some(p) => p.clone(),
+            None => {
+                let p = self.new_permit("pubblico").await?;
+                self.state.public_permit = Some(p.clone());
+                p
+            }
+        };
+        let card = self.card_with(Some(&permit))?;
+        let path = format!("/v1/inboxes/{}/phone/confirm", self.state.inbox);
+        self.net
+            .owner(
+                &self.identity,
+                Method::POST,
+                &self.state.node,
+                &path,
+                Some(&json!({ "code": code.trim(), "card": card })),
+            )
+            .await?;
+        self.state.phone_verified = true;
+        self.save()
+    }
+
+    /// Chi ha verificato questo numero: il suo biglietto e il nodo che l'ha verificato. Si
+    /// chiede al mio nodo e alle bacheche del mio elenco.
+    pub async fn find_by_phone(&self, number: &str) -> Result<(SignedCard, String)> {
+        let n = phone::normalize(number, phone::DEFAULT_COUNTRY)?;
+        let hash = phone::phone_hash(&n)?;
+        let mut nodes: Vec<String> = Vec::new();
+        if self.has_node() {
+            nodes.push(self.state.node.clone());
+        }
+        for b in &self.state.boards {
+            if !nodes.contains(b) {
+                nodes.push(b.clone());
+            }
+        }
+        for node in nodes {
+            if let Ok(found) = self.phone_entry(&node, &hash).await {
+                return Ok(found);
+            }
+        }
+        Err(Error::NotFound(format!(
+            "nessuno ha verificato il numero {n} su Rondine"
+        )))
+    }
+
+    /// La voce di `hash` nell'elenco dei numeri di `node`, se le firme tornano (SPEC §13.3):
+    /// attestazione firmata dalla chiave di quel nodo, per lo stesso numero e la stessa persona
+    /// del biglietto.
+    async fn phone_entry(&self, node: &str, hash: &str) -> Result<(SignedCard, String)> {
+        #[derive(serde::Deserialize)]
+        struct Entry {
+            card: SignedCard,
+            claim: phone::SignedPhoneClaim,
+        }
+        #[derive(serde::Deserialize)]
+        struct Info {
+            node_key: PublicKey,
+        }
+        let entry: Entry = self.net.get(node, &format!("/v1/phone/{hash}")).await?;
+        let info: Info = self.net.get(node, "/v1/info").await?;
+        let card = verify_card(&entry.card)?;
+        let claim = entry.claim.verify_by(&info.node_key)?;
+        let host = node_host(node)?;
+        if claim.phone_hash != hash
+            || claim.identity != card.identity
+            || node_host(&claim.node)? != host
+        {
+            return Err(Error::Invalid("attestazione del numero non valida".into()));
+        }
+        Ok((entry.card, host))
+    }
+
+    /// Aggiunge chi ha verificato questo numero (SPEC §13.3).
+    pub async fn add_by_phone(&mut self, number: &str) -> Result<Contact> {
+        let n = phone::normalize(number, phone::DEFAULT_COUNTRY)?;
+        let (card, verified_by) = self.find_by_phone(&n).await?;
+        let mut contact = self.connect(card, Source::Rubrica).await?;
+        if let Some(c) = self.contact_mut(&contact.identity) {
+            c.phone = Some(n.clone());
+            c.phone_verified_by = Some(verified_by.clone());
+        }
+        self.save()?;
+        contact.phone = Some(n);
+        contact.phone_verified_by = Some(verified_by);
+        Ok(contact)
+    }
+
     /// Aggiunge una bacheca all'elenco usato per la rubrica.
     pub fn add_board(&mut self, url: &str) -> Result<()> {
         node_host(url)?;
@@ -1938,6 +2062,7 @@ impl Client {
                     added_at: now(),
                     favorite: false,
                     addrs: Vec::new(),
+                    phone_verified_by: None,
                 });
             } else if let Some(c) = self.contact_mut(&info.identity) {
                 c.phone = Some(other.clone());
@@ -2039,4 +2164,14 @@ fn remember(list: &mut Vec<String>, item: String) {
         let extra = list.len() - SEEN_MAX;
         list.drain(..extra);
     }
+}
+
+/// Il testo è solo un numero di telefono (cifre e i soliti separatori)?
+fn looks_like_phone(input: &str) -> bool {
+    let t = input.trim();
+    let digits = t.chars().filter(char::is_ascii_digit).count();
+    digits >= 6
+        && t.chars()
+            .enumerate()
+            .all(|(i, c)| c.is_ascii_digit() || " -.()/".contains(c) || (c == '+' && i == 0))
 }

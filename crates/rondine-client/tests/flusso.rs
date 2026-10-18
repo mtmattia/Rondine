@@ -960,3 +960,89 @@ async fn sono_collegato_aspetta_chi_non_e_connesso() -> R {
     assert_eq!(texts(&x.sync().await?), ["ti trovo ancora"]);
     Ok(())
 }
+
+/// Nodo con accesso allo stato, per leggere gli SMS "in prova" (SPEC §13.4).
+async fn start_node_with_state() -> Result<(String, AppState), Box<dyn std::error::Error>> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: url.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+    })?;
+    tokio::spawn(rondine_nodo::serve(listener, state.clone()));
+    Ok((url, state))
+}
+
+/// Ultimo codice mandato "per SMS" a un numero.
+fn sms_code(state: &AppState, phone: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let (_, text) = state
+        .sent_sms()
+        .into_iter()
+        .rev()
+        .find(|(to, _)| to == phone)
+        .ok_or("nessun SMS")?;
+    Ok(text
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>())
+}
+
+#[tokio::test]
+async fn numero_verificato_con_sms_e_trovato_da_chi_lo_ha() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+
+    // Prima della verifica il numero non porta a nessuno.
+    mattia.request_phone("340 111 2233").await?;
+    assert!(silvia.add("340 111 2233").await.is_err());
+
+    // Codice sbagliato: rifiutato. Codice giusto: numero verificato.
+    let code = sms_code(&state, "+393401112233")?;
+    assert_eq!(code.len(), 6, "{code}");
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    assert!(mattia.confirm_phone(wrong).await.is_err());
+    mattia.confirm_phone(&code).await?;
+    assert!(mattia.state().phone_verified);
+
+    // Silvia ha solo il numero (scritto come le pare): lo trova, verificato dal nodo.
+    let c = silvia.add("+39 340-111-2233").await?;
+    assert_eq!(c.display_name, "Mattia");
+    assert_eq!(c.phone.as_deref(), Some("+393401112233"));
+    assert!(c.phone_verified_by.is_some());
+    silvia
+        .send_text(&mattia.identity(), "ti ho trovato col numero")
+        .await?;
+    let ev = mattia.sync().await?;
+    assert_eq!(texts(&ev), ["ti ho trovato col numero"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn codice_al_massimo_cinque_tentativi_e_numero_al_nuovo_proprietario() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut luca = profile(&tmp, "Luca", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+
+    mattia.request_phone("3405556677").await?;
+    let code = sms_code(&state, "+393405556677")?;
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    for _ in 0..5 {
+        assert!(mattia.confirm_phone(wrong).await.is_err());
+    }
+    // Dopo 5 errori anche il codice giusto non vale più: serve un codice nuovo.
+    assert!(mattia.confirm_phone(&code).await.is_err());
+
+    // Luca verifica lo stesso numero (la SIM è passata a lui): ora porta a Luca.
+    luca.request_phone("3405556677").await?;
+    luca.confirm_phone(&sms_code(&state, "+393405556677")?)
+        .await?;
+    let c = silvia.add("3405556677").await?;
+    assert_eq!(c.display_name, "Luca");
+    Ok(())
+}

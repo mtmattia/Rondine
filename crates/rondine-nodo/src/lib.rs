@@ -1,5 +1,6 @@
 //! Nodo Rondine: API HTTP descritta in `docs/SPEC.md` §11.
 
+mod phone;
 mod push;
 mod store;
 mod web;
@@ -50,6 +51,8 @@ struct Inner {
     pusher: Pusher,
     rate: Mutex<HashMap<String, (u64, u32)>>,
     last_wake: Mutex<HashMap<String, WakeSlot>>,
+    /// SMS "in prova" (SPEC §13.4): finiscono qui e nel log invece che sul telefono.
+    sms: Mutex<Vec<(String, String)>>,
     /// Durata dei depositi effimeri ("sta scrivendo"), in secondi.
     ephemeral_ttl: std::sync::atomic::AtomicU64,
 }
@@ -72,7 +75,24 @@ impl AppState {
             rate: Mutex::new(HashMap::new()),
             last_wake: Mutex::new(HashMap::new()),
             ephemeral_ttl: std::sync::atomic::AtomicU64::new(EPHEMERAL_TTL_SECS),
+            sms: Mutex::new(Vec::new()),
         })))
+    }
+
+    /// Manda un SMS. Per ora solo **in prova** (SPEC §13.4): il testo va nel log del nodo e in
+    /// memoria (per i test e per chi gestisce il nodo), non a un telefono.
+    fn send_sms(&self, to: &str, text: &str) {
+        tracing::info!("SMS in prova a {to}: {text}");
+        if let Ok(mut v) = self.0.sms.lock() {
+            v.push((to.to_string(), text.to_string()));
+            let extra = v.len().saturating_sub(100);
+            v.drain(..extra);
+        }
+    }
+
+    /// SMS mandati "in prova" (ultimi 100): per i test.
+    pub fn sent_sms(&self) -> Vec<(String, String)> {
+        self.0.sms.lock().map(|v| v.clone()).unwrap_or_default()
     }
 
     /// Cambia la durata dei depositi effimeri: serve ai test.
@@ -115,6 +135,12 @@ pub fn router(state: AppState) -> Router {
             put(put_name).get(get_name).delete(delete_name),
         )
         .route("/v1/board/{loc}", put(put_board).get(get_board))
+        .route(
+            "/v1/inboxes/{inbox}/phone",
+            post(phone::request).delete(phone::remove),
+        )
+        .route("/v1/inboxes/{inbox}/phone/confirm", post(phone::confirm))
+        .route("/v1/phone/{phone_hash}", get(phone::lookup))
         .route("/invito", get(web::invite_page))
         .route("/{at_name}", get(web::name_page))
         .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES * 2))

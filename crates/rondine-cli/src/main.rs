@@ -49,13 +49,21 @@ enum Cmd {
         #[arg(long)]
         nuovo: bool,
     },
-    /// Aggiunge un contatto da un link d'invito o da un nome utente (@nome@nodo).
+    /// Aggiunge un contatto da un link d'invito, da un nome utente (@nome@nodo) o da un numero
+    /// verificato.
     Aggiungi { chi: String },
     /// Gestisce il tuo nome utente.
     #[command(subcommand)]
     Nome(NomeCmd),
-    /// Imposta il tuo numero di telefono (resta sul dispositivo).
-    Numero { numero: String },
+    /// Imposta il tuo numero di telefono (resta sul dispositivo). Con --sms il tuo nodo ti
+    /// manda un codice per verificarlo: poi chi ha il numero ti trova.
+    Numero {
+        numero: String,
+        #[arg(long)]
+        sms: bool,
+    },
+    /// Conferma il numero con il codice ricevuto per SMS.
+    Codice { codice: String },
     /// Aggiunge una bacheca per la ricerca in rubrica.
     Bacheca { url: String },
     /// Ricerca dalla rubrica.
@@ -194,6 +202,9 @@ fn describe(c: &Contact) -> String {
     }
     if let Some(p) = &c.phone {
         s.push_str(&format!(" {p}"));
+        if let Some(by) = &c.phone_verified_by {
+            s.push_str(&format!(" (numero verificato da {by})"));
+        }
     }
     let stato = if c.blocked {
         "bloccato"
@@ -458,7 +469,15 @@ async fn main() -> anyhow::Result<()> {
                     .map(|u| format!("@{u}"))
                     .unwrap_or("—".into())
             );
-            println!("Numero:   {}", s.phone.as_deref().unwrap_or("—"));
+            println!(
+                "Numero:   {}{}",
+                s.phone.as_deref().unwrap_or("—"),
+                if s.phone_verified {
+                    " (verificato)"
+                } else {
+                    ""
+                }
+            );
             println!("Bacheche: {}", s.boards.join(", "));
             println!("Link:     {}", c.share_link()?);
             println!("Invito:   {}", c.invite_link()?);
@@ -487,7 +506,17 @@ async fn main() -> anyhow::Result<()> {
             let info = card.verify()?;
             println!("{}  {}", info.display_name, info.identity.short());
         }
-        Cmd::Numero { numero } => println!("Numero impostato: {}", c.set_phone(&numero)?),
+        Cmd::Numero { numero, sms: false } => {
+            println!("Numero impostato: {}", c.set_phone(&numero)?)
+        }
+        Cmd::Numero { numero, sms: true } => {
+            let n = c.request_phone(&numero).await?;
+            println!("Codice mandato per SMS a {n}. Confermalo con `rondine codice <codice>`.");
+        }
+        Cmd::Codice { codice } => {
+            c.confirm_phone(&codice).await?;
+            println!("Numero verificato: chi lo ha ti trova su Rondine.");
+        }
         Cmd::Bacheca { url } => {
             c.add_board(&url)?;
             println!("Bacheche: {}", c.state().boards.join(", "));

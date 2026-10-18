@@ -29,6 +29,21 @@ pub struct PushTarget {
 }
 
 const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS phone_pending (
+    inbox TEXT PRIMARY KEY,
+    phone_hash TEXT NOT NULL,
+    code TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    last_sent_at INTEGER NOT NULL,
+    day INTEGER NOT NULL,
+    sent_today INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS phone_dir (
+    phone_hash TEXT PRIMARY KEY,
+    inbox TEXT NOT NULL,
+    entry TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS inboxes (
     inbox TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
@@ -118,6 +133,95 @@ impl Store {
                 r.get(0)
             })
             .optional()
+    }
+
+    // --- numeri verificati (SPEC §13) ---
+
+    pub fn phone_pending(&self, inbox: &str) -> Result<Option<PhonePending>> {
+        self.conn
+            .query_row(
+                "SELECT phone_hash, code, expires_at, attempts, last_sent_at, day, sent_today
+                 FROM phone_pending WHERE inbox = ?1",
+                [inbox],
+                |r| {
+                    Ok(PhonePending {
+                        phone_hash: r.get(0)?,
+                        code: r.get(1)?,
+                        expires_at: to_u64(r.get(2)?),
+                        attempts: to_u64(r.get(3)?),
+                        last_sent_at: to_u64(r.get(4)?),
+                        day: to_u64(r.get(5)?),
+                        sent_today: to_u64(r.get(6)?),
+                    })
+                },
+            )
+            .optional()
+    }
+
+    pub fn put_phone_pending(&self, inbox: &str, p: &PhonePending) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO phone_pending
+               (inbox, phone_hash, code, expires_at, attempts, last_sent_at, day, sent_today)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(inbox) DO UPDATE SET phone_hash = excluded.phone_hash,
+               code = excluded.code, expires_at = excluded.expires_at,
+               attempts = excluded.attempts, last_sent_at = excluded.last_sent_at,
+               day = excluded.day, sent_today = excluded.sent_today",
+            params![
+                inbox,
+                p.phone_hash,
+                p.code,
+                to_i64(p.expires_at),
+                to_i64(p.attempts),
+                to_i64(p.last_sent_at),
+                to_i64(p.day),
+                to_i64(p.sent_today)
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn phone_attempt(&self, inbox: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE phone_pending SET attempts = attempts + 1 WHERE inbox = ?1",
+            [inbox],
+        )?;
+        Ok(())
+    }
+
+    /// Verifica riuscita: il codice non vale più (restano i contatori per i limiti).
+    pub fn phone_done(&self, inbox: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE phone_pending SET code = '', expires_at = 0 WHERE inbox = ?1",
+            [inbox],
+        )?;
+        Ok(())
+    }
+
+    /// Pubblica (o sposta a questa casella) un numero verificato.
+    pub fn put_phone_dir(&self, phone_hash: &str, inbox: &str, entry: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO phone_dir (phone_hash, inbox, entry) VALUES (?1, ?2, ?3)
+             ON CONFLICT(phone_hash) DO UPDATE SET inbox = excluded.inbox, entry = excluded.entry",
+            params![phone_hash, inbox, entry],
+        )?;
+        Ok(())
+    }
+
+    pub fn phone_dir(&self, phone_hash: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT entry FROM phone_dir WHERE phone_hash = ?1",
+                [phone_hash],
+                |r| r.get(0),
+            )
+            .optional()
+    }
+
+    pub fn delete_phone_dir(&self, inbox: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM phone_dir WHERE inbox = ?1", [inbox])?;
+        Ok(())
     }
 
     // --- permessi ---
@@ -358,4 +462,16 @@ impl Store {
             .execute("DELETE FROM board WHERE expires_at <= ?1", [to_i64(now)])?;
         Ok(())
     }
+}
+
+/// Verifica del numero in corso per una casella (SPEC §13.2).
+#[derive(Debug, Clone)]
+pub struct PhonePending {
+    pub phone_hash: String,
+    pub code: String,
+    pub expires_at: u64,
+    pub attempts: u64,
+    pub last_sent_at: u64,
+    pub day: u64,
+    pub sent_today: u64,
 }

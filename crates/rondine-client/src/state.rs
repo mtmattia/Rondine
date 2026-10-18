@@ -40,6 +40,9 @@ pub struct Contact {
     /// Indirizzi per la consegna diretta, dall'ultimo "sono collegato" (SPEC §12.3).
     #[serde(default)]
     pub addrs: Vec<String>,
+    /// Trovato col numero verificato via SMS: il nodo che l'ha verificato (SPEC §13).
+    #[serde(default)]
+    pub phone_verified_by: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -137,6 +140,9 @@ pub struct State {
     /// Buste in attesa di una via per il contatto (SPEC §12.4).
     #[serde(default)]
     pub outbox: Vec<Outgoing>,
+    /// Il mio numero è verificato via SMS dal mio nodo (SPEC §13).
+    #[serde(default)]
+    pub phone_verified: bool,
     /// Hash delle ultime buste elaborate, per scartare i doppioni (SPEC §12.6).
     #[serde(default)]
     pub seen_blobs: Vec<String>,

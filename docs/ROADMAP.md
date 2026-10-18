@@ -16,6 +16,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Permessi di consegna revocabili (blocco contatto) | ✅ | |
 | Nome utente univoco `nome@nodo` | ✅ | |
 | Scoperta dalla rubrica a coppie | ✅ | bacheche comuni tra nodi diversi |
+| Numero verificato via SMS | 🟡 | SPEC §13: client, nodo e CLI; SMS solo "in prova" (nel log del nodo); manca nell'app e il canale SMS vero |
 | Invito via SMS | 🟡 | l'SMS parte; il link `rondine:` non è cliccabile negli SMS: serve una pagina https di rimando |
 | Numero di sicurezza | ✅ | SPEC §10 |
 | Notifiche push (UnifiedPush) | ✅ | provate sull'emulatore con ntfy e un server ntfy locale, anche ad app chiusa |

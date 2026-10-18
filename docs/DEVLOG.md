@@ -143,3 +143,8 @@ Una riga per modifica: data, cosa è cambiato.
   UnifiedPush), stesso pacchetto e stessa firma. Provato sull'emulatore: la versione play ottiene
   il token FCM e registra `…/v1/fcm/<token>` sul nodo; foss → play → foss si installano una sopra
   l'altra tenendo il profilo. La Action pubblica APK foss e AAB play.
+- 2026-10-18 — FCM provato con Google vero: nido locale con la chiave del service account,
+  versione play sull'emulatore con il processo chiuso; un messaggio dalla CLI ha risvegliato
+  l'app attraverso FCM e mostrato la notifica. Il nido pubblico di Mattia (servizio systemd
+  utente `rondine-nodo`) è aggiornato alla versione attuale con `RONDINE_FCM_CREDENZIALI`; copia
+  del binario e dei dati vecchi in `~/.local/share/rondine/backup-20261018-2110`.

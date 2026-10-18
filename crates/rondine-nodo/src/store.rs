@@ -29,6 +29,13 @@ pub struct PushTarget {
 }
 
 const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS files (
+    id TEXT PRIMARY KEY,
+    inbox TEXT NOT NULL,
+    data BLOB NOT NULL,
+    received_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS files_inbox ON files (inbox);
 CREATE TABLE IF NOT EXISTS phone_pending (
     inbox TEXT PRIMARY KEY,
     phone_hash TEXT NOT NULL,
@@ -447,6 +454,45 @@ impl Store {
         Ok(())
     }
 
+    // --- file (SPEC §6.2) ---
+
+    pub fn put_file(&self, id: &str, inbox: &str, data: &[u8], now: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO files (id, inbox, data, received_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, inbox, data, to_i64(now)],
+        )?;
+        Ok(())
+    }
+
+    pub fn file(&self, inbox: &str, id: &str) -> Result<Option<Vec<u8>>> {
+        self.conn
+            .query_row(
+                "SELECT data FROM files WHERE inbox = ?1 AND id = ?2",
+                [inbox, id],
+                |r| r.get(0),
+            )
+            .optional()
+    }
+
+    pub fn delete_file(&self, inbox: &str, id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM files WHERE inbox = ?1 AND id = ?2",
+            [inbox, id],
+        )?;
+        Ok(())
+    }
+
+    /// Spazio occupato dai file di una casella.
+    pub fn file_bytes(&self, inbox: &str) -> Result<u64> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM files WHERE inbox = ?1",
+                [inbox],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(to_u64)
+    }
+
     // --- pulizia ---
 
     pub fn purge(&self, now: u64, message_ttl: u64) -> Result<()> {
@@ -457,6 +503,10 @@ impl Store {
         self.conn.execute(
             "DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?1",
             [to_i64(now)],
+        )?;
+        self.conn.execute(
+            "DELETE FROM files WHERE received_at < ?1",
+            [to_i64(now.saturating_sub(message_ttl))],
         )?;
         self.conn
             .execute("DELETE FROM board WHERE expires_at <= ?1", [to_i64(now)])?;

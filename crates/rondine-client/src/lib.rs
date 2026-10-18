@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use reqwest::Method;
 use rondine_core::card::{INVITE_PREFIX, invite_link, parse_invite, verify_card};
 use rondine_core::discovery::{self, BoardEntry, DiscoveryRecord};
-use rondine_core::envelope::{AppMessage, Envelope, ReceiptStatus};
+use rondine_core::envelope::{AppMessage, Envelope, FileMsg, ReceiptStatus};
 use rondine_core::username::{Handle, NAME_LINK_PREFIX, NameClaim, node_host, normalize_name};
 use rondine_core::{
     Card, Identity, PublicKey, Signed, SignedCard, SignedPermit, b64, check_version, now, phone,
@@ -24,9 +24,75 @@ use serde_json::json;
 pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
 pub use state::{
-    ChatMessage, Contact, Delivery, GroupChat, GroupMember, GroupMessage, GroupRef, Outgoing,
-    Source, State,
+    Attachment, ChatMessage, Contact, Delivery, GroupChat, GroupMember, GroupMessage, GroupRef,
+    Outgoing, Source, State,
 };
+
+/// Foto o documento da mandare (SPEC §7.5).
+#[derive(Clone, Debug, Default)]
+pub struct NewFile {
+    pub name: String,
+    pub mime: String,
+    pub data: Vec<u8>,
+    pub caption: Option<String>,
+    /// Anteprima JPEG, al massimo 16 KiB (la prepara l'app).
+    pub thumb: Option<Vec<u8>>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+impl NewFile {
+    pub fn new(name: &str, mime: &str, data: Vec<u8>) -> Self {
+        Self {
+            name: name.to_string(),
+            mime: mime.to_string(),
+            data,
+            ..Self::default()
+        }
+    }
+
+    /// Legge un file dal disco; il tipo si ricava dall'estensione.
+    pub fn from_path(path: &Path) -> Result<Self> {
+        let meta = std::fs::metadata(path)?;
+        if meta.len() > rondine_core::file::MAX_FILE_BYTES {
+            return Err(Error::Invalid("file troppo grande (massimo 64 MiB)".into()));
+        }
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "file".into());
+        Ok(Self::new(&name, mime_for(&name), std::fs::read(path)?))
+    }
+}
+
+/// Tipo MIME dall'estensione, per i file più comuni.
+pub fn mime_for(name: &str) -> &'static str {
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "heic" => "image/heic",
+        "mp4" => "video/mp4",
+        "mp3" => "audio/mpeg",
+        "ogg" | "opus" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "pdf" => "application/pdf",
+        "txt" => "text/plain",
+        "zip" => "application/zip",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        _ => "application/octet-stream",
+    }
+}
 
 use groups::Batch;
 
@@ -34,6 +100,8 @@ use net::{Net, parse};
 
 const STATE_FILE: &str = "stato.json";
 const MLS_FILE: &str = "mls.bin";
+/// Cartella del profilo con foto e documenti (SPEC §7.5).
+const FILES_DIR: &str = "file";
 /// Key package caricati sul nodo alla creazione (l'ultimo è di riserva).
 const KEYPACKAGE_BATCH: usize = 20;
 /// Key package offerti in rete locale a chi avvia una chat (SPEC §12.2).
@@ -43,6 +111,7 @@ const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 
 /// Cosa è successo durante una sincronizzazione.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)] // eventi di breve vita: non vale la pena di un Box
 pub enum Event {
     NewContact {
         identity: PublicKey,
@@ -1228,26 +1297,7 @@ impl Client {
         if body.is_empty() {
             return Err(Error::Invalid("messaggio vuoto".into()));
         }
-        let contact = self
-            .state
-            .contacts
-            .iter()
-            .find(|c| &c.identity == to)
-            .cloned()
-            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
-        if contact.blocked {
-            return Err(Error::Invalid("il contatto è bloccato".into()));
-        }
-        if contact.groups.is_empty() {
-            self.start_chat(to).await?;
-        }
-        let contact = self
-            .state
-            .contacts
-            .iter()
-            .find(|c| &c.identity == to)
-            .cloned()
-            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
+        let contact = self.chat_contact(to).await?;
         let msg = ChatMessage {
             id: random_id(),
             contact: *to,
@@ -1256,6 +1306,7 @@ impl Client {
             ts: now(),
             read: true,
             status: Delivery::Sent,
+            attachment: None,
         };
         let app = AppMessage::Text {
             v: 1,
@@ -1276,6 +1327,257 @@ impl Client {
         self.state.messages.push(msg.clone());
         self.save()?;
         Ok(msg)
+    }
+
+    /// Il contatto a cui scrivere, con la chat già avviata.
+    async fn chat_contact(&mut self, to: &PublicKey) -> Result<Contact> {
+        let contact = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == to)
+            .cloned()
+            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
+        if contact.blocked {
+            return Err(Error::Invalid("il contatto è bloccato".into()));
+        }
+        if contact.groups.is_empty() {
+            self.start_chat(to).await?;
+        }
+        self.state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == to)
+            .cloned()
+            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))
+    }
+
+    // ---------- foto e documenti (SPEC §7.5) ----------
+
+    /// Manda una foto o un documento. Il file si cifra qui; se è piccolo viaggia dentro il
+    /// messaggio, altrimenti si carica nella casella del contatto sul suo nodo.
+    pub async fn send_file(&mut self, to: &PublicKey, file: NewFile) -> Result<ChatMessage> {
+        if file.data.is_empty() {
+            return Err(Error::Invalid("file vuoto".into()));
+        }
+        if file
+            .thumb
+            .as_ref()
+            .is_some_and(|t| t.len() > rondine_core::file::MAX_THUMB_BYTES)
+        {
+            return Err(Error::Invalid("anteprima troppo grande".into()));
+        }
+        let contact = self.chat_contact(to).await?;
+        let sealed = rondine_core::file::seal(&file.data)?;
+        let id = random_id();
+        let (at, data) = if sealed.ciphertext.len() <= rondine_core::file::MAX_INLINE_BYTES {
+            (None, Some(b64::encode(&sealed.ciphertext)))
+        } else {
+            let info = verify_card(&contact.card)?;
+            let Some((node, inbox, permit)) = info.mailbox() else {
+                return Err(Error::Invalid(format!(
+                    "{} non ha un nodo: si possono mandare solo file fino a 64 KiB",
+                    contact.display_name
+                )));
+            };
+            let res = self
+                .net
+                .upload_file(
+                    node,
+                    &format!("/v1/inboxes/{inbox}/files"),
+                    permit,
+                    sealed.ciphertext,
+                )
+                .await?;
+            let up: serde_json::Value = parse(&res)?;
+            let file_id = up["id"]
+                .as_str()
+                .ok_or_else(|| Error::Invalid("il nodo non ha dato l'id del file".into()))?;
+            (
+                Some(rondine_core::file::FileAt {
+                    node: node.to_string(),
+                    file: file_id.to_string(),
+                }),
+                None,
+            )
+        };
+        let caption = file
+            .caption
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string);
+        let ts = now();
+        let path = self.store_file(&id, &file.name, &file.data)?;
+        let app = AppMessage::File(Box::new(FileMsg {
+            v: 1,
+            id: id.clone(),
+            ts,
+            name: rondine_core::file::safe_name(&file.name),
+            mime: file.mime.clone(),
+            size: file.data.len() as u64,
+            caption: caption.clone(),
+            key: sealed.key,
+            hash: sealed.hash,
+            at,
+            data,
+            thumb: file.thumb.as_ref().map(b64::encode),
+            width: file.width,
+            height: file.height,
+        }));
+        let mut msg = ChatMessage {
+            id,
+            contact: *to,
+            outgoing: true,
+            body: caption.unwrap_or_default(),
+            ts,
+            read: true,
+            status: Delivery::Sent,
+            attachment: Some(Attachment {
+                name: rondine_core::file::safe_name(&file.name),
+                mime: file.mime,
+                size: file.data.len() as u64,
+                path: Some(path.to_string_lossy().into_owned()),
+                thumb: file.thumb,
+                width: file.width,
+                height: file.height,
+                key: String::new(),
+                hash: String::new(),
+                at: None,
+            }),
+        };
+        if self
+            .send_app_with(&contact, &app, false, Some(&msg.id))
+            .await?
+            == Route::Queued
+        {
+            msg.status = Delivery::Pending;
+        }
+        self.typing_sent.remove(to);
+        self.state.messages.push(msg.clone());
+        self.save()?;
+        Ok(msg)
+    }
+
+    /// Scarica dal mio nodo il file di un messaggio ricevuto, lo decifra e lo salva sul
+    /// telefono; poi lo cancella dal nodo. Restituisce dove l'ha salvato.
+    pub async fn download(&mut self, message_id: &str) -> Result<PathBuf> {
+        let m = self
+            .state
+            .messages
+            .iter()
+            .find(|m| m.id == message_id)
+            .ok_or_else(|| Error::NotFound("messaggio sconosciuto".into()))?;
+        let a = m
+            .attachment
+            .clone()
+            .ok_or_else(|| Error::Invalid("il messaggio non ha un file".into()))?;
+        if let Some(p) = &a.path
+            && Path::new(p).exists()
+        {
+            return Ok(PathBuf::from(p));
+        }
+        let Some(at) = a.at else {
+            return Err(Error::NotFound("il file non è più disponibile".into()));
+        };
+        self.require_node()?;
+        if node_host(&at.node)? != node_host(&self.state.node)? {
+            return Err(Error::Invalid(
+                "il file è su un nodo che non è il mio".into(),
+            ));
+        }
+        let path = format!("/v1/inboxes/{}/files/{}", self.state.inbox, at.file);
+        let sealed = self
+            .net
+            .owner_file(&self.identity, &self.state.node, &path)
+            .await?;
+        let plain = rondine_core::file::open(&sealed, &a.key, &a.hash)?;
+        let saved = self.store_file(message_id, &a.name, &plain)?;
+        if let Some(att) = self
+            .state
+            .messages
+            .iter_mut()
+            .find(|m| m.id == message_id)
+            .and_then(|m| m.attachment.as_mut())
+        {
+            att.path = Some(saved.to_string_lossy().into_owned());
+            att.at = None;
+            att.key.clear();
+        }
+        self.save()?;
+        // È sul telefono: dal nodo si può togliere. Se non riesce, scade da solo.
+        let _ = self
+            .net
+            .owner::<()>(
+                &self.identity,
+                Method::DELETE,
+                &self.state.node,
+                &path,
+                None,
+            )
+            .await;
+        Ok(saved)
+    }
+
+    /// Salva un file nella cartella del profilo: `file/<id messaggio>/<nome ripulito>`.
+    fn store_file(&self, message_id: &str, name: &str, data: &[u8]) -> Result<PathBuf> {
+        let dir = self
+            .dir
+            .join(FILES_DIR)
+            .join(rondine_core::file::safe_name(message_id));
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(rondine_core::file::safe_name(name));
+        write_atomic(&path, data)?;
+        Ok(path)
+    }
+
+    /// Un `file` ricevuto in una chat 1:1: se il file è dentro il messaggio si salva subito,
+    /// altrimenti lo scarica `sync`.
+    fn received_file(&mut self, sender: PublicKey, f: FileMsg) -> Result<Vec<Event>> {
+        if self.state.messages.iter().any(|m| m.id == f.id) {
+            return Ok(Vec::new());
+        }
+        if f.size > rondine_core::file::MAX_FILE_BYTES {
+            return Err(Error::Invalid("file troppo grande".into()));
+        }
+        let name = rondine_core::file::safe_name(&f.name);
+        let mut attachment = Attachment {
+            name: name.clone(),
+            mime: f.mime,
+            size: f.size,
+            path: None,
+            thumb: f
+                .thumb
+                .and_then(|t| b64::decode(&t).ok())
+                .filter(|t| t.len() <= rondine_core::file::MAX_THUMB_BYTES),
+            width: f.width,
+            height: f.height,
+            key: f.key,
+            hash: f.hash,
+            at: f.at,
+        };
+        if let Some(data) = f.data {
+            let plain =
+                rondine_core::file::open(&b64::decode(&data)?, &attachment.key, &attachment.hash)?;
+            let path = self.store_file(&f.id, &name, &plain)?;
+            attachment.path = Some(path.to_string_lossy().into_owned());
+            attachment.key.clear();
+        } else if attachment.at.is_none() {
+            return Err(Error::Invalid("file senza contenuto".into()));
+        }
+        let m = ChatMessage {
+            id: f.id,
+            contact: sender,
+            outgoing: false,
+            body: f.caption.unwrap_or_default(),
+            ts: f.ts,
+            read: false,
+            status: Delivery::Sent,
+            attachment: Some(attachment),
+        };
+        self.typing.remove(&sender);
+        self.state.messages.push(m.clone());
+        Ok(vec![Event::Message(m)])
     }
 
     /// Cifra un messaggio applicativo nella chat con il contatto e lo deposita nella sua casella.
@@ -1455,6 +1757,19 @@ impl Client {
         // Qualcuno ha detto "sono collegato": la coda verso di lui riparte subito.
         if self.online_marker() != online_before {
             events.extend(self.flush_outbox().await);
+        }
+        // Foto e documenti arrivati: si scaricano subito dal mio nodo (SPEC §7.5). Se non
+        // riesce, il messaggio resta da scaricare con `download`.
+        for e in events.iter_mut() {
+            if let Event::Message(m) = e
+                && m.attachment.as_ref().is_some_and(|a| a.at.is_some())
+                && let Ok(p) = self.download(&m.id).await
+                && let Some(a) = m.attachment.as_mut()
+            {
+                a.path = Some(p.to_string_lossy().into_owned());
+                a.at = None;
+                a.key.clear();
+            }
         }
         self.save()?;
         if !ids.is_empty() {
@@ -1657,11 +1972,13 @@ impl Client {
                     ts,
                     read: false,
                     status: Delivery::Sent,
+                    attachment: None,
                 };
                 self.typing.remove(&sender);
                 self.state.messages.push(m.clone());
                 Ok(vec![Event::Message(m)])
             }
+            AppMessage::File(f) => self.received_file(sender, *f),
             AppMessage::Typing { active, ts, .. } => {
                 // Uno vecchio (ritirato tardi) non vale più.
                 let fresh = ts + TYPING_SHOW_SECS > now();

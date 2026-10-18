@@ -6,6 +6,7 @@ pub mod card;
 pub mod discovery;
 pub mod envelope;
 pub mod error;
+pub mod file;
 pub mod identity;
 pub mod lan;
 pub mod permit;

@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use rondine_client::{Client, Delivery, Event, Source};
+use rondine_client::{Client, Delivery, Event, NewFile, Source};
 use rondine_core::Identity;
 use rondine_nodo::{AppState, Config, Store, WAKE_BODY};
 use tempfile::TempDir;
@@ -1044,5 +1044,100 @@ async fn codice_al_massimo_cinque_tentativi_e_numero_al_nuovo_proprietario() -> 
         .await?;
     let c = silvia.add("3405556677").await?;
     assert_eq!(c.display_name, "Luca");
+    Ok(())
+}
+
+/// Byte "a caso" ma ripetibili, per un file finto.
+fn fake_file(len: usize) -> Vec<u8> {
+    (0..len).map(|i| (i * 31 % 251) as u8).collect()
+}
+
+#[tokio::test]
+async fn foto_grande_passa_dal_nodo_cifrata() -> R {
+    let (n1, n2) = (start_node().await?, start_node().await?);
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut silvia = profile(&tmp, "Silvia", &n2).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+
+    // 1 MiB: troppo per un messaggio, va nella casella di Silvia sul suo nodo.
+    let data = fake_file(1024 * 1024);
+    let sent = mattia
+        .send_file(
+            &silvia.identity(),
+            NewFile {
+                name: "../../al mare.jpg".into(),
+                mime: "image/jpeg".into(),
+                data: data.clone(),
+                caption: Some("al mare".into()),
+                thumb: Some(vec![0xff, 0xd8, 0xff]),
+                width: Some(1280),
+                height: Some(960),
+            },
+        )
+        .await?;
+    assert_eq!(sent.status, Delivery::Sent);
+    let a = sent.attachment.as_ref().ok_or("niente allegato")?;
+    assert_eq!(a.size, data.len() as u64);
+    // Anche chi manda ne tiene una copia.
+    assert_eq!(std::fs::read(a.path.as_ref().ok_or("niente copia")?)?, data);
+
+    let ev = silvia.sync().await?;
+    let m = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::Message(m) => Some(m.clone()),
+            _ => None,
+        })
+        .ok_or("nessun messaggio")?;
+    assert_eq!(m.body, "al mare");
+    let a = m.attachment.ok_or("niente allegato")?;
+    assert_eq!(a.mime, "image/jpeg");
+    assert_eq!((a.width, a.height), (Some(1280), Some(960)));
+    assert_eq!(a.thumb.as_deref(), Some(&[0xff, 0xd8, 0xff][..]));
+    // Il nome non porta fuori dalla cartella dei file.
+    let path = std::path::PathBuf::from(a.path.ok_or("non scaricato")?);
+    assert!(path.starts_with(tmp.path().join("Silvia")), "{path:?}");
+    assert!(path.to_string_lossy().ends_with("al mare.jpg"), "{path:?}");
+    assert_eq!(std::fs::read(&path)?, data);
+
+    // Scaricato e cancellato dal nodo: un secondo tentativo non lo trova più.
+    std::fs::remove_file(&path)?;
+    assert!(silvia.download(&m.id).await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn file_piccolo_dentro_il_messaggio_anche_senza_nodo() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut io = profile(&tmp, "Mattia", &node).await?;
+    let mut x = Client::create_local(&tmp.path().join("X"), "X")?;
+    x.start_lan("127.0.0.1:0".parse()?, false).await?;
+    io.start_lan("127.0.0.1:0".parse()?, false).await?;
+    x.add(&io.invite_link()?).await?;
+    io.sync().await?;
+
+    let doc = fake_file(10 * 1024);
+    io.send_file(
+        &x.identity(),
+        NewFile::new("conto.pdf", "application/pdf", doc.clone()),
+    )
+    .await?;
+    let ev = x.sync().await?;
+    let a = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::Message(m) => m.attachment.clone(),
+            _ => None,
+        })
+        .ok_or("niente allegato")?;
+    assert_eq!(a.name, "conto.pdf");
+    assert_eq!(std::fs::read(a.path.ok_or("non salvato")?)?, doc);
+
+    // Un file grande non ha dove andare: X non ha un nodo.
+    let big = NewFile::new("film.mp4", "video/mp4", fake_file(200 * 1024));
+    assert!(io.send_file(&x.identity(), big).await.is_err());
     Ok(())
 }

@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
-use rondine_client::{Client, Contact, Delivery, Event, GroupChat, GroupEvent};
+use rondine_client::{
+    ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent, NewFile,
+};
 use rondine_core::PublicKey;
 
 #[derive(Parser)]
@@ -83,6 +85,15 @@ enum Cmd {
         #[arg(required = true, num_args = 1..)]
         testo: Vec<String>,
     },
+    /// Manda una foto o un documento a un contatto.
+    Manda {
+        contatto: String,
+        file: PathBuf,
+        #[arg(long)]
+        didascalia: Option<String>,
+    },
+    /// Scarica di nuovo il file di un messaggio ricevuto (id mostrato da `leggi`).
+    Scarica { id: String },
     /// Ritira e mostra i messaggi nuovi.
     Sincronizza,
     /// Mostra la conversazione con un contatto.
@@ -195,6 +206,26 @@ fn numbers(list: Vec<String>, file: Option<PathBuf>) -> anyhow::Result<Vec<Strin
     Ok(out)
 }
 
+/// Testo di un messaggio, con l'eventuale file: dove sta, o come scaricarlo.
+fn text(m: &ChatMessage) -> String {
+    let Some(a) = &m.attachment else {
+        return m.body.clone();
+    };
+    let kb = a.size.div_ceil(1024);
+    let file = match &a.path {
+        Some(p) => format!("[file {} · {kb} KiB · {p}]", a.name),
+        None => format!(
+            "[file {} · {kb} KiB · da scaricare: rondine scarica {}]",
+            a.name, m.id
+        ),
+    };
+    if m.body.is_empty() {
+        file
+    } else {
+        format!("{} {file}", m.body)
+    }
+}
+
 fn describe(c: &Contact) -> String {
     let mut s = c.display_name.clone();
     if let Some(u) = &c.username {
@@ -301,7 +332,7 @@ fn print_events(events: &[Event], client: &Client) {
                     .find(|c| c.identity == m.contact)
                     .map(|c| c.display_name.as_str())
                     .unwrap_or("?");
-                println!("{from}: {}", m.body);
+                println!("{from}: {}", text(m));
             }
             Event::Receipt {
                 contact,
@@ -547,6 +578,20 @@ async fn main() -> anyhow::Result<()> {
             c.set_typing(&id, !fine).await?;
             println!("{}", if fine { "Fatto." } else { "Sta scrivendo…" });
         }
+        Cmd::Manda {
+            contatto,
+            file,
+            didascalia,
+        } => {
+            let id = c.find_contact(&contatto)?.identity;
+            let mut f = NewFile::from_path(&file)?;
+            f.caption = didascalia;
+            let m = c.send_file(&id, f).await?;
+            println!("Inviato: {}", text(&m));
+        }
+        Cmd::Scarica { id } => {
+            println!("Salvato in {}", c.download(&id).await?.display());
+        }
         Cmd::Scrivi { contatto, testo } => {
             let id = c.find_contact(&contatto)?.identity;
             c.send_text(&id, &testo.join(" ")).await?;
@@ -564,9 +609,9 @@ async fn main() -> anyhow::Result<()> {
             let contact = c.find_contact(&contatto)?.clone();
             for m in c.messages_with(&contact.identity) {
                 if m.outgoing {
-                    println!("io: {}  {}", m.body, ticks(m.status));
+                    println!("io: {}  {}", text(m), ticks(m.status));
                 } else {
-                    println!("{}: {}", contact.display_name, m.body);
+                    println!("{}: {}", contact.display_name, text(m));
                 }
             }
             // Leggere la conversazione la segna come letta (e lo conferma al contatto).

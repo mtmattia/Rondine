@@ -23,7 +23,8 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Notifiche iPhone (APNs) | ⬜ | dopo Android |
 | Notifiche via Google (FCM), versione Play | ⬜ | facoltativo: distributore FCM incorporato di UnifiedPush + gateway; serve un progetto Firebase; la versione F-Droid resta senza Google |
 | Gruppi | 🟡 | client e CLI (SPEC §7.4); manca nell'app; l'amministratore non può ancora uscire né passare il ruolo |
-| Foto, file, messaggi vocali | ⬜ | come blob cifrati |
+| Foto e documenti | 🟡 | SPEC §7.5: cifrati sul telefono, nella casella del destinatario fino a 64 MiB, dentro il messaggio se piccoli; client, nodo e CLI; manca nell'app; niente coda se il nodo non risponde; nei gruppi non ancora |
+| Messaggi vocali | ⬜ | come file `audio/ogg` (SPEC §7.5) |
 | Conferme di lettura, "sta scrivendo" | ✅ | spunte ✓ / ✓✓ / ✓✓ verdi (SPEC §7.2), "sta scrivendo" effimero senza sveglia (§7.3) |
 | Più dispositivi per persona | ⬜ | ogni dispositivo membro MLS |
 | Recupero dell'identità | ⬜ | frase di 24 parole o backup cifrato |

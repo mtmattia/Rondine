@@ -58,6 +58,49 @@ pub struct ChatMessage {
     /// Solo per i messaggi in uscita: le spunte (SPEC §7.4).
     #[serde(default)]
     pub status: Delivery,
+    /// Foto o documento (SPEC §7.5); `body` è la didascalia.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<Attachment>,
+}
+
+/// Foto o documento di un messaggio (SPEC §7.5).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Attachment {
+    pub name: String,
+    pub mime: String,
+    pub size: u64,
+    /// Dove sta sul telefono; `None` finché non è scaricato.
+    pub path: Option<String>,
+    /// Anteprima JPEG.
+    #[serde(default, with = "opt_b64")]
+    pub thumb: Option<Vec<u8>>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// Per scaricarlo dal mio nodo, finché non è sul telefono.
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub hash: String,
+    #[serde(default)]
+    pub at: Option<rondine_core::file::FileAt>,
+}
+
+/// Byte facoltativi salvati in base64url.
+mod opt_b64 {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(b) => s.serialize_some(&rondine_core::b64::encode(b)),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
+        Option::<String>::deserialize(d)?
+            .map(|t| rondine_core::b64::decode(&t).map_err(serde::de::Error::custom))
+            .transpose()
+    }
 }
 
 /// Stato di un messaggio inviato: inviato al nodo, consegnato al telefono, letto.

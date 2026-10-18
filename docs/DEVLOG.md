@@ -91,3 +91,8 @@ Una riga per modifica: data, cosa è cambiato.
   Argon2id; `rondine aggiungi <numero>` trova chi l'ha verificato. CLI `rondine numero --sms` e
   `rondine codice`. SMS solo "in prova", nel log del nodo. 1 test unitario e 2 di accettazione.
 - 2026-10-18 — Roadmap: M4 "Nidi" (ogni PC con l'app fa da nido, maglia tra nidi, scelta del nido per latenza) con le domande aperte.
+- 2026-10-18 — Foto e documenti (SPEC §6.2, §7.5): file cifrato sul telefono con ChaCha20-Poly1305 e
+  chiave usata una volta, caricato nella casella di chi riceve (fino a 64 MiB, 512 MiB per
+  casella) oppure dentro il messaggio se è al massimo 64 KiB, anche verso chi non ha un nodo. Chi
+  riceve lo scarica in `sync`, controlla l'hash e lo cancella dal nodo. CLI `rondine manda` e
+  `rondine scarica`. 4 test unitari e 2 di accettazione.

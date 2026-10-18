@@ -23,6 +23,8 @@ pub struct Net {
     http: reqwest::Client,
     /// Per le consegne dirette tra telefoni (SPEC §12.2): tempi brevi, chi non c'è non risponde.
     direct: reqwest::Client,
+    /// Per foto e documenti (SPEC §6.2): fino a 64 MiB, anche su reti lente.
+    files: reqwest::Client,
 }
 
 impl Net {
@@ -37,7 +39,17 @@ impl Net {
             .connect_timeout(std::time::Duration::from_secs(2))
             .timeout(std::time::Duration::from_secs(10))
             .build()?;
-        Ok(Self { http, direct })
+        let files = reqwest::Client::builder()
+            .tls_backend_preconfigured(tls_config()?)
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(15 * 60))
+            .user_agent(concat!("rondine-client/", env!("CARGO_PKG_VERSION")))
+            .build()?;
+        Ok(Self {
+            http,
+            direct,
+            files,
+        })
     }
 
     /// Consegna diretta di una busta (b64) a un telefono (SPEC §12.2).
@@ -119,6 +131,34 @@ impl Net {
             .request(method, Self::url(base, path))
             .header("content-type", "application/json")
             .body(serde_json::to_vec(body)?);
+        self.send(req).await
+    }
+
+    /// Carica un file cifrato nella casella di un contatto, con il suo permesso (SPEC §6.2).
+    pub async fn upload_file(
+        &self,
+        base: &str,
+        path: &str,
+        permit: &rondine_core::SignedPermit,
+        data: Vec<u8>,
+    ) -> Result<Vec<u8>> {
+        let permit = rondine_core::b64::encode(serde_json::to_vec(permit)?);
+        let req = self
+            .files
+            .post(Self::url(base, path))
+            .header("rondine-permit", permit)
+            .header("content-type", "application/octet-stream")
+            .body(data);
+        self.send(req).await
+    }
+
+    /// Ritira un file dalla mia casella (SPEC §6.2).
+    pub async fn owner_file(&self, id: &Identity, base: &str, path: &str) -> Result<Vec<u8>> {
+        let header = auth::header(id, "GET", path, now(), &[]);
+        let req = self
+            .files
+            .get(Self::url(base, path))
+            .header("authorization", header);
         self.send(req).await
     }
 

@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::file::FileAt;
 use crate::{PublicKey, SignedCard};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -69,6 +70,33 @@ pub enum AppMessage {
     Leave {
         v: u32,
     },
+    /// Foto o documento (SPEC §7.5).
+    File(Box<FileMsg>),
+}
+
+/// Il messaggio `file` (SPEC §7.5): il file cifrato sta in `at` oppure in `data`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct FileMsg {
+    pub v: u32,
+    pub id: String,
+    pub ts: u64,
+    pub name: String,
+    pub mime: String,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    pub key: String,
+    pub hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<FileAt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +117,7 @@ impl AppMessage {
             | AppMessage::Relay { v, .. }
             | AppMessage::Group { v, .. }
             | AppMessage::Leave { v } => *v,
+            AppMessage::File(f) => f.v,
         }
     }
 }
@@ -122,6 +151,15 @@ mod tests {
             serde_json::to_string(&AppMessage::Leave { v: 1 })?,
             r#"{"type":"leave","v":1}"#
         );
+        let f: AppMessage = serde_json::from_str(
+            r#"{"type":"file","v":1,"id":"x","ts":5,"name":"a.pdf","mime":"application/pdf",
+                "size":3,"key":"k","hash":"h","at":{"node":"https://n","file":"f"}}"#,
+        )?;
+        let AppMessage::File(ref m) = f else {
+            return Err(crate::Error::Invalid("non è un file"));
+        };
+        assert_eq!(m.at.as_ref().map(|a| a.file.as_str()), Some("f"));
+        assert!(serde_json::to_string(&f)?.starts_with(r#"{"type":"file","v":1,"#));
         Ok(())
     }
 }

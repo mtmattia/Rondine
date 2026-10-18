@@ -153,6 +153,18 @@ Il nodo vede solo `blob`. Dentro, dopo la decodifica b64, c'è una busta JSON:
 La busta non contiene mittente in chiaro: il mittente si ricava dalla credenziale MLS dopo la
 decifratura.
 
+### 6.2 File nella casella
+Foto e documenti cifrati (§7.5) si caricano nella casella di chi riceve, separati dai messaggi:
+
+- `POST /v1/inboxes/{inbox}/files`, con il permesso (scope `deposit`) nell'intestazione
+  `Rondine-Permit: <b64 del JSON di Signed<Permit>>` e il file cifrato come corpo
+  (`application/octet-stream`) → `{id}`. Niente sveglia: la sveglia la fa il messaggio `file`.
+- `GET /v1/inboxes/{inbox}/files/{id}` (proprietario) → i byte; `DELETE` (proprietario) lo
+  cancella dopo averlo salvato.
+- Al massimo 64 MiB + 16 byte per file e 512 MiB per casella; conservazione 30 giorni.
+
+Il nodo vede solo la dimensione del file cifrato.
+
 ## 7. Messaggi applicativi (dentro MLS)
 
 Ciphersuite: `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`. Credenziale `Basic`, con
@@ -166,6 +178,7 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "typing", "active": true, "ts": 1792240000 }
 { "v": 1, "type": "group", ... }   // §7.4
 { "v": 1, "type": "leave" }        // §7.4
+{ "v": 1, "type": "file", ... }    // §7.5
 ```
 
 ### 7.2 Conferme (spunte)
@@ -232,6 +245,31 @@ chiavi delle ultime 5 epoche, per i messaggi che incrociano un cambio di membri.
   più caselle ricevono dallo stesso gruppo. Lo stesso vale già per le chat 1:1 (id del gruppo).
   Un sigillo per destinatario è in roadmap.
 
+### 7.5 Foto e documenti
+
+Un file si cifra sul telefono con una chiave nuova, usata una volta sola:
+`ChaCha20-Poly1305(chiave casuale di 32 byte, nonce = 12 byte a zero, file)`. Il file cifrato
+viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave:
+
+```json
+{ "v": 1, "type": "file", "id": "<b64 16 byte>", "ts": 1792240000,
+  "name": "foto.jpg", "mime": "image/jpeg", "size": 123456, "caption": "al mare",
+  "key": "<b64 32 byte>", "hash": "<b64 blake3 del file cifrato>",
+  "at": { "node": "https://nodo.example", "file": "<id>" },
+  "data": "<b64 file cifrato>",
+  "thumb": "<b64 JPEG>", "width": 1280, "height": 960 }
+```
+
+- `size` è la dimensione del file in chiaro; al massimo **64 MiB**.
+- Il file cifrato sta in `at` (caricato nella casella di chi riceve, §6.2) **oppure** in `data`
+  (dentro il messaggio, solo se è al massimo 64 KiB). Si usa `data` per i file piccoli e verso chi
+  non ha un nodo; un file più grande verso chi non ha un nodo non si può mandare (per ora).
+- `caption`, `thumb` (anteprima JPEG di al massimo 16 KiB), `width` e `height` sono facoltativi.
+- Chi riceve scarica il file dal proprio nodo, controlla `hash`, lo decifra, lo salva sul
+  telefono e lo cancella dal nodo. Le spunte (§7.2) valgono come per `text`: l'`id` è quello del
+  messaggio `file`.
+- `name` è solo un suggerimento: chi riceve lo ripulisce (niente percorsi) prima di salvarlo.
+
 ## 8. Sveglia push
 
 Il proprietario registra un bersaglio:
@@ -293,6 +331,9 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `POST /v1/inboxes/{inbox}/messages` | permesso | `{permit, blob, ephemeral?}` → `{id}` |
 | `GET /v1/inboxes/{inbox}/messages` | proprietario | `[{id, blob, received_at}]` |
 | `POST /v1/inboxes/{inbox}/messages/ack` | proprietario | `{ids}` |
+| `POST /v1/inboxes/{inbox}/files` | permesso (intestazione) | corpo: file cifrato → `{id}` (§6.2) |
+| `GET /v1/inboxes/{inbox}/files/{id}` | proprietario | i byte del file cifrato |
+| `DELETE /v1/inboxes/{inbox}/files/{id}` | proprietario | cancella il file |
 | `POST /v1/inboxes/{inbox}/keypackages` | proprietario | `{items: [b64]}` |
 | `POST /v1/inboxes/{inbox}/keypackages/claim` | permesso | `{permit}` → `{keypackage}`; l'ultimo resta e si riusa |
 | `POST /v1/wake` | permesso | `{permit}` |

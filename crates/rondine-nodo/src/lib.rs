@@ -1,5 +1,6 @@
 //! Nodo Rondine: API HTTP descritta in `docs/SPEC.md` §11.
 
+mod files;
 mod phone;
 mod push;
 mod store;
@@ -124,6 +125,14 @@ pub fn router(state: AppState) -> Router {
             post(deposit).get(fetch_messages),
         )
         .route("/v1/inboxes/{inbox}/messages/ack", post(ack_messages))
+        .route(
+            "/v1/inboxes/{inbox}/files",
+            post(files::upload).layer(DefaultBodyLimit::max(files::MAX_SEALED_BYTES)),
+        )
+        .route(
+            "/v1/inboxes/{inbox}/files/{id}",
+            get(files::fetch).delete(files::delete),
+        )
         .route("/v1/inboxes/{inbox}/keypackages", post(upload_keypackages))
         .route(
             "/v1/inboxes/{inbox}/keypackages/claim",

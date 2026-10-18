@@ -36,6 +36,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Foto e documenti ricevuti, da aprire con le altre app (SPEC §7.5). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.file"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <service
             android:name=".push.PushService"
             android:exported="false">

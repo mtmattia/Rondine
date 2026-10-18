@@ -1,5 +1,6 @@
 package io.github.mtmattia.rondine
 
+import io.github.mtmattia.rondine.ui.preview
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -48,12 +49,12 @@ object Notifier {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
                 val style = NotificationCompat.InboxStyle()
-                msgs.takeLast(5).forEach { style.addLine(it.body) }
+                msgs.takeLast(5).forEach { style.addLine(it.preview) }
                 val n = NotificationCompat.Builder(context, CHANNEL)
                     .setSmallIcon(R.drawable.ic_notification)
                     .setColor(NOTIFICATION_COLOR)
                     .setContentTitle(name)
-                    .setContentText(msgs.last().body)
+                    .setContentText(msgs.last().preview)
                     .setStyle(style)
                     .setNumber(msgs.size)
                     .setAutoCancel(true)

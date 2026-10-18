@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rondine_client::{ChatMessage, Client, Contact, Delivery, Event, Source};
+use rondine_client::{ChatMessage, Client, Contact, Delivery, Event, NewFile, Source};
 use rondine_core::PublicKey;
 use tokio::sync::Mutex;
 
@@ -91,6 +91,21 @@ pub struct Message {
     pub read: bool,
     /// Spunte dei messaggi in uscita.
     pub status: MessageStatus,
+    /// Foto o documento; `body` è la didascalia (SPEC §7.5).
+    pub attachment: Option<AttachmentInfo>,
+}
+
+#[derive(uniffi::Record)]
+pub struct AttachmentInfo {
+    pub name: String,
+    pub mime: String,
+    pub size: u64,
+    /// Percorso sul telefono; `None` finché non è scaricato.
+    pub path: Option<String>,
+    /// Anteprima JPEG.
+    pub thumb: Option<Vec<u8>>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
 }
 
 #[derive(uniffi::Enum, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +180,15 @@ fn message(m: &ChatMessage) -> Message {
         ts: m.ts,
         read: m.read,
         status: m.status.into(),
+        attachment: m.attachment.as_ref().map(|a| AttachmentInfo {
+            name: a.name.clone(),
+            mime: a.mime.clone(),
+            size: a.size,
+            path: a.path.clone(),
+            thumb: a.thumb.clone(),
+            width: a.width,
+            height: a.height,
+        }),
     }
 }
 
@@ -361,6 +385,47 @@ impl Rondine {
         let k = key(&contact_id)?;
         self.run(move |c| Box::pin(async move { Ok(message(&c.send_text(&k, &body).await?)) }))
             .await
+    }
+
+    /// Manda una foto o un documento (SPEC §7.5). L'anteprima JPEG (al massimo 16 KiB) e le
+    /// dimensioni le prepara l'app.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_file(
+        &self,
+        contact_id: String,
+        name: String,
+        mime: String,
+        data: Vec<u8>,
+        caption: Option<String>,
+        thumb: Option<Vec<u8>>,
+        width: Option<u32>,
+        height: Option<u32>,
+    ) -> Result<Message> {
+        let k = key(&contact_id)?;
+        let file = NewFile {
+            name,
+            mime,
+            data,
+            caption,
+            thumb,
+            width,
+            height,
+        };
+        self.run(move |c| Box::pin(async move { Ok(message(&c.send_file(&k, file).await?)) }))
+            .await
+    }
+
+    /// Scarica di nuovo il file di un messaggio ricevuto; restituisce il percorso.
+    pub async fn download(&self, message_id: String) -> Result<String> {
+        self.run(move |c| {
+            Box::pin(async move {
+                Ok(c.download(&message_id)
+                    .await?
+                    .to_string_lossy()
+                    .into_owned())
+            })
+        })
+        .await
     }
 
     pub async fn sync(&self) -> Result<SyncResult> {

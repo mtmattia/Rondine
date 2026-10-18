@@ -96,3 +96,8 @@ Una riga per modifica: data, cosa è cambiato.
   casella) oppure dentro il messaggio se è al massimo 64 KiB, anche verso chi non ha un nodo. Chi
   riceve lo scarica in `sync`, controlla l'hash e lo cancella dal nodo. CLI `rondine manda` e
   `rondine scarica`. 4 test unitari e 2 di accettazione.
+- 2026-10-18 — App: foto e documenti. Il tasto 📎 apre il selettore delle foto (senza permessi) o
+  dei documenti; le foto si riducono a 1600 px in JPEG con un'anteprima sotto i 16 KiB, e prima di
+  inviare si aggiunge la didascalia. Nella chat le foto si vedono nella bolla e i documenti si
+  aprono con le app del telefono (FileProvider solo su `profilo/file/`). Provato sull'emulatore
+  con un nodo locale e la CLI: foto e PDF nei due sensi, arrivati identici.

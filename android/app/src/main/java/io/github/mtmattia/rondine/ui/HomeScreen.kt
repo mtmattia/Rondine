@@ -430,7 +430,7 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
                     Text(
                         when {
                             row.typing -> "sta scrivendo…"
-                            last != null -> last.body
+                            last != null -> last.preview
                             row.contact.source == "rubrica" -> "Trovato nella rubrica"
                             else -> "Nuovo contatto: scrivi il primo messaggio"
                         },

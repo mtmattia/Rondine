@@ -1,6 +1,10 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -27,10 +32,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +52,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -53,6 +62,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -61,6 +71,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,7 +83,9 @@ import androidx.compose.ui.unit.sp
 import io.github.mtmattia.rondine.Notifier
 import io.github.mtmattia.rondine.Repo
 import io.github.mtmattia.rondine.userMessage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uniffi.rondine_ffi.ContactInfo
 import uniffi.rondine_ffi.Message
 import uniffi.rondine_ffi.RondineException
@@ -112,6 +127,10 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var attachMenu by remember { mutableStateOf(false) }
+    /** File scelto, in attesa della didascalia e di "Invia". */
+    var picked by remember { mutableStateOf<PickedFile?>(null) }
+    var downloading by remember { mutableStateOf(setOf<String>()) }
     val chats by Repo.chats.collectAsState()
     val typing = chats.any { it.contact.id == contactId && it.typing }
     val onLan = chats.any { it.contact.id == contactId && it.onLan }
@@ -138,6 +157,63 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
         } catch (e: RondineException) {
             snackbar.showSnackbar(e.userMessage)
         }
+    }
+
+    fun onPicked(uri: android.net.Uri?, asPhoto: Boolean) {
+        if (uri == null) return
+        scope.launch {
+            try {
+                picked = pickFile(context, uri, asPhoto)
+            } catch (e: FileTooBig) {
+                snackbar.showSnackbar(e.message ?: "File troppo grande")
+            } catch (e: Exception) {
+                snackbar.showSnackbar("Non riesco a leggere il file: ${e.message}")
+            }
+        }
+    }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { onPicked(it, true) }
+    val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { onPicked(it, false) }
+
+    fun download(m: Message) {
+        if (m.id in downloading) return
+        downloading = downloading + m.id
+        scope.launch {
+            try {
+                Repo.client().download(m.id)
+                Repo.refresh()
+            } catch (e: RondineException) {
+                snackbar.showSnackbar("Non scaricato: ${e.userMessage}")
+            } finally {
+                downloading = downloading - m.id
+            }
+        }
+    }
+
+    picked?.let { f ->
+        SendFileDialog(
+            file = f,
+            initialCaption = text,
+            sending = sending,
+            onDismiss = { if (!sending) picked = null },
+            onSend = { caption ->
+                sending = true
+                scope.launch {
+                    try {
+                        Repo.client().sendFile(
+                            contactId, f.name, f.mime, f.data, caption.trim().ifEmpty { null },
+                            f.thumb, f.width, f.height,
+                        )
+                        text = ""
+                        picked = null
+                        Repo.refresh()
+                    } catch (e: RondineException) {
+                        snackbar.showSnackbar("Non inviato: ${e.userMessage}")
+                    } finally {
+                        sending = false
+                    }
+                }
+            },
+        )
     }
 
     fun comingSoon(what: String) {
@@ -268,7 +344,14 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                         }
                     }) { item ->
                         when (item) {
-                            is ChatItem.Msg -> Bubble(item.m, item.firstOfRun)
+                            is ChatItem.Msg -> Bubble(
+                                item.m, item.firstOfRun,
+                                downloading = item.m.id in downloading,
+                                onOpen = { a ->
+                                    openAttachment(context, a)?.let { scope.launch { snackbar.showSnackbar(it) } }
+                                },
+                                onDownload = { download(item.m) },
+                            )
                             is ChatItem.Day -> CenterChip(item.label)
                             ChatItem.Notice -> EncryptionNotice()
                         }
@@ -290,7 +373,27 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                         Repo.typing(contactId, it.isNotBlank())
                     },
                     sending = sending,
-                    onAttach = { comingSoon("Foto e file") },
+                    onAttach = { attachMenu = true },
+                    attachMenu = {
+                        DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Foto") },
+                                leadingIcon = { Icon(Icons.Filled.ImageIcon, null) },
+                                onClick = {
+                                    attachMenu = false
+                                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Documento") },
+                                leadingIcon = { Icon(Icons.Filled.Description, null) },
+                                onClick = {
+                                    attachMenu = false
+                                    docPicker.launch(arrayOf("*/*"))
+                                },
+                            )
+                        }
+                    },
                     onSend = {
                         val body = text.trim()
                         if (body.isEmpty() || sending) return@InputBar
@@ -367,7 +470,13 @@ private fun EncryptionNotice() {
 }
 
 @Composable
-private fun Bubble(m: Message, firstOfRun: Boolean) {
+private fun Bubble(
+    m: Message,
+    firstOfRun: Boolean,
+    downloading: Boolean,
+    onOpen: (uniffi.rondine_ffi.AttachmentInfo) -> Unit,
+    onDownload: () -> Unit,
+) {
     val colors = LocalChatColors.current
     val big = 12.dp
     val small = 3.dp
@@ -386,8 +495,19 @@ private fun Bubble(m: Message, firstOfRun: Boolean) {
             shadowElevation = 0.5.dp,
             modifier = Modifier.widthIn(max = 320.dp),
         ) {
-            Column(Modifier.padding(start = 10.dp, end = 8.dp, top = 6.dp, bottom = 4.dp)) {
-                Text(m.body, color = colors.bubbleText, fontSize = 16.sp)
+            val a = m.attachment
+            val pad = if (a != null) 4.dp else 0.dp
+            Column(Modifier.padding(start = 10.dp - pad * 1.5f, end = 8.dp - pad, top = 6.dp - pad, bottom = 4.dp)) {
+                if (a != null) {
+                    AttachmentView(a, downloading, onOpen = { onOpen(a) }, onDownload = onDownload)
+                    if (m.body.isNotBlank()) Spacer(Modifier.size(4.dp))
+                }
+                if (m.body.isNotBlank() || a == null) {
+                    Text(
+                        m.body, color = colors.bubbleText, fontSize = 16.sp,
+                        modifier = Modifier.padding(start = pad * 1.5f, end = pad),
+                    )
+                }
                 Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                     Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
                     if (m.outgoing) {
@@ -406,6 +526,7 @@ private fun InputBar(
     onText: (String) -> Unit,
     sending: Boolean,
     onAttach: () -> Unit,
+    attachMenu: @Composable () -> Unit,
     onSend: () -> Unit,
 ) {
     Row(
@@ -432,8 +553,11 @@ private fun InputBar(
                         unfocusedIndicatorColor = Color.Transparent,
                     ),
                 )
-                IconButton(onClick = onAttach) {
-                    Icon(Icons.Filled.AttachFile, "Allega", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box {
+                    IconButton(onClick = onAttach) {
+                        Icon(Icons.Filled.AttachFile, "Allega", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    attachMenu()
                 }
             }
         }
@@ -450,3 +574,67 @@ private fun InputBar(
         ) { Icon(Icons.AutoMirrored.Filled.Send, "Invia") }
     }
 }
+
+/** Prima di mandare un file: anteprima e didascalia. */
+@Composable
+private fun SendFileDialog(
+    file: PickedFile,
+    initialCaption: String,
+    sending: Boolean,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit,
+) {
+    var caption by rememberSaveable { mutableStateOf(initialCaption) }
+    val preview by produceState<ImageBitmap?>(null, file) {
+        if (file.isImage) {
+            value = withContext(Dispatchers.IO) {
+                val bytes = file.data
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                var sample = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 800) sample *= 2
+                android.graphics.BitmapFactory.decodeByteArray(
+                    bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample },
+                )?.asImageBitmap()
+            }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (file.isImage) "Manda la foto" else "Manda il documento") },
+        text = {
+            Column {
+                val p = preview
+                if (p != null) {
+                    Image(
+                        p, "Anteprima",
+                        Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Description, null, Modifier.size(32.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(file.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(humanSize(file.data.size.toULong()), fontSize = 12.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.size(12.dp))
+                TextField(
+                    value = caption,
+                    onValueChange = { caption = it },
+                    placeholder = { Text("Aggiungi una didascalia") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 4,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSend(caption) }, enabled = !sending) { Text(if (sending) "Invio…" else "Invia") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !sending) { Text("Annulla") } },
+    )
+}
+

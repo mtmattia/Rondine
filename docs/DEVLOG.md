@@ -90,3 +90,4 @@ Una riga per modifica: data, cosa è cambiato.
   5 tentativi, 1 al minuto e 5 al giorno), attestazione firmata dal nodo ed elenco per hash
   Argon2id; `rondine aggiungi <numero>` trova chi l'ha verificato. CLI `rondine numero --sms` e
   `rondine codice`. SMS solo "in prova", nel log del nodo. 1 test unitario e 2 di accettazione.
+- 2026-10-18 — Roadmap: M4 "Nidi" (ogni PC con l'app fa da nido, maglia tra nidi, scelta del nido per latenza) con le domande aperte.

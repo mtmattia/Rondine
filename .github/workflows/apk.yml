@@ -24,10 +24,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
-      - name: NDK
-        run: sdkmanager --install "ndk;29.0.14206865"
+      # L'SDK Android è già sul runner (ANDROID_HOME): si aggiungono licenze e NDK.
+      - name: SDK e NDK
+        run: |
+          sdkm=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sdkm" --licenses > /dev/null || true
+          "$sdkm" --install "ndk;29.0.14206865"
 
       - uses: dtolnay/rust-toolchain@stable
         with:

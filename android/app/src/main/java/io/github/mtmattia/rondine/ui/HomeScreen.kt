@@ -215,6 +215,7 @@ private fun ChatList(
     modifier: Modifier,
 ) {
     val push by Repo.pushState.collectAsState()
+    val pushDetail by Repo.pushStatus.collectAsState()
     // Senza nodo non c'è sveglia push: l'avviso non avrebbe senso.
     val hasNode = Repo.profile.collectAsState().value?.hasNode != false
     var pushHidden by remember { mutableStateOf(Repo.pushBannerHidden()) }
@@ -235,7 +236,7 @@ private fun ChatList(
     LazyColumn(modifier.fillMaxSize()) {
         if (hasNode && !pushHidden && push in setOf(PushState.NoDistributor, PushState.NotChosen, PushState.Failed)) {
             item {
-                PushBanner(push, onPickPush) {
+                PushBanner(push, pushDetail, onPickPush) {
                     Repo.hidePushBanner()
                     pushHidden = true
                 }
@@ -297,7 +298,7 @@ private fun ChatList(
 /** Avviso quando le notifiche non possono arrivare: senza distributore UnifiedPush i messaggi
  *  si ritirano solo con l'app aperta. */
 @Composable
-private fun PushBanner(state: PushState, onPickPush: () -> Unit, onLater: () -> Unit) {
+private fun PushBanner(state: PushState, detail: String, onPickPush: () -> Unit, onLater: () -> Unit) {
     val context = LocalContext.current
     Surface(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -324,8 +325,9 @@ private fun PushBanner(state: PushState, onPickPush: () -> Unit, onLater: () -> 
                         "Scegli l'app che ti sveglia quando arriva un messaggio. " +
                             "Senza, i messaggi arrivano solo quando apri Rondine."
                     else ->
-                        "Non riesco ad attivare le notifiche. " +
-                            "Finché non funzionano, i messaggi arrivano solo quando apri Rondine."
+                        "Il permesso delle notifiche c'è, ma Rondine non riesce a farsi svegliare quando " +
+                            "è chiusa ($detail). Finché non funziona, i messaggi arrivano solo quando " +
+                            "apri Rondine."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,

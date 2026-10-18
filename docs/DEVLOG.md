@@ -159,3 +159,9 @@ Una riga per modifica: data, cosa è cambiato.
   `<nido>/v1/fcm/<token>` veniva rifiutata, perché da lì il nome del nido punta all'indirizzo
   Tailscale (privato). Il nodo ora riconosce il proprio ripetitore e chiama FCM direttamente
   (SPEC §8.1); 1 test. Nido pubblico aggiornato.
+- 2026-10-18 — Notifiche Google provate su un telefono vero (realme, ColorOS): arrivano dopo aver
+  consentito a Rondine attività in background e avvio automatico; chiusa dalle app recenti,
+  ColorOS la blocca. App: la registrazione delle notifiche riprova da sola a ogni ritorno in
+  primo piano finché non riesce; l'avviso dice il motivo vero; in Impostazioni la voce
+  "Notifiche ad app chiusa" spiega il caso dei telefoni Xiaomi, realme, Oppo, Huawei e apre la
+  pagina giusta. Provato sull'emulatore (nido che rifiuta, poi accetta).

@@ -63,6 +63,13 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Notifiche non ancora attive (primo tentativo fallito, nodo irraggiungibile…):
+                // si riprova a ogni ritorno in primo piano, senza chiedere niente.
+                if (Repo.ready.value == true && Repo.pushState.value in
+                    setOf(PushState.Failed, PushState.Unknown)
+                ) {
+                    setupPush(interactive = false)
+                }
                 while (true) {
                     if (Repo.ready.value == true) Repo.sync()
                     delay(FOREGROUND_SYNC_MS)

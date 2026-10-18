@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PrivacyTip
@@ -298,6 +299,17 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 "Nodo",
                 if (p.hasNode) p.node else "Nessuno: tocca per aggiungerne uno",
             ) { dialog = SettingsDialog.Node }
+            SettingRow(
+                Icons.Filled.BatteryChargingFull,
+                "Notifiche ad app chiusa",
+                "Su Xiaomi, realme, Oppo, Huawei e simili: consenti a Rondine l'attività in background " +
+                    "e l'avvio automatico, e non chiuderla dalle app recenti",
+            ) {
+                context.startActivity(
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        .setData(Uri.parse("package:${context.packageName}")),
+                )
+            }
             var maps by remember { mutableStateOf(MapTiles.enabled(context)) }
             SettingRow(
                 Icons.Filled.Map,

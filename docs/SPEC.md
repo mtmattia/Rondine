@@ -164,6 +164,8 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "text", "id": "<b64 16 byte>", "ts": 1792240000, "body": "ciao" }
 { "v": 1, "type": "receipt", "status": "delivered", "ids": ["<id di un text>", "…"] }
 { "v": 1, "type": "typing", "active": true, "ts": 1792240000 }
+{ "v": 1, "type": "group", ... }   // §7.4
+{ "v": 1, "type": "leave" }        // §7.4
 ```
 
 ### 7.2 Conferme (spunte)
@@ -192,6 +194,43 @@ messaggi saltati).
 
 Se A e B avviano la chat insieme nascono due gruppi. Vale quello creato dall'identità con chiave
 più bassa (ordine dei byte); l'altro resta valido in ricezione.
+
+### 7.4 Gruppi
+
+Un gruppo è un gruppo MLS a sé, distinto dalle chat 1:1. Non c'è un server che smista: **chi
+scrive deposita lo stesso messaggio MLS nella casella di ogni altro membro**, usando il biglietto
+di quel membro. Messaggi di gestione sempre cifrati (`PrivateMessage`); ogni membro conserva le
+chiavi delle ultime 5 epoche, per i messaggi che incrociano un cambio di membri.
+
+- **Amministratore** = chi crea il gruppo. È l'unico che fa commit (aggiunge e toglie membri):
+  così non nascono rami concorrenti. Un commit di un altro membro si scarta senza applicarlo.
+- **Biglietti dei membri.** Ogni membro, entrando, chiede al proprio nodo un permesso nuovo con
+  etichetta `gruppo` e lo annuncia nel gruppo con un `hello` (stesso formato del §7). Per un
+  membro si tiene il biglietto con `issued_at` più recente (a parità vince quello mandato dal
+  membro stesso), e solo se la sua identità è un membro
+  MLS del gruppo e il biglietto è firmato da quella stessa identità.
+- **Elenco iniziale.** Per poter consegnare prima che arrivino gli `hello`, l'amministratore
+  manda l'elenco dei biglietti che conosce:
+
+  ```json
+  { "v": 1, "type": "group", "name": "Calcetto del giovedì", "admin": "<b64 chiave>",
+    "cards": [<Signed<Card>>, ...] }
+  ```
+
+  - nel campo `first` del Welcome per i nuovi membri (al posto dell'`hello`);
+  - come messaggio di gruppo a tutti dopo ogni aggiunta.
+
+  `name` è al massimo 64 caratteri. I biglietti degli altri membri sono quelli che
+  l'amministratore ha ricevuto da loro, quindi contengono permessi emessi per lui: servono solo
+  finché ogni membro non manda il proprio `hello`.
+- **Uscita.** Chi vuole uscire manda `{ "v": 1, "type": "leave" }`; l'amministratore lo toglie
+  con un commit, consegnato anche a chi esce. Chi viene tolto revoca il proprio permesso
+  `gruppo`. I membri tolti spariscono dall'elenco di tutti quando arriva il commit.
+- **Busta.** Si usano le buste del §6.1: `welcome` per chi entra, `mls` per commit e messaggi.
+- **Limite noto.** L'intestazione di un `PrivateMessage` MLS contiene in chiaro id del gruppo ed
+  epoca, e il blob è lo stesso in ogni casella: nodi che si mettono d'accordo possono capire che
+  più caselle ricevono dallo stesso gruppo. Lo stesso vale già per le chat 1:1 (id del gruppo).
+  Un sigillo per destinatario è in roadmap.
 
 ## 8. Sveglia push
 
@@ -299,16 +338,20 @@ Chi riceve tratta il `blob` esattamente come uno ritirato dalla casella. Limiti:
 busta, coda di 1000.
 
 ### 12.3 "Sono collegato"
-Quando si accende (e quando cambiano i suoi indirizzi), il dispositivo manda a ogni contatto, in
-deposito effimero (§6), il messaggio MLS:
+Quando si accende, quando cambiano i suoi indirizzi e quando nasce una chat con un contatto
+nuovo (da una parte e dall'altra), il dispositivo manda al contatto il messaggio MLS:
 
 ```json
 { "v": 1, "type": "online", "addrs": ["192.168.1.20:41234", "[2a01:…]:41234"], "ts": 1792240000 }
 ```
 
 `addrs` sono gli indirizzi su cui ascolta (rete locale e IPv6 globali). Chi lo riceve li ricorda
-per quel contatto e prova subito a consegnargli i messaggi in attesa. Il nodo vede solo un
-deposito effimero.
+per quel contatto e prova subito a consegnargli i messaggi in attesa.
+
+Si consegna come un messaggio normale (nodo, poi diretto), **non effimero**: chi non è connesso
+in quel momento lo trova al prossimo ritiro. Se nessuna via risponde si lascia perdere, senza coda
+né mesh: il prossimo "sono collegato" lo sostituisce. Senza questo avviso chi ha il nodo non
+saprebbe mai dove trovare un contatto senza nodo che l'ha aggiunto dopo essersi acceso.
 
 ### 12.4 Ordine di consegna
 1. Deposito nel nodo del contatto (se il suo biglietto ne ha uno).
@@ -323,7 +366,7 @@ deposito effimero.
 La consegna diretta via internet riesce quando l'indirizzo annunciato è raggiungibile (tipicamente
 IPv6); dietro un NAT IPv4 non riesce, e restano il nodo e la mesh.
 
-I depositi effimeri (§7.3, §12.3) non vanno in coda né nella mesh.
+I depositi effimeri (§7.3) e i "sono collegato" (§12.3) non vanno in coda né nella mesh.
 
 ### 12.5 Mesh tra utenti
 Chi non riesce a consegnare affida la busta ad altri: fino a 3 suoi contatti (non il

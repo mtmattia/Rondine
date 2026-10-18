@@ -1,6 +1,7 @@
 //! Client Rondine: tutto ciò che l'app sa fare, come funzioni (CLAUDE.md, regola 5).
 
 mod error;
+mod groups;
 mod lan;
 mod net;
 mod state;
@@ -21,7 +22,13 @@ use rondine_mls::{Device, Received};
 use serde_json::json;
 
 pub use error::{Error, Result};
-pub use state::{ChatMessage, Contact, Delivery, GroupRef, Outgoing, Source, State};
+pub use groups::{GroupDelivery, GroupEvent, Synced};
+pub use state::{
+    ChatMessage, Contact, Delivery, GroupChat, GroupMember, GroupMessage, GroupRef, Outgoing,
+    Source, State,
+};
+
+use groups::Batch;
 
 use net::{Net, parse};
 
@@ -91,6 +98,8 @@ pub struct Client {
     lan: Option<lan::Lan>,
     /// Lavori della mesh raccolti durante l'elaborazione, eseguiti alla fine di `sync`.
     relay_jobs: Vec<RelayJob>,
+    /// Eventi e azioni dei gruppi raccolti durante l'elaborazione (SPEC §7.4).
+    batch: Batch,
 }
 
 /// Cosa fare di un `relay` ricevuto (SPEC §12.5).
@@ -177,12 +186,15 @@ impl Client {
                 outbox: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
+                group_chats: Vec::new(),
+                group_messages: Vec::new(),
             },
             identity,
             device,
             net,
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
+            batch: Batch::default(),
             lan: None,
             relay_jobs: Vec::new(),
         };
@@ -220,12 +232,15 @@ impl Client {
                 outbox: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
+                group_chats: Vec::new(),
+                group_messages: Vec::new(),
             },
             identity,
             device,
             net: Net::new()?,
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
+            batch: Batch::default(),
             lan: None,
             relay_jobs: Vec::new(),
         };
@@ -340,15 +355,6 @@ impl Client {
     /// "Sono collegato" a tutti i contatti, con gli indirizzi diretti (SPEC §12.3). Effimero:
     /// arriva solo a chi è connesso, e non sveglia nessuno.
     pub async fn announce_online(&mut self) {
-        let Some(lan) = &self.lan else {
-            return;
-        };
-        let addrs: Vec<String> = lan.public_addrs().iter().map(|a| a.to_string()).collect();
-        let app = AppMessage::Online {
-            v: 1,
-            addrs,
-            ts: now(),
-        };
         let contacts: Vec<Contact> = self
             .state
             .contacts
@@ -357,8 +363,58 @@ impl Client {
             .cloned()
             .collect();
         for c in contacts {
-            // Un di più: chi non è raggiungibile adesso lo saprà la prossima volta.
-            let _ = self.send_app_with(&c, &app, true, None).await;
+            self.send_online(&c).await;
+        }
+    }
+
+    /// "Sono collegato" a un contatto (SPEC §12.3): non effimero, così chi non è connesso lo
+    /// trova al prossimo ritiro, ma senza coda né mesh. Un di più: se non parte, pazienza.
+    async fn send_online(&mut self, c: &Contact) {
+        let Some(lan) = &self.lan else {
+            return;
+        };
+        if c.blocked {
+            return;
+        }
+        let addrs: Vec<String> = lan.public_addrs().iter().map(|a| a.to_string()).collect();
+        let app = AppMessage::Online {
+            v: 1,
+            addrs,
+            ts: now(),
+        };
+        let Some(group) = self.preferred_group(c) else {
+            return;
+        };
+        let Ok(plain) = serde_json::to_vec(&app) else {
+            return;
+        };
+        let Ok(ct) = self.device.encrypt(&group, &plain) else {
+            return;
+        };
+        // L'archivio MLS va salvato subito: il messaggio ha fatto avanzare le chiavi.
+        if self.save().is_err() {
+            return;
+        }
+        let envelope = Envelope::Mls {
+            v: 1,
+            msg: b64::encode(ct),
+        };
+        let Ok(bytes) = serde_json::to_vec(&envelope) else {
+            return;
+        };
+        let _ = self.try_deliver(&c.card, &b64::encode(bytes), false).await;
+    }
+
+    /// "Sono collegato" a un contatto per identità, se c'è una chat con lui.
+    async fn send_online_to(&mut self, id: &PublicKey) {
+        let c = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == id && !c.groups.is_empty())
+            .cloned();
+        if let Some(c) = c {
+            self.send_online(&c).await;
         }
     }
 
@@ -391,6 +447,15 @@ impl Client {
         if let Some(l) = self.lan.as_mut() {
             l.add_peer(id, addr);
         }
+    }
+
+    /// Dimentica gli indirizzi diretti di un contatto (test, CLI): come un contatto dietro NAT,
+    /// che si raggiunge solo dal nodo o dalla mesh finché non manda un altro "sono collegato".
+    pub fn forget_addrs(&mut self, id: &PublicKey) -> Result<()> {
+        if let Some(c) = self.contact_mut(id) {
+            c.addrs.clear();
+        }
+        self.save()
     }
 
     pub fn forget_lan_peer(&mut self, id: &PublicKey) {
@@ -488,6 +553,7 @@ impl Client {
             net: Net::new()?,
             typing: HashMap::new(),
             typing_sent: HashMap::new(),
+            batch: Batch::default(),
             lan: None,
             relay_jobs: Vec::new(),
         })
@@ -890,6 +956,8 @@ impl Client {
         }
         self.start_chat(&info.identity).await?;
         self.save()?;
+        // Chat nuova: il contatto deve sapere dove trovarmi, anche se ero già acceso.
+        self.send_online_to(&info.identity).await;
         self.state
             .contacts
             .iter()
@@ -899,18 +967,11 @@ impl Client {
     }
 
     /// Crea il gruppo MLS con un contatto e gli consegna il Welcome con il mio biglietto.
-    async fn start_chat(&mut self, peer: &PublicKey) -> Result<()> {
-        let contact = self
-            .state
-            .contacts
-            .iter()
-            .find(|c| &c.identity == peer)
-            .cloned()
-            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
-        let their = verify_card(&contact.card)?;
-
-        // Key package: dal nodo del contatto, se non risponde direttamente dal suo telefono
-        // (SPEC §12.4).
+    /// Key package di un contatto: dal suo nodo, se non risponde direttamente dal suo telefono
+    /// (SPEC §12.4).
+    async fn claim_keypackage(&self, card: &SignedCard) -> Result<Vec<u8>> {
+        let their = verify_card(card)?;
+        let peer = &their.identity;
         let mut kp_b64 = None;
         if let Some((node, inbox, permit)) = their.mailbox() {
             let claimed = self
@@ -947,7 +1008,18 @@ impl Client {
                 their.display_name
             ))
         })?;
-        let kp = b64::decode(&kp_b64)?;
+        Ok(b64::decode(&kp_b64)?)
+    }
+
+    async fn start_chat(&mut self, peer: &PublicKey) -> Result<()> {
+        let contact = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == peer)
+            .cloned()
+            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
+        let kp = self.claim_keypackage(&contact.card).await?;
 
         let permit = match &contact.my_permit_id {
             Some(_) => None,
@@ -1288,7 +1360,14 @@ impl Client {
 
     /// Consegna la coda a chi è tornato raggiungibile, ritira i messaggi dalla casella del nodo e
     /// dalla rete locale, li elabora e li conferma al nodo.
+    /// Restituisce solo gli eventi delle chat 1:1; per i gruppi c'è [`Client::sync_all`].
     pub async fn sync(&mut self) -> Result<Vec<Event>> {
+        Ok(self.sync_all().await?.events)
+    }
+
+    /// Come [`Client::sync`], con anche gli eventi dei gruppi (SPEC §7.4).
+    pub async fn sync_all(&mut self) -> Result<Synced> {
+        self.batch = Batch::default();
         let mut events = self.flush_outbox().await;
         let path = format!("/v1/inboxes/{}/messages", self.state.inbox);
         let mut ids = Vec::new();
@@ -1351,6 +1430,19 @@ impl Client {
                 }
             }
         }
+        // Azioni dei gruppi raccolte durante l'elaborazione (annunci, uscite, revoche).
+        events.extend(self.run_pending().await);
+        // Contatti nuovi: devono sapere dove trovarmi (SPEC §12.3).
+        let new: Vec<PublicKey> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::NewContact { identity, .. } => Some(*identity),
+                _ => None,
+            })
+            .collect();
+        for id in new {
+            self.send_online_to(&id).await;
+        }
         // Qualcuno ha detto "sono collegato": la coda verso di lui riparte subito.
         if self.online_marker() != online_before {
             events.extend(self.flush_outbox().await);
@@ -1388,7 +1480,10 @@ impl Client {
                 )));
             }
         }
-        Ok(events)
+        Ok(Synced {
+            events,
+            groups: std::mem::take(&mut self.batch.groups),
+        })
     }
 
     /// Elabora una busta una volta sola: i doppioni (da altre vie) si scartano in silenzio.
@@ -1426,22 +1521,35 @@ impl Client {
     fn handle_welcome(&mut self, welcome: &str, first: &str) -> Result<Vec<Event>> {
         let me = self.identity.public();
         let joined = self.device.join(&b64::decode(welcome)?)?;
+        let Received::Application {
+            sender: from,
+            plaintext,
+            group_id,
+        } = self.device.decrypt(&b64::decode(first)?, |_, _| false)?
+        else {
+            return Err(Error::Invalid("primo messaggio mancante".into()));
+        };
+        if group_id != joined.group_id {
+            return Err(Error::Invalid("primo messaggio di un altro gruppo".into()));
+        }
+        let app: AppMessage = serde_json::from_slice(&plaintext)?;
+        check_version(app.version())?;
+        let card = match app {
+            AppMessage::Hello { card, .. } => card,
+            // Invito a un gruppo (SPEC §7.4).
+            AppMessage::Group {
+                name, admin, cards, ..
+            } => {
+                self.join_group(&joined.members, &group_id, from, name, admin, cards)?;
+                return Ok(Vec::new());
+            }
+            _ => return Err(Error::Invalid("il primo messaggio non è un saluto".into())),
+        };
         let others: Vec<PublicKey> = joined.members.into_iter().filter(|m| m != &me).collect();
         let [sender] = others.as_slice() else {
             return Err(Error::Invalid(
                 "chat 1:1 con un numero di membri sbagliato".into(),
             ));
-        };
-        let Received::Application {
-            sender: from,
-            plaintext,
-            group_id,
-        } = self.device.decrypt(&b64::decode(first)?)?
-        else {
-            return Err(Error::Invalid("primo messaggio mancante".into()));
-        };
-        let AppMessage::Hello { card, .. } = serde_json::from_slice(&plaintext)? else {
-            return Err(Error::Invalid("il primo messaggio non è un saluto".into()));
         };
         let info = verify_card(&card)?;
         if &from != sender || info.identity != from || group_id != joined.group_id {
@@ -1490,15 +1598,28 @@ impl Client {
     }
 
     fn handle_mls(&mut self, msg: &str) -> Result<Vec<Event>> {
+        // Nei gruppi applica commit solo l'amministratore; nelle chat 1:1 nessuno (SPEC §7.4).
+        let groups = &self.state.group_chats;
+        let received = self.device.decrypt(&b64::decode(msg)?, |gid, sender| {
+            let gid = b64::encode(gid);
+            groups.iter().any(|g| g.id == gid && &g.admin == sender)
+        })?;
         let Received::Application {
             group_id,
             sender,
             plaintext,
-        } = self.device.decrypt(&b64::decode(msg)?)?
+        } = received
         else {
+            if let Received::Control { group_id, .. } = received {
+                self.group_changed(&group_id)?;
+            }
             return Ok(Vec::new());
         };
         let gid = b64::encode(&group_id);
+        if self.state.group_chats.iter().any(|g| g.id == gid) {
+            self.group_app_message(&gid, sender, &plaintext)?;
+            return Ok(Vec::new());
+        }
         let contact = self
             .state
             .contacts
@@ -1650,6 +1771,9 @@ impl Client {
                     c.username = info.username;
                 }
                 Ok(Vec::new())
+            }
+            AppMessage::Group { .. } | AppMessage::Leave { .. } => {
+                Err(Error::Invalid("messaggio di gruppo in una chat 1:1".into()))
             }
         }
     }

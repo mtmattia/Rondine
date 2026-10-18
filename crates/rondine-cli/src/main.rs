@@ -4,7 +4,8 @@ use std::path::PathBuf;
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
-use rondine_client::{Client, Contact, Delivery, Event};
+use rondine_client::{Client, Contact, Delivery, Event, GroupChat, GroupEvent};
+use rondine_core::PublicKey;
 
 #[derive(Parser)]
 #[command(name = "rondine", version, about = "Messenger senza centralino")]
@@ -87,6 +88,41 @@ enum Cmd {
     /// Notifiche UnifiedPush.
     #[command(subcommand)]
     Push(PushCmd),
+    /// Elenca i gruppi.
+    Gruppi,
+    /// Chat di gruppo.
+    #[command(subcommand)]
+    Gruppo(GruppoCmd),
+}
+
+#[derive(Subcommand)]
+enum GruppoCmd {
+    /// Crea un gruppo con alcuni contatti; ne sei l'amministratore.
+    Crea {
+        nome: String,
+        #[arg(required = true, num_args = 1..)]
+        membri: Vec<String>,
+    },
+    /// Scrive a tutto il gruppo.
+    Scrivi {
+        gruppo: String,
+        #[arg(required = true, num_args = 1..)]
+        testo: Vec<String>,
+    },
+    /// Mostra la conversazione del gruppo.
+    Leggi { gruppo: String },
+    /// Mostra i membri.
+    Membri { gruppo: String },
+    /// Aggiunge contatti (solo l'amministratore).
+    Aggiungi {
+        gruppo: String,
+        #[arg(required = true, num_args = 1..)]
+        membri: Vec<String>,
+    },
+    /// Toglie un membro (solo l'amministratore).
+    Togli { gruppo: String, membro: String },
+    /// Esce dal gruppo.
+    Esci { gruppo: String },
 }
 
 #[derive(Subcommand)]
@@ -179,10 +215,71 @@ fn ticks(status: Delivery) -> &'static str {
     }
 }
 
-fn print_events(events: &[Event], client: &Client) {
-    if events.is_empty() {
-        println!("Nessun messaggio nuovo.");
+/// Nome da mostrare per un'identità: io, un membro del gruppo o un contatto.
+fn who(client: &Client, group: Option<&GroupChat>, id: &PublicKey) -> String {
+    if id == &client.identity() {
+        return "io".into();
     }
+    group
+        .and_then(|g| g.members.iter().find(|m| &m.identity == id))
+        .map(|m| m.display_name.clone())
+        .or_else(|| {
+            client
+                .contacts()
+                .iter()
+                .find(|c| &c.identity == id)
+                .map(|c| c.display_name.clone())
+        })
+        .unwrap_or_else(|| id.short())
+}
+
+/// Membro di un gruppo per nome o inizio della chiave.
+fn group_member(g: &GroupChat, query: &str) -> anyhow::Result<PublicKey> {
+    let q = query.trim().to_lowercase();
+    let found: Vec<&PublicKey> = g
+        .members
+        .iter()
+        .filter(|m| {
+            m.display_name.to_lowercase() == q
+                || (q.len() >= 6 && m.identity.to_b64().to_lowercase().starts_with(&q))
+        })
+        .map(|m| &m.identity)
+        .collect();
+    match found.as_slice() {
+        [one] => Ok(**one),
+        [] => bail!("nessun membro «{query}» nel gruppo"),
+        _ => bail!("«{query}» corrisponde a più membri: usa la chiave"),
+    }
+}
+
+fn print_group_events(events: &[GroupEvent], client: &Client) {
+    for e in events {
+        let group = |id: &str| client.groups().iter().find(|g| g.id == id);
+        match e {
+            GroupEvent::Joined { name, admin, .. } => println!(
+                "+ sei nel gruppo «{name}» (amministratore: {})",
+                who(client, None, admin)
+            ),
+            GroupEvent::Message(m) => {
+                let g = group(&m.group);
+                let name = g.map(|g| g.name.as_str()).unwrap_or("?");
+                println!("[{name}] {}: {}", who(client, g, &m.sender), m.body);
+            }
+            GroupEvent::MembersChanged { group: id } => {
+                if let Some(g) = group(id) {
+                    println!("~ cambiati i membri di «{}»", g.name);
+                }
+            }
+            GroupEvent::Removed { group: id } => {
+                if let Some(g) = group(id) {
+                    println!("- sei stato tolto da «{}»", g.name);
+                }
+            }
+        }
+    }
+}
+
+fn print_events(events: &[Event], client: &Client) {
     for e in events {
         match e {
             Event::NewContact { name, .. } => println!("+ nuovo contatto: {name}"),
@@ -227,6 +324,82 @@ fn print_events(events: &[Event], client: &Client) {
             Event::Rejected(why) => eprintln!("! {why}"),
         }
     }
+}
+
+async fn group_cmd(c: &mut Client, cmd: GruppoCmd) -> anyhow::Result<()> {
+    let contacts = |c: &Client, names: &[String]| -> anyhow::Result<Vec<PublicKey>> {
+        names
+            .iter()
+            .map(|n| Ok(c.find_contact(n)?.identity))
+            .collect()
+    };
+    match cmd {
+        GruppoCmd::Crea { nome, membri } => {
+            let ids = contacts(c, &membri)?;
+            let g = c.create_group(&nome, &ids).await?;
+            println!(
+                "Gruppo «{}» creato con {} membri.",
+                g.name,
+                g.members.len() + 1
+            );
+        }
+        GruppoCmd::Scrivi { gruppo, testo } => {
+            let id = c.find_group(&gruppo)?.id.clone();
+            let d = c.send_group_text(&id, &testo.join(" ")).await?;
+            if d.undelivered.is_empty() {
+                println!("Inviato.");
+            } else {
+                let g = c.find_group(&gruppo)?;
+                let names: Vec<String> = d.undelivered.iter().map(|p| who(c, Some(g), p)).collect();
+                println!("Inviato, ma non consegnato a: {}", names.join(", "));
+            }
+        }
+        GruppoCmd::Leggi { gruppo } => {
+            let g = c.find_group(&gruppo)?.clone();
+            for m in c.group_messages(&g.id) {
+                println!("{}: {}", who(c, Some(&g), &m.sender), m.body);
+            }
+            c.mark_group_read(&g.id)?;
+        }
+        GruppoCmd::Membri { gruppo } => {
+            let g = c.find_group(&gruppo)?;
+            let me = c.identity();
+            let admin = |id: &PublicKey| {
+                if id == &g.admin {
+                    "  [amministratore]"
+                } else {
+                    ""
+                }
+            };
+            println!("io{}", admin(&me));
+            for m in &g.members {
+                println!(
+                    "{}  {}{}",
+                    m.display_name,
+                    m.identity.short(),
+                    admin(&m.identity)
+                );
+            }
+        }
+        GruppoCmd::Aggiungi { gruppo, membri } => {
+            let id = c.find_group(&gruppo)?.id.clone();
+            let ids = contacts(c, &membri)?;
+            c.add_group_members(&id, &ids).await?;
+            println!("Aggiunti.");
+        }
+        GruppoCmd::Togli { gruppo, membro } => {
+            let g = c.find_group(&gruppo)?;
+            let (id, who) = (g.id.clone(), group_member(g, &membro)?);
+            c.remove_group_member(&id, &who).await?;
+            println!("Tolto.");
+        }
+        GruppoCmd::Esci { gruppo } => {
+            let id = c.find_group(&gruppo)?.id.clone();
+            c.leave_group(&id).await?;
+            println!("Sei uscito dal gruppo.");
+        }
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -351,8 +524,12 @@ async fn main() -> anyhow::Result<()> {
             println!("Inviato.");
         }
         Cmd::Sincronizza => {
-            let events = c.sync().await?;
-            print_events(&events, &c);
+            let s = c.sync_all().await?;
+            if s.events.is_empty() && s.groups.is_empty() {
+                println!("Nessun messaggio nuovo.");
+            }
+            print_events(&s.events, &c);
+            print_group_events(&s.groups, &c);
         }
         Cmd::Leggi { contatto } => {
             let contact = c.find_contact(&contatto)?.clone();
@@ -395,6 +572,22 @@ async fn main() -> anyhow::Result<()> {
             c.clear_push_endpoint().await?;
             println!("Notifiche disattivate.");
         }
+        Cmd::Gruppi => {
+            if c.groups().is_empty() {
+                println!("Nessun gruppo.");
+            }
+            for g in c.groups() {
+                let stato = if g.active {
+                    ""
+                } else {
+                    "  [non ne fai più parte]"
+                };
+                let n = g.members.len() + 1;
+                let membri = if n == 1 { "membro" } else { "membri" };
+                println!("{}  ({n} {membri}){stato}", g.name);
+            }
+        }
+        Cmd::Gruppo(cmd) => group_cmd(&mut c, cmd).await?,
     }
     Ok(())
 }

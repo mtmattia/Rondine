@@ -608,6 +608,7 @@ async fn coda_finche_il_contatto_ricompare() -> R {
 
     // Bruno esce dalla rete: il messaggio di Anna resta in attesa sul telefono.
     anna.forget_lan_peer(&bruno.identity());
+    anna.forget_addrs(&bruno.identity())?;
     let m = anna.send_text(&bruno.identity(), "quando torni").await?;
     assert_eq!(m.status, Delivery::Pending);
     anna.sync().await?;
@@ -756,11 +757,12 @@ async fn mesh_tramite_un_contatto_in_comune() -> R {
     let mut silvia = profile(&tmp, "Silvia", &ns).await?;
     let mut pino = profile(&tmp, "Pino", &np).await?;
     let mut mario = profile(&tmp, "Mario", &np).await?;
-    // Silvia ascolta prima di avere contatti: nessuno impara i suoi indirizzi da "sono collegato".
     let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
     befriend(&mut silvia, &mut pino).await?;
     befriend(&mut silvia, &mut mario).await?;
     befriend(&mut pino, &mut mario).await?;
+    // Silvia è dietro un NAT: Pino non la raggiunge direttamente.
+    pino.forget_addrs(&silvia.identity())?;
     // Mario è vicino a Silvia (stessa rete); Pino no.
     mario.start_lan("127.0.0.1:0".parse()?, false).await?;
     mario.add_lan_peer(silvia.identity(), s);
@@ -894,5 +896,67 @@ async fn nodo_aggiunto_dopo() -> R {
     // Ora ha anche i servizi del nodo, e un secondo nodo non si aggiunge.
     anna.claim_username("anna").await?;
     assert!(anna.set_node(&node).await.is_err());
+    Ok(())
+}
+
+/// Io ho un nodo, il contatto no; siamo accesi e ci conosciamo (segnalazione di Mattia).
+/// Il contatto ascolta già prima di aggiungermi, come l'app all'avvio, e non siamo nella
+/// stessa rete locale: il messaggio verso di lui deve partire lo stesso.
+#[tokio::test]
+async fn con_nodo_verso_contatto_senza_nodo() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut io = profile(&tmp, "Mattia", &node).await?;
+    let mut x = Client::create_local(&tmp.path().join("X"), "X")?;
+    x.start_lan("127.0.0.1:0".parse()?, false).await?;
+    io.start_lan("127.0.0.1:0".parse()?, false).await?;
+
+    // X apre il mio invito; io ricevo il saluto dal mio nodo.
+    x.add(&io.invite_link()?).await?;
+    io.sync().await?;
+
+    // Da X a me passa dal mio nodo.
+    let m = x.send_text(&io.identity(), "ciao da X").await?;
+    assert_eq!(m.status, Delivery::Sent, "X → io");
+    assert_eq!(texts(&io.sync().await?), ["ciao da X"]);
+
+    // Da me a X: deve partire.
+    let m = io.send_text(&x.identity(), "ciao X").await?;
+    assert_eq!(m.status, Delivery::Sent, "io → X");
+    assert_eq!(texts(&x.sync().await?), ["ciao X"]);
+    Ok(())
+}
+
+/// Il contatto senza nodo cambia indirizzo mentre io non sono collegato: il suo "sono collegato"
+/// deve aspettarmi nel nodo (prima era effimero e il nodo lo buttava dopo 30 s).
+#[tokio::test]
+async fn sono_collegato_aspetta_chi_non_e_connesso() -> R {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let node = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: node.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+    })?;
+    // Gli effimeri scadono subito: come un ritiro che arriva troppo tardi.
+    state.set_ephemeral_ttl(0);
+    tokio::spawn(rondine_nodo::serve(listener, state));
+
+    let tmp = TempDir::new()?;
+    let mut io = profile(&tmp, "Mattia", &node).await?;
+    let mut x = Client::create_local(&tmp.path().join("X"), "X")?;
+    x.start_lan("127.0.0.1:0".parse()?, false).await?;
+    x.add(&io.invite_link()?).await?;
+    io.sync().await?;
+
+    // X riparte su un'altra porta (app riaperta) e lo annuncia; io ritiro dopo.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    x.start_lan("127.0.0.1:0".parse()?, false).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    io.sync().await?;
+    let m = io.send_text(&x.identity(), "ti trovo ancora").await?;
+    assert_eq!(m.status, Delivery::Sent);
+    assert_eq!(texts(&x.sync().await?), ["ti trovo ancora"]);
     Ok(())
 }

@@ -71,3 +71,18 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-18 — Benvenuto: tolta la spiegazione imprecisa sotto il campo Nodo.
 - 2026-10-18 — Benvenuto: "Nodo (facoltativo)" con tasto ⓘ che spiega a cosa serve; campo vuoto = profilo senza nodo.
 - 2026-10-18 — Nodo aggiunto dopo (SPEC §12.7): `Client::set_node` crea casella, permessi e key package e manda a ogni contatto il biglietto nuovo con un permesso suo. App: Impostazioni → Nodo; CLI: `rondine nodo <url>`.
+- 2026-10-18 — Corretto: con il nodo non si riusciva a scrivere a un contatto senza nodo che ti
+  aveva aggiunto dopo essersi acceso (messaggio fermo "in attesa"). Il "sono collegato" ora parte
+  anche quando nasce una chat, dai due lati, e non è più effimero (il nodo lo buttava dopo 30 s
+  se non eri connesso); resta senza coda né mesh (SPEC §12.3). Due test che lo riproducono;
+  `forget_addrs` per simulare nei test un contatto dietro NAT.
+- 2026-10-18 — Gruppi (SPEC §7.4): `rondine-mls` crea gruppi, aggiunge e toglie membri, tiene 5
+  epoche passate e controlla credenziale = chiave di firma su ogni foglia dei commit ricevuti.
+  `rondine-client` con consegna a ogni membro, permesso `gruppo` per membro, amministratore unico,
+  uscita su richiesta; `sync_all()` aggiunge gli eventi dei gruppi senza cambiare `sync()`. CLI
+  `rondine gruppi` e `rondine gruppo …`. Corretto il mittente dei messaggi di un'epoca passata
+  (con test) e il biglietto `gruppo` che a parità di secondo perdeva contro quello prestato
+  dall'amministratore (con test). 4 test MLS, 1 unitario e 3 di accettazione.
+- 2026-10-18 — GitHub Actions (`.github/workflows/apk.yml`): a ogni tag `v*` compila l'APK di prova
+  (debug) e lo pubblica in una Release scaricabile; anche a ogni push sui branch `ccr-*`, con un
+  tag di prova creato dalla Action (il push di tag da qui è bloccato dal proxy).

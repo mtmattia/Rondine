@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -243,8 +244,18 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
         ) {
             Box(Modifier.weight(1f)) {
                 Wallpaper(colors.wallpaperDot)
+                // L'ultimo messaggio è l'elemento 0 (lista rovesciata). Si scende da soli quando
+                // mando io, o quando arriva qualcosa mentre sono già in fondo.
+                val listState = rememberLazyListState()
+                val last = messages.lastOrNull()
+                LaunchedEffect(last?.id) {
+                    if (last != null && (last.outgoing || listState.firstVisibleItemIndex <= 1)) {
+                        listState.animateScrollToItem(0)
+                    }
+                }
                 LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = listState,
                     reverseLayout = true,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),

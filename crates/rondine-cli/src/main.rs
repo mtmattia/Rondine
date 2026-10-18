@@ -41,6 +41,8 @@ enum Cmd {
     },
     /// Mostra chi sei e il tuo link d'invito.
     Io,
+    /// Aggiunge un nodo a un profilo che non l'aveva.
+    Nodo { url: String },
     /// Stampa il link d'invito; con --nuovo revoca quello vecchio.
     Invito {
         #[arg(long)]
@@ -255,6 +257,10 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.cmd {
         Cmd::Crea { .. } => {}
+        Cmd::Nodo { url } => {
+            c.set_node(&url).await?;
+            println!("Nodo aggiunto: {url}. I tuoi contatti ricevono il biglietto nuovo.");
+        }
         Cmd::Rete {
             porta,
             vicino,

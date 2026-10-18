@@ -869,3 +869,30 @@ async fn mesh_al_massimo_quattro_passaggi() -> R {
     assert!(texts(&silvia.sync().await?).is_empty());
     Ok(())
 }
+
+#[tokio::test]
+async fn nodo_aggiunto_dopo() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut anna, mut bruno, _, _) = local_pair(&tmp).await?;
+    befriend(&mut anna, &mut bruno).await?;
+
+    // Anna aggiunge un nodo: i suoi contatti ricevono il biglietto nuovo.
+    anna.set_node(&node).await?;
+    assert!(anna.has_node());
+    bruno.sync().await?;
+
+    // Bruno non la vede più in rete locale: il messaggio passa dal nodo di Anna.
+    bruno.forget_lan_peer(&anna.identity());
+    let m = bruno
+        .send_text(&anna.identity(), "dal tuo nodo nuovo")
+        .await?;
+    assert_eq!(m.status, Delivery::Sent, "doveva passare dal nodo");
+    anna.forget_lan_peer(&bruno.identity());
+    assert_eq!(texts(&anna.sync().await?), ["dal tuo nodo nuovo"]);
+
+    // Ora ha anche i servizi del nodo, e un secondo nodo non si aggiunge.
+    anna.claim_username("anna").await?;
+    assert!(anna.set_node(&node).await.is_err());
+    Ok(())
+}

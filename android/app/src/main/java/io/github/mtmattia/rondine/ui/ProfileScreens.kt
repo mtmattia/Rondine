@@ -69,6 +69,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import io.github.mtmattia.rondine.BuildConfig
 import io.github.mtmattia.rondine.Repo
 import io.github.mtmattia.rondine.userMessage
 import kotlinx.coroutines.launch
@@ -244,7 +245,7 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
     }
 }
 
-private enum class SettingsDialog { Username, Phone }
+private enum class SettingsDialog { Username, Phone, Node }
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Unit) {
@@ -290,7 +291,11 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             SettingRow(Icons.Filled.Phone, "Numero di telefono", p.phone ?: "Non impostato") { dialog = SettingsDialog.Phone }
             SettingRow(Icons.Filled.QrCode2, "Link d'invito e QR", "Condividi o reimposta", onMyQr)
             SettingRow(Icons.Filled.Notifications, "Notifiche", "$push · tocca per scegliere il distributore UnifiedPush", onPickPush)
-            SettingRow(Icons.Filled.Dns, "Nodo", if (p.hasNode) p.node else "Nessuno: consegna diretta e tramite contatti") {}
+            SettingRow(
+                Icons.Filled.Dns,
+                "Nodo",
+                if (p.hasNode) p.node else "Nessuno: tocca per aggiungerne uno",
+            ) { if (!p.hasNode) dialog = SettingsDialog.Node }
             SettingRow(Icons.Filled.Code, "Codice sorgente", "Rondine è open source (MIT o Apache-2.0)") {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mtmattia/Rondine")))
             }
@@ -332,6 +337,24 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 val n = Repo.client().setPhone(value)
                 Repo.refresh()
                 "Numero salvato: $n"
+            }
+        }
+        SettingsDialog.Node -> TextDialog(
+            title = "Aggiungi un nodo",
+            label = "Nodo",
+            placeholder = "https://…",
+            initial = BuildConfig.DEFAULT_NODE.ifEmpty { "https://" },
+            note = "I tuoi contatti ricevono il nuovo biglietto: da lì ti arrivano messaggi e " +
+                "notifiche anche col telefono spento, e puoi scegliere un nome utente.",
+            onDismiss = { dialog = null },
+        ) { value ->
+            dialog = null
+            run {
+                Repo.client().setNode(value.trim())
+                Repo.refresh()
+                // Col nodo arrivano anche le notifiche: si registra subito il distributore.
+                onPickPush()
+                "Nodo aggiunto"
             }
         }
         null -> {}

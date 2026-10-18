@@ -352,5 +352,10 @@ Lo stesso messaggio può arrivare da più vie (nodo, diretto, mesh). Chi riceve 
 se vengono dal nodo, si confermano comunque perché il nodo le cancelli.
 
 ### 12.7 Profilo senza nodo
-Il client sa creare un profilo senza nodo (`node`, `inbox`, `permit` assenti nel biglietto, §4):
-funziona solo con le vie dirette e la mesh. L'app non lo propone; resta per prove e usi futuri.
+Un profilo può nascere senza nodo (`node`, `inbox`, `permit` assenti nel biglietto, §4): funziona
+con le vie dirette e la mesh. Nell'app il campo "Nodo" è facoltativo.
+
+**Aggiungere un nodo dopo:** il client crea la casella (`POST /v1/inboxes`), il permesso
+d'invito e i key package, poi manda a ogni contatto un `hello` (§7) con il nuovo biglietto e un
+permesso suo (etichetta `contatto:…`, da revocare per bloccarlo). Chi lo riceve aggiorna il
+biglietto e da lì consegna anche nel nodo. Cambiare nodo a chi ne ha già uno non è ancora previsto.

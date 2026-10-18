@@ -233,6 +233,71 @@ impl Client {
         Ok(client)
     }
 
+    /// Aggiunge un nodo a un profilo che non l'aveva (SPEC §12.7): casella, permessi, key
+    /// package, e il biglietto nuovo a ogni contatto con un permesso suo.
+    pub async fn set_node(&mut self, node: &str) -> Result<()> {
+        if self.has_node() {
+            return Err(Error::Invalid(
+                "questo profilo ha già un nodo: cambiarlo non è ancora possibile".into(),
+            ));
+        }
+        node_host(node)?;
+        let node = node.trim().trim_end_matches('/').to_string();
+        let created: serde_json::Value = parse(
+            &self
+                .net
+                .owner(
+                    &self.identity,
+                    Method::POST,
+                    &node,
+                    "/v1/inboxes",
+                    Some(&json!({})),
+                )
+                .await?,
+        )?;
+        let inbox = created["inbox"]
+            .as_str()
+            .ok_or_else(|| Error::Invalid("risposta del nodo senza casella".into()))?
+            .to_string();
+        let invite = issue_permit(&self.net, &self.identity, &node, &inbox, "invito").await?;
+        self.state.node = node.clone();
+        self.state.inbox = inbox;
+        self.state.invite_permit = Some(invite);
+        if self.state.boards.is_empty() {
+            self.state.boards.push(node);
+        }
+        // Senza key package nessuno potrebbe avviare una chat passando dal nodo: se il caricamento
+        // fallisce si torna come prima.
+        if let Err(e) = self.upload_keypackages(KEYPACKAGE_BATCH).await {
+            self.state.node.clear();
+            self.state.inbox.clear();
+            self.state.invite_permit = None;
+            self.state.boards.clear();
+            return Err(e);
+        }
+        self.save()?;
+        let contacts: Vec<Contact> = self
+            .state
+            .contacts
+            .iter()
+            .filter(|c| !c.blocked && !c.groups.is_empty())
+            .cloned()
+            .collect();
+        for c in contacts {
+            let permit = self
+                .new_permit(&format!("contatto:{}", c.identity.short()))
+                .await?;
+            let card = self.card_with(Some(&permit))?;
+            let permit_id = permit.verify()?.id;
+            if let Some(cm) = self.contact_mut(&c.identity) {
+                cm.my_permit_id = Some(permit_id);
+            }
+            // Chi non è raggiungibile adesso lo riceve dalla coda o dalla mesh.
+            let _ = self.send_app(&c, &AppMessage::Hello { v: 1, card }).await;
+        }
+        self.save()
+    }
+
     /// Il profilo ha un nodo? Senza, niente casella, nomi utente, push né rubrica.
     pub fn has_node(&self) -> bool {
         !self.state.node.is_empty()

@@ -70,3 +70,4 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-18 — App: la chat scorre da sola all'ultimo messaggio quando ne mandi uno, o quando ne arriva uno mentre sei in fondo.
 - 2026-10-18 — Benvenuto: tolta la spiegazione imprecisa sotto il campo Nodo.
 - 2026-10-18 — Benvenuto: "Nodo (facoltativo)" con tasto ⓘ che spiega a cosa serve; campo vuoto = profilo senza nodo.
+- 2026-10-18 — Nodo aggiunto dopo (SPEC §12.7): `Client::set_node` crea casella, permessi e key package e manda a ogni contatto il biglietto nuovo con un permesso suo. App: Impostazioni → Nodo; CLI: `rondine nodo <url>`.

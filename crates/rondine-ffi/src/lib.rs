@@ -307,6 +307,12 @@ impl Rondine {
         Ok(c.messages_with(&k).into_iter().map(message).collect())
     }
 
+    /// Aggiunge un nodo a un profilo che non l'aveva (SPEC §12.7).
+    pub async fn set_node(&self, url: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.set_node(&url).await?) }))
+            .await
+    }
+
     /// Avvia la rete locale (consegna diretta e, con `discovery`, mDNS). Restituisce la porta.
     pub async fn start_lan(&self, discovery: bool) -> Result<u16> {
         self.run(move |c| {

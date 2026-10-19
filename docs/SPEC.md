@@ -220,6 +220,8 @@ scrive deposita lo stesso messaggio MLS nella casella di ogni altro membro**, us
 di quel membro. Messaggi di gestione sempre cifrati (`PrivateMessage`); ogni membro conserva le
 chiavi delle ultime 5 epoche, per i messaggi che incrociano un cambio di membri.
 
+- **Al massimo 100 membri**, amministratore compreso: chi scrive deposita il messaggio una volta
+  per membro.
 - **Amministratore** = chi crea il gruppo. È l'unico che fa commit (aggiunge e toglie membri):
   così non nascono rami concorrenti. Un commit di un altro membro si scarta senza applicarlo.
 - **Biglietti dei membri.** Ogni membro, entrando, chiede al proprio nodo un permesso nuovo con

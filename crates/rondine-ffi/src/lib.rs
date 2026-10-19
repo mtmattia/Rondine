@@ -4,7 +4,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rondine_client::{ChatMessage, Client, Contact, Delivery, Event, NewFile, Source};
+use rondine_client::{
+    ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent, GroupMessage, NewFile,
+    Source,
+};
 use rondine_core::PublicKey;
 use tokio::sync::Mutex;
 
@@ -140,6 +143,107 @@ impl From<Delivery> for MessageStatus {
     }
 }
 
+/// Un membro di un gruppo (io escluso).
+#[derive(uniffi::Record, Clone)]
+pub struct GroupMemberInfo {
+    pub id: String,
+    pub name: String,
+    pub is_admin: bool,
+    /// È anche tra i miei contatti (si può aprire la chat 1:1).
+    pub is_contact: bool,
+}
+
+#[derive(uniffi::Record, Clone)]
+pub struct GroupInfo {
+    pub id: String,
+    pub name: String,
+    pub admin_id: String,
+    pub i_am_admin: bool,
+    /// Falso dopo essere usciti o essere stati tolti.
+    pub active: bool,
+    /// Gli altri membri, io escluso.
+    pub members: Vec<GroupMemberInfo>,
+    pub created_at: u64,
+}
+
+#[derive(uniffi::Record, Clone)]
+pub struct GroupMessageInfo {
+    pub id: String,
+    pub group_id: String,
+    pub sender_id: String,
+    /// "Tu" per i miei.
+    pub sender_name: String,
+    pub outgoing: bool,
+    pub body: String,
+    pub ts: u64,
+    pub read: bool,
+}
+
+#[derive(uniffi::Record, Clone)]
+pub struct GroupRow {
+    pub group: GroupInfo,
+    pub last: Option<GroupMessageInfo>,
+    /// Ultimo messaggio, o la creazione del gruppo.
+    pub last_ts: u64,
+    pub unread: u32,
+}
+
+fn group_info(c: &Client, g: &GroupChat) -> GroupInfo {
+    let me = c.identity();
+    GroupInfo {
+        id: g.id.clone(),
+        name: g.name.clone(),
+        admin_id: g.admin.to_b64(),
+        i_am_admin: g.admin == me,
+        active: g.active,
+        members: g
+            .members
+            .iter()
+            .map(|m| GroupMemberInfo {
+                id: m.identity.to_b64(),
+                name: c
+                    .contacts()
+                    .iter()
+                    .find(|x| x.identity == m.identity)
+                    .map(|x| x.display_name.clone())
+                    .unwrap_or_else(|| m.display_name.clone()),
+                is_admin: m.identity == g.admin,
+                is_contact: c.contacts().iter().any(|x| x.identity == m.identity),
+            })
+            .collect(),
+        created_at: g.created_at,
+    }
+}
+
+fn group_message(c: &Client, m: &GroupMessage) -> GroupMessageInfo {
+    let sender_name = if m.outgoing {
+        "Tu".to_string()
+    } else {
+        c.contacts()
+            .iter()
+            .find(|x| x.identity == m.sender)
+            .map(|x| x.display_name.clone())
+            .or_else(|| {
+                c.groups()
+                    .iter()
+                    .find(|g| g.id == m.group)
+                    .and_then(|g| g.members.iter().find(|x| x.identity == m.sender))
+                    .map(|x| x.display_name.clone())
+            })
+            .unwrap_or_else(|| m.sender.short())
+    };
+    GroupMessageInfo {
+        id: m.id.clone(),
+        group_id: m.group.clone(),
+        sender_id: m.sender.to_b64(),
+        sender_name,
+        outgoing: m.outgoing,
+        body: m.body.clone(),
+        ts: m.ts,
+        read: m.read,
+    }
+}
+
 /// Una mia condivisione della posizione in tempo reale ancora attiva.
 #[derive(uniffi::Record, Clone)]
 pub struct LiveShare {
@@ -171,6 +275,10 @@ pub struct SyncResult {
     pub typing_changed: bool,
     /// Una posizione in tempo reale ricevuta si è spostata o è finita.
     pub locations_changed: bool,
+    /// Messaggi nuovi nei gruppi.
+    pub group_messages: Vec<GroupMessageInfo>,
+    /// Gruppi nuovi, membri cambiati o io tolto da un gruppo.
+    pub groups_changed: bool,
 }
 
 fn contact_info(c: &Contact) -> ContactInfo {
@@ -280,6 +388,9 @@ struct View {
     /// Messaggi per contatto (chiave in b64), nell'ordine del client.
     messages: std::collections::HashMap<String, Vec<Message>>,
     live: Vec<LiveShare>,
+    groups: Vec<GroupRow>,
+    /// Messaggi per gruppo (id del gruppo).
+    group_messages: std::collections::HashMap<String, Vec<GroupMessageInfo>>,
 }
 
 fn view_of(c: &Client) -> View {
@@ -330,12 +441,39 @@ fn view_of(c: &Client) -> View {
             until: m.location.as_ref().and_then(|l| l.live_until).unwrap_or(t),
         })
         .collect();
+    let mut group_messages: std::collections::HashMap<String, Vec<GroupMessageInfo>> =
+        Default::default();
+    for m in &s.group_messages {
+        group_messages
+            .entry(m.group.clone())
+            .or_default()
+            .push(group_message(c, m));
+    }
+    let groups = c
+        .groups()
+        .iter()
+        .map(|g| {
+            let msgs = group_messages.get(&g.id);
+            let last = msgs.and_then(|v| v.last()).cloned();
+            GroupRow {
+                group: group_info(c, g),
+                last_ts: last.as_ref().map_or(g.created_at, |m| m.ts),
+                last,
+                unread: u32::try_from(
+                    msgs.map_or(0, |v| v.iter().filter(|m| !m.outgoing && !m.read).count()),
+                )
+                .unwrap_or(u32::MAX),
+            }
+        })
+        .collect();
     View {
         profile,
         chats,
         contacts,
         messages,
         live,
+        groups,
+        group_messages,
     }
 }
 
@@ -561,6 +699,75 @@ impl Rondine {
             .await
     }
 
+    // ---------- gruppi (SPEC §7.4) ----------
+
+    pub async fn groups(&self) -> Vec<GroupRow> {
+        self.read(|v| v.groups.clone())
+    }
+
+    pub async fn group(&self, id: String) -> Result<GroupInfo> {
+        self.read(|v| {
+            v.groups
+                .iter()
+                .find(|g| g.group.id == id)
+                .map(|g| g.group.clone())
+        })
+        .ok_or_else(|| RondineError::NotFound("gruppo sconosciuto".into()))
+    }
+
+    pub async fn group_messages(&self, id: String) -> Vec<GroupMessageInfo> {
+        self.read(|v| v.group_messages.get(&id).cloned().unwrap_or_default())
+    }
+
+    /// Crea un gruppo con alcuni contatti; ne divento l'amministratore.
+    pub async fn create_group(&self, name: String, member_ids: Vec<String>) -> Result<GroupInfo> {
+        let ids = member_ids
+            .iter()
+            .map(|i| key(i))
+            .collect::<Result<Vec<_>>>()?;
+        self.run(move |c| {
+            Box::pin(async move {
+                let g = c.create_group(&name, &ids).await?;
+                Ok(group_info(c, &g))
+            })
+        })
+        .await
+    }
+
+    pub async fn add_group_members(&self, id: String, member_ids: Vec<String>) -> Result<()> {
+        let ids = member_ids
+            .iter()
+            .map(|i| key(i))
+            .collect::<Result<Vec<_>>>()?;
+        self.run(move |c| Box::pin(async move { Ok(c.add_group_members(&id, &ids).await?) }))
+            .await
+    }
+
+    pub async fn remove_group_member(&self, id: String, member_id: String) -> Result<()> {
+        let k = key(&member_id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.remove_group_member(&id, &k).await?) }))
+            .await
+    }
+
+    pub async fn leave_group(&self, id: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.leave_group(&id).await?) }))
+            .await
+    }
+
+    pub async fn send_group_text(&self, id: String, body: String) -> Result<GroupMessageInfo> {
+        self.run(move |c| {
+            Box::pin(async move {
+                let d = c.send_group_text(&id, &body).await?;
+                Ok(group_message(c, &d.message))
+            })
+        })
+        .await
+    }
+
+    pub async fn mark_group_read(&self, id: String) -> Result<()> {
+        Ok(self.with(|c| c.mark_group_read(&id)).await?)
+    }
+
     /// Le mie posizioni in tempo reale ancora attive (alla fine dell'ultima operazione).
     pub async fn live_locations(&self) -> Vec<LiveShare> {
         let t = rondine_core::now();
@@ -581,9 +788,10 @@ impl Rondine {
     }
 
     pub async fn sync(&self) -> Result<SyncResult> {
-        let events = self
-            .run(|c| Box::pin(async move { Ok(c.sync().await?) }))
+        let synced = self
+            .run(|c| Box::pin(async move { Ok(c.sync_all().await?) }))
             .await?;
+        let events = synced.events;
         let mut out = SyncResult {
             new_contacts: Vec::new(),
             messages: Vec::new(),
@@ -591,7 +799,33 @@ impl Rondine {
             receipts: 0,
             typing_changed: false,
             locations_changed: false,
+            group_messages: Vec::new(),
+            groups_changed: false,
         };
+        for e in synced.groups {
+            match e {
+                GroupEvent::Message(m) => out.group_messages.push(GroupMessageInfo {
+                    sender_name: self
+                        .read(|v| {
+                            v.group_messages
+                                .get(&m.group)
+                                .and_then(|l| l.iter().find(|x| x.id == m.id))
+                                .map(|x| x.sender_name.clone())
+                        })
+                        .unwrap_or_default(),
+                    id: m.id,
+                    group_id: m.group,
+                    sender_id: m.sender.to_b64(),
+                    outgoing: m.outgoing,
+                    body: m.body,
+                    ts: m.ts,
+                    read: m.read,
+                }),
+                GroupEvent::Joined { .. }
+                | GroupEvent::MembersChanged { .. }
+                | GroupEvent::Removed { .. } => out.groups_changed = true,
+            }
+        }
         for e in events {
             match e {
                 Event::NewContact { identity, .. } => out.new_contacts.push(identity.to_b64()),

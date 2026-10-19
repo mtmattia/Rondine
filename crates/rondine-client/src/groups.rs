@@ -107,6 +107,19 @@ fn merge_card(
     }
 }
 
+/// Membri al massimo, me compreso (SPEC §7.4): ogni messaggio si deposita una volta per membro.
+pub const MAX_GROUP_MEMBERS: usize = 100;
+
+/// `others`: gli altri membri, io escluso.
+fn check_size(others: usize) -> Result<()> {
+    if others + 1 > MAX_GROUP_MEMBERS {
+        return Err(Error::Invalid(format!(
+            "un gruppo ha al massimo {MAX_GROUP_MEMBERS} membri"
+        )));
+    }
+    Ok(())
+}
+
 impl Client {
     // ---------- lettura ----------
 
@@ -262,6 +275,7 @@ impl Client {
     /// Crea un gruppo con alcuni contatti; io ne sono l'amministratore.
     pub async fn create_group(&mut self, name: &str, members: &[PublicKey]) -> Result<GroupChat> {
         let name = group_name(name)?;
+        check_size(members.len())?;
         let members = self.group_candidates(members)?;
         let kps = self.claim_all(&members).await?;
         let permit = match self.has_node() {
@@ -324,6 +338,7 @@ impl Client {
         if new.is_empty() {
             return Err(Error::Invalid("sono già tutti nel gruppo".into()));
         }
+        check_size(self.state.group_chats[i].members.len() + new.len())?;
         let kps = self.claim_all(&new).await?;
         let my_card = self.my_group_card(i).await?;
         let raw = gid_bytes(gid)?;

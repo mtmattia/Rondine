@@ -218,3 +218,21 @@ async fn gruppo_solo_con_contatti_e_nome_valido() -> R {
     assert!(anna.groups().is_empty());
     Ok(())
 }
+
+#[tokio::test]
+async fn al_massimo_cento_membri() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut a = profile(&tmp, "Anna", &node).await?;
+    // Io più 100 altri fa 101: troppi, e lo si dice prima di contattare chiunque.
+    let others: Vec<_> = (0..100)
+        .map(|_| rondine_core::Identity::generate().public())
+        .collect();
+    let err = a
+        .create_group("Troppi", &others)
+        .await
+        .err()
+        .ok_or("accettato")?;
+    assert!(err.to_string().contains("100"), "{err}");
+    Ok(())
+}

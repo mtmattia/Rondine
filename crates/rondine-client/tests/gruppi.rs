@@ -347,3 +347,65 @@ async fn file_e_posizione_nel_gruppo() -> R {
     assert_eq!((loc.lat, loc.lon), (45.1, 9.2));
     Ok(())
 }
+
+/// Foto del profilo (SPEC §7.7): la vedono i contatti e i membri dei gruppi in comune, anche
+/// senza essere contatti; si toglie; un contatto nuovo la riceve appena collegato.
+#[tokio::test]
+async fn foto_del_profilo_a_contatti_e_gruppi() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut anna = profile(&tmp, "Anna", &node).await?;
+    let mut bruno = profile(&tmp, "Bruno", &node).await?;
+    let mut carla = profile(&tmp, "Carla", &node).await?;
+    connect(&mut anna, &mut bruno).await?;
+    connect(&mut anna, &mut carla).await?;
+    // Bruno e Carla non sono contatti: si conoscono solo nel gruppo di Anna.
+    let g = anna
+        .create_group("Amici", &[bruno.identity(), carla.identity()])
+        .await?;
+    sync_ok(&mut bruno).await?;
+    sync_ok(&mut carla).await?;
+    sync_ok(&mut anna).await?;
+
+    // Comincia come un JPEG (FF D8 FF): il resto non conta per il protocollo.
+    let jpeg = [vec![0xff, 0xd8, 0xff], fake_file(20 * 1024)].concat();
+    bruno.set_photo(Some(jpeg.clone())).await?;
+    assert_eq!(
+        std::fs::read(bruno.my_photo().ok_or("niente mia foto")?)?,
+        jpeg
+    );
+    for c in [&mut anna, &mut carla] {
+        sync_ok(c).await?;
+        let p = c.photo_of(&bruno.identity()).ok_or("foto non arrivata")?;
+        assert_eq!(std::fs::read(p)?, jpeg);
+    }
+    let _ = g;
+
+    // Troppo grande: rifiutata prima di mandarla.
+    assert!(
+        bruno
+            .set_photo(Some(
+                [vec![0xff, 0xd8, 0xff], fake_file(60 * 1024)].concat()
+            ))
+            .await
+            .is_err()
+    );
+    // Non un JPEG: rifiutata.
+    assert!(bruno.set_photo(Some(fake_file(1000))).await.is_err());
+
+    // Tolta: sparisce per tutti.
+    bruno.set_photo(None).await?;
+    sync_ok(&mut anna).await?;
+    assert!(anna.photo_of(&bruno.identity()).is_none());
+
+    // Un contatto nuovo la riceve appena collegato.
+    bruno.set_photo(Some(jpeg.clone())).await?;
+    let mut dario = profile(&tmp, "Dario", &node).await?;
+    connect(&mut bruno, &mut dario).await?;
+    sync_ok(&mut dario).await?;
+    assert!(
+        dario.photo_of(&bruno.identity()).is_some(),
+        "Dario non ha la foto"
+    );
+    Ok(())
+}

@@ -77,6 +77,21 @@ pub enum AppMessage {
     /// Nuova posizione di un `location` in tempo reale (SPEC §7.6).
     #[serde(rename = "location_update")]
     LocationUpdate(LocationMsg),
+    /// Foto del profilo, o `None` per toglierla (SPEC §7.7).
+    Profile {
+        v: u32,
+        ts: u64,
+        #[serde(default)]
+        photo: Option<String>,
+    },
+}
+
+/// Foto del profilo: JPEG di al massimo 48 KiB (SPEC §7.7).
+pub const MAX_PHOTO_BYTES: usize = 48 * 1024;
+
+/// Sembra un JPEG (comincia con FF D8 FF)?
+pub fn is_jpeg(data: &[u8]) -> bool {
+    data.starts_with(&[0xff, 0xd8, 0xff])
 }
 
 /// Posizione (SPEC §7.6): `id` è quello del messaggio `location`, anche negli aggiornamenti.
@@ -157,6 +172,7 @@ impl AppMessage {
             | AppMessage::Leave { v } => *v,
             AppMessage::File(f) => f.v,
             AppMessage::Location(l) | AppMessage::LocationUpdate(l) => l.v,
+            AppMessage::Profile { v, .. } => *v,
         }
     }
 }

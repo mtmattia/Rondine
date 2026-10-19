@@ -231,6 +231,21 @@ pub struct State {
     /// Endpoint UnifiedPush registrato, da spostare se cambia il nodo.
     #[serde(default)]
     pub push_endpoint: Option<String>,
+    /// Quando ho cambiato (o tolto) la mia foto; 0 se non l'ho mai messa (SPEC §7.7).
+    #[serde(default)]
+    pub my_photo_ts: u64,
+    /// Foto ricevute da contatti e membri dei gruppi: chi e di quando. Il file sta in
+    /// `foto/<chiave>.jpg` nella cartella del profilo.
+    #[serde(default)]
+    pub photos: Vec<PhotoEntry>,
+}
+
+/// La foto più recente ricevuta da qualcuno (`has` falso: l'ha tolta).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PhotoEntry {
+    pub identity: PublicKey,
+    pub ts: u64,
+    pub has: bool,
 }
 
 /// Casella di un nodo lasciato, ritirata fino a `until` per chi ha ancora il biglietto vecchio.

@@ -13,7 +13,8 @@ use reqwest::Method;
 use rondine_core::card::{INVITE_PREFIX, invite_link, parse_invite, verify_card};
 use rondine_core::discovery::{self, BoardEntry, DiscoveryRecord};
 use rondine_core::envelope::{
-    AppMessage, Envelope, FileMsg, LocationMsg, MIN_LOCATION_UPDATE_SECS, ReceiptStatus,
+    AppMessage, Envelope, FileMsg, LocationMsg, MAX_PHOTO_BYTES, MIN_LOCATION_UPDATE_SECS,
+    ReceiptStatus, is_jpeg,
 };
 use rondine_core::username::{Handle, NAME_LINK_PREFIX, NameClaim, node_host, normalize_name};
 use rondine_core::{
@@ -104,6 +105,8 @@ const STATE_FILE: &str = "stato.json";
 const MLS_FILE: &str = "mls.bin";
 /// Cartella del profilo con foto e documenti (SPEC §7.5).
 const FILES_DIR: &str = "file";
+/// Cartella del profilo con le foto: la mia (`io.jpg`) e quelle ricevute (SPEC §7.7).
+const PHOTOS_DIR: &str = "foto";
 /// Key package caricati sul nodo alla creazione (l'ultimo è di riserva).
 const KEYPACKAGE_BATCH: usize = 20;
 /// Key package offerti in rete locale a chi avvia una chat (SPEC §12.2).
@@ -163,6 +166,10 @@ pub enum Event {
     LocationUpdate {
         contact: PublicKey,
         id: String,
+    },
+    /// Un contatto o un membro di un gruppo ha cambiato o tolto la foto (SPEC §7.7).
+    PhotoChanged {
+        identity: PublicKey,
     },
 }
 
@@ -293,6 +300,8 @@ impl Client {
                 phone_verified: false,
                 retired: Vec::new(),
                 push_endpoint: None,
+                my_photo_ts: 0,
+                photos: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -343,6 +352,8 @@ impl Client {
                 phone_verified: false,
                 retired: Vec::new(),
                 push_endpoint: None,
+                my_photo_ts: 0,
+                photos: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -1242,7 +1253,10 @@ impl Client {
                 c.my_permit_id = Some(p.verify()?.id);
             }
         }
-        self.save()
+        self.save()?;
+        // La mia foto, se ce l'ho: anche chi aggiungo la vede subito (SPEC §7.7).
+        self.send_profile_to(peer).await;
+        Ok(())
     }
 
     async fn deposit(&mut self, card: &SignedCard, envelope: &Envelope) -> Result<Route> {
@@ -2011,6 +2025,156 @@ impl Client {
         }])
     }
 
+    // ---------- foto del profilo (SPEC §7.7) ----------
+
+    fn photo_path(&self, who: &str) -> PathBuf {
+        self.dir.join(PHOTOS_DIR).join(format!("{who}.jpg"))
+    }
+
+    /// La mia foto, se l'ho messa.
+    pub fn my_photo(&self) -> Option<PathBuf> {
+        Some(self.photo_path("io")).filter(|p| p.exists())
+    }
+
+    /// La foto di un contatto o di un membro di un gruppo, se l'ha mandata.
+    pub fn photo_of(&self, id: &PublicKey) -> Option<PathBuf> {
+        self.state
+            .photos
+            .iter()
+            .find(|p| &p.identity == id && p.has)
+            .map(|_| self.photo_path(&id.to_b64()))
+            .filter(|p| p.exists())
+    }
+
+    /// Mette (o con `None` toglie) la mia foto e la manda a tutti i contatti e i gruppi.
+    pub async fn set_photo(&mut self, jpeg: Option<Vec<u8>>) -> Result<()> {
+        if let Some(j) = &jpeg {
+            if j.len() > MAX_PHOTO_BYTES {
+                return Err(Error::Invalid(
+                    "foto troppo grande (al massimo 48 KiB)".into(),
+                ));
+            }
+            if !is_jpeg(j) {
+                return Err(Error::Invalid("la foto deve essere un JPEG".into()));
+            }
+        }
+        let path = self.photo_path("io");
+        match &jpeg {
+            Some(j) => {
+                if let Some(d) = path.parent() {
+                    std::fs::create_dir_all(d)?;
+                }
+                write_atomic(&path, j)?;
+            }
+            None => {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        // Sempre più recente della precedente, anche con due cambi nello stesso secondo.
+        self.state.my_photo_ts = now().max(self.state.my_photo_ts + 1);
+        self.save()?;
+        let contacts: Vec<PublicKey> = self
+            .state
+            .contacts
+            .iter()
+            .filter(|c| !c.blocked && !c.groups.is_empty())
+            .map(|c| c.identity)
+            .collect();
+        for id in contacts {
+            self.send_profile_to(&id).await;
+        }
+        let groups: Vec<String> = self
+            .state
+            .group_chats
+            .iter()
+            .filter(|g| g.active)
+            .map(|g| g.id.clone())
+            .collect();
+        if let Some(app) = self.profile_message() {
+            for gid in groups {
+                // Chi non la riceve adesso la riceve alla prossima occasione: non è un errore.
+                let _ = self.group_send(&gid, &app, Kind::Normal).await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Il messaggio `profile` con la mia foto attuale (o la sua assenza); `None` se non ho mai
+    /// messo una foto, e allora non c'è niente da dire.
+    pub(crate) fn profile_message(&self) -> Option<AppMessage> {
+        if self.state.my_photo_ts == 0 {
+            return None;
+        }
+        let photo = self
+            .my_photo()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(b64::encode);
+        Some(AppMessage::Profile {
+            v: 1,
+            ts: self.state.my_photo_ts,
+            photo,
+        })
+    }
+
+    /// Manda la mia foto a un contatto (un di più: se non parte, non è un errore).
+    async fn send_profile_to(&mut self, id: &PublicKey) {
+        let Some(app) = self.profile_message() else {
+            return;
+        };
+        let Some(contact) = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == id && !c.blocked && !c.groups.is_empty())
+            .cloned()
+        else {
+            return;
+        };
+        let _ = self.send_app(&contact, &app).await;
+    }
+
+    /// Una foto ricevuta, da un contatto o da un membro di un gruppo: vale la più recente.
+    pub(crate) fn received_profile(
+        &mut self,
+        sender: PublicKey,
+        ts: u64,
+        photo: Option<String>,
+    ) -> Result<Vec<Event>> {
+        if self
+            .state
+            .photos
+            .iter()
+            .any(|p| p.identity == sender && p.ts >= ts)
+        {
+            return Ok(Vec::new());
+        }
+        let path = self.photo_path(&sender.to_b64());
+        let has = match photo {
+            Some(b) => {
+                let j = b64::decode(&b)?;
+                if j.len() > MAX_PHOTO_BYTES || !is_jpeg(&j) {
+                    return Err(Error::Invalid("foto del profilo non valida".into()));
+                }
+                if let Some(d) = path.parent() {
+                    std::fs::create_dir_all(d)?;
+                }
+                write_atomic(&path, &j)?;
+                true
+            }
+            None => {
+                let _ = std::fs::remove_file(&path);
+                false
+            }
+        };
+        self.state.photos.retain(|p| p.identity != sender);
+        self.state.photos.push(state::PhotoEntry {
+            identity: sender,
+            ts,
+            has,
+        });
+        Ok(vec![Event::PhotoChanged { identity: sender }])
+    }
+
     /// Cifra un messaggio applicativo nella chat con il contatto e lo deposita nella sua casella.
     async fn send_app(&mut self, contact: &Contact, app: &AppMessage) -> Result<Route> {
         self.send_app_with(contact, app, Kind::Normal, None).await
@@ -2213,6 +2377,7 @@ impl Client {
             .collect();
         for id in new {
             self.send_online_to(&id).await;
+            self.send_profile_to(&id).await;
         }
         // Qualcuno ha detto "sono collegato": la coda verso di lui riparte subito.
         if self.online_marker() != online_before {
@@ -2464,6 +2629,7 @@ impl Client {
             AppMessage::File(f) => self.received_file(sender, *f),
             AppMessage::Location(l) => self.received_location(sender, l),
             AppMessage::LocationUpdate(l) => self.received_location_update(sender, l),
+            AppMessage::Profile { ts, photo, .. } => self.received_profile(sender, ts, photo),
             AppMessage::Typing { active, ts, .. } => {
                 // Uno vecchio (ritirato tardi) non vale più.
                 let fresh = ts + TYPING_SHOW_SECS > now();

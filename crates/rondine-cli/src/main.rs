@@ -92,6 +92,12 @@ enum Cmd {
         #[arg(long)]
         didascalia: Option<String>,
     },
+    /// Mette la foto del profilo (JPEG, al massimo 48 KiB); con --togli la toglie.
+    Foto {
+        file: Option<PathBuf>,
+        #[arg(long)]
+        togli: bool,
+    },
     /// Posizione: fissa, in tempo reale, aggiornamenti.
     #[command(subcommand)]
     Posizione(PosizioneCmd),
@@ -376,6 +382,11 @@ fn print_group_events(events: &[GroupEvent], client: &Client) {
                 let name = g.map(|g| g.name.as_str()).unwrap_or("?");
                 println!("[{name}] {}: {}", who(client, g, &m.sender), group_text(m));
             }
+            GroupEvent::PhotoChanged { identity } => {
+                if let Some(p) = client.photo_of(identity) {
+                    println!("~ {} ha una foto nuova: {}", identity.short(), p.display());
+                }
+            }
             GroupEvent::LocationUpdate { group: gid, id } => {
                 if let Some(m) = client.group_messages(gid).into_iter().find(|m| &m.id == id) {
                     let name = group(gid).map(|g| g.name.as_str()).unwrap_or("?");
@@ -400,6 +411,18 @@ fn print_events(events: &[Event], client: &Client) {
     for e in events {
         match e {
             Event::NewContact { name, .. } => println!("+ nuovo contatto: {name}"),
+            Event::PhotoChanged { identity } => {
+                let who = client
+                    .contacts()
+                    .iter()
+                    .find(|c| &c.identity == identity)
+                    .map(|c| c.display_name.clone())
+                    .unwrap_or_else(|| identity.short());
+                match client.photo_of(identity) {
+                    Some(p) => println!("~ {who} ha una foto nuova: {}", p.display()),
+                    None => println!("~ {who} ha tolto la foto"),
+                }
+            }
             Event::LocationUpdate { id, .. } => {
                 if let Some(m) = client.state().messages.iter().find(|m| &m.id == id) {
                     println!("~ posizione aggiornata: {}", text(m));
@@ -716,6 +739,16 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Posizione(PosizioneCmd::Ferma { id }) => {
             c.stop_location(&id).await?;
             println!("Condivisione finita.");
+        }
+        Cmd::Foto { file, togli } => {
+            if togli {
+                c.set_photo(None).await?;
+                println!("Foto tolta: i tuoi contatti e i tuoi gruppi lo sanno.");
+            } else {
+                let path = file.context("indica il file JPEG, o --togli")?;
+                c.set_photo(Some(std::fs::read(&path)?)).await?;
+                println!("Foto messa: la vedono i tuoi contatti e i tuoi gruppi.");
+            }
         }
         Cmd::Scarica { id } => {
             println!("Salvato in {}", c.download(&id).await?.display());

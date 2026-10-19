@@ -185,3 +185,7 @@ Una riga per modifica: data, cosa è cambiato.
   Corretto: se arrivavano più messaggi insieme la chat non scendeva fino all'ultimo. Provato
   sull'emulatore: foto dall'app ad Anna e Bruno (una sola copia sul nodo), PDF e posizione in
   tempo reale da Bruno all'app.
+- 2026-10-19 — Foto del profilo (SPEC §7.7): messaggio `profile` dentro MLS (JPEG ≤ 48 KiB) ai
+  contatti e ai gruppi attivi quando cambia, a un contatto nuovo appena collegato, a un gruppo
+  entrando; vale la più recente; non sta nel biglietto. Client, CLI (`rondine foto`) e ponte. 1 test
+  (anche un membro di gruppo che non è un contatto la vede).

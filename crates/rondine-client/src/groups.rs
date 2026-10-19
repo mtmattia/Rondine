@@ -32,6 +32,10 @@ pub enum GroupEvent {
         group: String,
         id: String,
     },
+    /// Un membro ha cambiato o tolto la foto (SPEC §7.7).
+    PhotoChanged {
+        identity: PublicKey,
+    },
 }
 
 /// Esito di [`Client::sync_all`].
@@ -788,6 +792,15 @@ impl Client {
                 self.state.group_messages.push(m.clone());
                 self.batch.groups.push(GroupEvent::Message(m));
             }
+            AppMessage::Profile { ts, photo, .. } => {
+                // Anche da chi non è un contatto: lo si vede nel gruppo (SPEC §7.7).
+                let ev = self.received_profile(sender, ts, photo)?;
+                if !ev.is_empty() {
+                    self.batch
+                        .groups
+                        .push(GroupEvent::PhotoChanged { identity: sender });
+                }
+            }
             AppMessage::LocationUpdate(l) => {
                 // Stesse regole della chat 1:1 (SPEC §7.6): stesso mittente, non più vecchia,
                 // condivisione non finita, la fine può solo anticipare.
@@ -882,6 +895,11 @@ impl Client {
         let envelope = self.group_encrypt(&gid_bytes(gid)?, &AppMessage::Hello { v: 1, card })?;
         let members = self.state.group_chats[i].members.clone();
         self.fanout(&members, &envelope).await;
+        // Con il biglietto anche la foto, se ce l'ho (SPEC §7.7).
+        if let Some(app) = self.profile_message() {
+            let envelope = self.group_encrypt(&gid_bytes(gid)?, &app)?;
+            self.fanout(&members, &envelope).await;
+        }
         Ok(())
     }
 }

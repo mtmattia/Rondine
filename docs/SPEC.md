@@ -196,6 +196,7 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "file", ... }    // §7.5
 { "v": 1, "type": "location", ... }          // §7.6
 { "v": 1, "type": "location_update", ... }   // §7.6
+{ "v": 1, "type": "profile", ... }           // §7.7
 ```
 
 ### 7.2 Conferme (spunte)
@@ -318,6 +319,22 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
   di mappe del telefono (`geo:`). Limite noto: chi segue una posizione in tempo reale scarica un
   quadrato nuovo quando il punto ne esce, quindi il server delle mappe vede gli spostamenti a
   quadrati di quella grandezza.
+
+### 7.7 Foto del profilo
+
+```json
+{ "v": 1, "type": "profile", "ts": 1792240000, "photo": "<b64 JPEG>" }
+{ "v": 1, "type": "profile", "ts": 1792240100, "photo": null }
+```
+
+- La foto è un JPEG quadrato di al massimo **48 KiB** (l'app lo prepara a 256×256). `photo: null`
+  la toglie.
+- Non sta nel biglietto (che finisce in link, QR e bacheche): la vedono solo i **contatti** e i
+  **membri dei gruppi** in comune, a cui si manda dentro MLS
+  - quando cambia o si toglie: a tutti i contatti e a tutti i gruppi attivi;
+  - a un contatto nuovo, appena si è collegati;
+  - a un gruppo, entrando (insieme al proprio `hello`).
+- Chi la riceve tiene, per ogni mittente, quella con `ts` più recente.
 
 ## 8. Sveglia push
 

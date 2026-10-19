@@ -68,6 +68,8 @@ pub struct Profile {
     pub share_link: String,
     /// Senza nodo il profilo funziona solo in rete locale.
     pub has_node: bool,
+    /// La mia foto del profilo (percorso), se l'ho messa.
+    pub photo: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -82,6 +84,8 @@ pub struct ContactInfo {
     pub favorite: bool,
     /// invito, nome, rubrica o messaggio.
     pub source: String,
+    /// Foto del profilo (percorso), se l'ha mandata.
+    pub photo: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -151,6 +155,7 @@ pub struct GroupMemberInfo {
     pub is_admin: bool,
     /// È anche tra i miei contatti (si può aprire la chat 1:1).
     pub is_contact: bool,
+    pub photo: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -211,6 +216,9 @@ fn group_info(c: &Client, g: &GroupChat) -> GroupInfo {
                     .unwrap_or_else(|| m.display_name.clone()),
                 is_admin: m.identity == g.admin,
                 is_contact: c.contacts().iter().any(|x| x.identity == m.identity),
+                photo: c
+                    .photo_of(&m.identity)
+                    .map(|p| p.to_string_lossy().into_owned()),
             })
             .collect(),
         created_at: g.created_at,
@@ -283,6 +291,17 @@ pub struct SyncResult {
     pub group_messages: Vec<GroupMessageInfo>,
     /// Gruppi nuovi, membri cambiati o io tolto da un gruppo.
     pub groups_changed: bool,
+    /// Qualcuno ha cambiato o tolto la foto del profilo.
+    pub photos_changed: bool,
+}
+
+/// Come [`contact_info`], con la foto del profilo se il contatto l'ha mandata.
+fn contact_info_with_photo(client: &Client, c: &Contact) -> ContactInfo {
+    let mut info = contact_info(c);
+    info.photo = client
+        .photo_of(&c.identity)
+        .map(|p| p.to_string_lossy().into_owned());
+    info
 }
 
 fn contact_info(c: &Contact) -> ContactInfo {
@@ -302,6 +321,7 @@ fn contact_info(c: &Contact) -> ContactInfo {
             Source::Messaggio => "messaggio",
         }
         .into(),
+        photo: None,
     }
 }
 
@@ -432,6 +452,7 @@ fn view_of(c: &Client) -> View {
             invite_link: c.invite_link()?,
             share_link: c.share_link()?,
             has_node: c.has_node(),
+            photo: c.my_photo().map(|p| p.to_string_lossy().into_owned()),
         })
     })()
     .ok();
@@ -439,7 +460,7 @@ fn view_of(c: &Client) -> View {
         .chats()
         .iter()
         .map(|r| ChatRow {
-            contact: contact_info(&r.contact),
+            contact: contact_info_with_photo(c, &r.contact),
             last: r.last.as_ref().map(message),
             last_ts: r.last_ts,
             unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
@@ -447,7 +468,11 @@ fn view_of(c: &Client) -> View {
             on_lan: c.on_lan(&r.contact.identity),
         })
         .collect();
-    let mut contacts: Vec<ContactInfo> = c.contacts().iter().map(contact_info).collect();
+    let mut contacts: Vec<ContactInfo> = c
+        .contacts()
+        .iter()
+        .map(|x| contact_info_with_photo(c, x))
+        .collect();
     contacts.sort_by_key(|c| c.name.to_lowercase());
     let mut messages: std::collections::HashMap<String, Vec<Message>> = Default::default();
     for m in &s.messages {
@@ -850,6 +875,13 @@ impl Rondine {
         .await
     }
 
+    /// Mette (o con `None` toglie) la foto del profilo: JPEG di al massimo 48 KiB, che l'app
+    /// prepara quadrato a 256×256 (SPEC §7.7).
+    pub async fn set_photo(&self, jpeg: Option<Vec<u8>>) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.set_photo(jpeg).await?) }))
+            .await
+    }
+
     pub async fn mark_group_read(&self, id: String) -> Result<()> {
         Ok(self.with(|c| c.mark_group_read(&id)).await?)
     }
@@ -887,6 +919,7 @@ impl Rondine {
             locations_changed: false,
             group_messages: Vec::new(),
             groups_changed: false,
+            photos_changed: false,
         };
         for e in synced.groups {
             match e {
@@ -910,6 +943,7 @@ impl Rondine {
                     location: m.location.as_ref().map(location_info),
                 }),
                 GroupEvent::LocationUpdate { .. } => out.locations_changed = true,
+                GroupEvent::PhotoChanged { .. } => out.photos_changed = true,
                 GroupEvent::Joined { .. }
                 | GroupEvent::MembersChanged { .. }
                 | GroupEvent::Removed { .. } => out.groups_changed = true,
@@ -922,6 +956,7 @@ impl Rondine {
                 Event::Rejected(why) => out.rejected.push(why),
                 Event::Typing { .. } => out.typing_changed = true,
                 Event::LocationUpdate { .. } => out.locations_changed = true,
+                Event::PhotoChanged { .. } => out.photos_changed = true,
                 Event::Receipt { ids, .. } => {
                     out.receipts = out
                         .receipts

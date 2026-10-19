@@ -18,6 +18,7 @@ async fn start_node() -> Result<String, Box<dyn std::error::Error>> {
         store: Store::in_memory()?,
         allow_local_push: true,
         fcm: None,
+        sms: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     Ok(url)
@@ -501,6 +502,7 @@ async fn sta_scrivendo_effimero_e_senza_sveglia() -> R {
         store: Store::in_memory()?,
         allow_local_push: true,
         fcm: None,
+        sms: None,
     })?;
     // Scadenza breve per provare un "sta scrivendo" che nessuno ritira.
     state.set_ephemeral_ttl(1);
@@ -713,6 +715,7 @@ async fn start_node_killable()
         store: Store::in_memory()?,
         allow_local_push: true,
         fcm: None,
+        sms: None,
     })?;
     Ok((url, tokio::spawn(rondine_nodo::serve(listener, state))))
 }
@@ -942,6 +945,7 @@ async fn sono_collegato_aspetta_chi_non_e_connesso() -> R {
         store: Store::in_memory()?,
         allow_local_push: true,
         fcm: None,
+        sms: None,
     })?;
     // Gli effimeri scadono subito: come un ritiro che arriva troppo tardi.
     state.set_ephemeral_ttl(0);
@@ -975,6 +979,7 @@ async fn start_node_with_state() -> Result<(String, AppState), Box<dyn std::erro
         store: Store::in_memory()?,
         allow_local_push: true,
         fcm: None,
+        sms: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state.clone()));
     Ok((url, state))
@@ -1414,6 +1419,7 @@ async fn sveglia_fcm_dal_ripetitore() -> R {
         store: Store::in_memory()?,
         allow_local_push: true,
         fcm: Some(fcm),
+        sms: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     let node = start_node().await?;
@@ -1490,6 +1496,7 @@ async fn sveglia_fcm_sul_nido_che_fa_da_ripetitore() -> R {
         // Controllo degli indirizzi attivo, come in produzione.
         allow_local_push: false,
         fcm: Some(fcm),
+        sms: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     let tmp = TempDir::new()?;
@@ -1576,5 +1583,76 @@ async fn rubrica_coppie_e_numeri_verificati_in_una_ricerca() -> R {
     let found = anna.scan_address_book(&["3403334455".into()]).await?;
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].contact.display_name, "Luca");
+    Ok(())
+}
+
+/// SMS veri attraverso un telefono Android che fa da gateway (SPEC §13.4): qui un finto gateway
+/// che controlla credenziali e corpo come l'app "SMS Gateway for Android".
+#[tokio::test]
+async fn sms_di_verifica_dal_gateway_android() -> R {
+    let got: Arc<Mutex<Vec<(String, serde_json::Value)>>> = Arc::default();
+    let sink = got.clone();
+    let app = axum::Router::new().route(
+        "/message",
+        axum::routing::post(
+            move |headers: axum::http::HeaderMap, body: axum::Json<serde_json::Value>| {
+                let sink = sink.clone();
+                async move {
+                    let auth = headers
+                        .get("authorization")
+                        .and_then(|h| h.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string();
+                    if let Ok(mut v) = sink.lock() {
+                        v.push((auth, body.0));
+                    }
+                    (
+                        axum::http::StatusCode::ACCEPTED,
+                        r#"{"id":"1","state":"Pending"}"#,
+                    )
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let gateway = format!("http://{}", listener.local_addr()?);
+    tokio::spawn(async move { axum::serve(listener, app).await });
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let node = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: node.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+        fcm: None,
+        sms: Some(rondine_nodo::SmsGateway {
+            url: gateway,
+            user: "sms".into(),
+            password: "segreta".into(),
+        }),
+    })?;
+    tokio::spawn(rondine_nodo::serve(listener, state));
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    mattia.request_phone("340 111 2233").await?;
+
+    let mut sent = Vec::new();
+    for _ in 0..50 {
+        sent = got.lock().map_err(|_| "lock")?.clone();
+        if !sent.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let (auth, body) = sent.first().ok_or("nessun SMS al gateway")?;
+    // Basic sms:segreta
+    assert_eq!(auth, "Basic c21zOnNlZ3JldGE=");
+    assert_eq!(body["phoneNumbers"], serde_json::json!(["+393401112233"]));
+    let text = body["textMessage"]["text"].as_str().ok_or("niente testo")?;
+    let code: String = text.chars().filter(char::is_ascii_digit).collect();
+    assert_eq!(code.len(), 6, "{text}");
+    mattia.confirm_phone(&code).await?;
+    assert!(mattia.state().phone_verified);
     Ok(())
 }

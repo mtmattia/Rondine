@@ -25,6 +25,16 @@ struct Args {
     /// Google Play dell'app (SPEC §8.1).
     #[arg(long, env = "RONDINE_FCM_CREDENZIALI")]
     fcm_credenziali: Option<PathBuf>,
+    /// Telefono Android con "SMS Gateway for Android" in modalità server locale, per gli SMS di
+    /// verifica (SPEC §13.4), es. http://100.64.0.7:8080. Senza: SMS "in prova", nel log.
+    #[arg(long, env = "RONDINE_SMS_GATEWAY")]
+    sms_gateway: Option<String>,
+    /// Utente del server locale del gateway SMS.
+    #[arg(long, env = "RONDINE_SMS_UTENTE", default_value = "sms")]
+    sms_utente: String,
+    /// Password del server locale del gateway SMS.
+    #[arg(long, env = "RONDINE_SMS_PASSWORD")]
+    sms_password: Option<String>,
 }
 
 fn load_or_create_key(path: &std::path::Path) -> anyhow::Result<Identity> {
@@ -69,6 +79,18 @@ async fn main() -> anyhow::Result<()> {
         store,
         allow_local_push: args.allow_local_push,
         fcm,
+        sms: match (args.sms_gateway.clone(), args.sms_password.clone()) {
+            (Some(url), Some(password)) => {
+                tracing::info!(gateway = %url, "SMS di verifica dal telefono gateway");
+                Some(rondine_nodo::SmsGateway {
+                    url,
+                    user: args.sms_utente.clone(),
+                    password,
+                })
+            }
+            (Some(_), None) => anyhow::bail!("--sms-gateway vuole anche --sms-password"),
+            _ => None,
+        },
     })?;
     let listener = tokio::net::TcpListener::bind(&args.bind)
         .await

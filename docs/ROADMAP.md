@@ -16,7 +16,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Permessi di consegna revocabili (blocco contatto) | ✅ | |
 | Nome utente univoco `nome@nodo` | ✅ | |
 | Scoperta dalla rubrica | ✅ | a coppie (SPEC §9) e con i numeri verificati (§13), a lotti e con i segreti in cache; nell'app la rubrica del telefono come WhatsApp: chi usa Rondine in alto, gli altri con "Invita" |
-| Numero verificato via SMS | 🟡 | SPEC §13: client, nodo, CLI e app (Impostazioni → Numero → Verifica con un SMS); manca il canale SMS vero: il nodo scrive il codice nel log |
+| Numero verificato via SMS | 🟡 | SPEC §13: client, nodo, CLI e app; il nodo spedisce gli SMS da un telefono Android con "SMS Gateway for Android" (docs/NIDO.md); manca la SIM sul telefono gateway del nido di Mattia |
 | Invito via SMS | 🟡 | l'SMS parte; il link `rondine:` non è cliccabile negli SMS: serve una pagina https di rimando |
 | Numero di sicurezza | ✅ | SPEC §10 |
 | Notifiche push (UnifiedPush) | ✅ | provate sull'emulatore con ntfy e un server ntfy locale, anche ad app chiusa |

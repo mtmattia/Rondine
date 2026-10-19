@@ -46,6 +46,28 @@ pub struct Config {
     pub allow_local_push: bool,
     /// Credenziali Firebase: con queste il nodo fa da ripetitore FCM (SPEC §8.1).
     pub fcm: Option<FcmConfig>,
+    /// Telefono Android che spedisce gli SMS di verifica (SPEC §13.4); senza, SMS "in prova".
+    pub sms: Option<SmsGateway>,
+}
+
+/// L'app "SMS Gateway for Android" in modalità server locale (SPEC §13.4).
+#[derive(Clone)]
+pub struct SmsGateway {
+    /// Per esempio `http://100.64.0.7:8080`.
+    pub url: String,
+    pub user: String,
+    pub password: String,
+}
+
+/// Numero mascherato per il log: `+39340***233`.
+fn masked(number: &str) -> String {
+    let n = number.chars().count();
+    if n < 8 {
+        return "***".into();
+    }
+    let head: String = number.chars().take(6).collect();
+    let tail: String = number.chars().skip(n - 3).collect();
+    format!("{head}***{tail}")
 }
 
 struct Inner {
@@ -55,6 +77,8 @@ struct Inner {
     store: Mutex<Store>,
     pusher: Pusher,
     fcm: Option<fcm::Fcm>,
+    sms_gateway: Option<SmsGateway>,
+    http: reqwest::Client,
     rate: Mutex<HashMap<String, (u64, u32)>>,
     last_wake: Mutex<HashMap<String, WakeSlot>>,
     /// SMS "in prova" (SPEC §13.4): finiscono qui e nel log invece che sul telefono.
@@ -78,6 +102,8 @@ impl AppState {
             node: cfg.node_key,
             store: Mutex::new(cfg.store),
             pusher: Pusher::new(cfg.allow_local_push)?,
+            sms_gateway: cfg.sms,
+            http: push::http_client()?,
             fcm: match cfg.fcm {
                 Some(f) => Some(fcm::Fcm::new(f, push::http_client()?)),
                 None => None,
@@ -92,6 +118,35 @@ impl AppState {
     /// Manda un SMS. Per ora solo **in prova** (SPEC §13.4): il testo va nel log del nodo e in
     /// memoria (per i test e per chi gestisce il nodo), non a un telefono.
     fn send_sms(&self, to: &str, text: &str) {
+        if let Some(g) = self.0.sms_gateway.clone() {
+            // Dal telefono gateway, in background: la risposta al client non aspetta l'SMS.
+            let http = self.0.http.clone();
+            let (to, text) = (to.to_string(), text.to_string());
+            tokio::spawn(async move {
+                let url = format!("{}/message", g.url.trim_end_matches('/'));
+                let res = http
+                    .post(url)
+                    .basic_auth(&g.user, Some(&g.password))
+                    .json(&serde_json::json!({
+                        "textMessage": { "text": text },
+                        "phoneNumbers": [to],
+                    }))
+                    .send()
+                    .await;
+                match res {
+                    Ok(r) if r.status().is_success() => {
+                        tracing::info!(numero = %masked(&to), "SMS di verifica affidato al gateway");
+                    }
+                    Ok(r) => {
+                        tracing::warn!(numero = %masked(&to), stato = %r.status(), "gateway SMS: rifiutato")
+                    }
+                    Err(e) => {
+                        tracing::warn!(numero = %masked(&to), errore = %e, "gateway SMS irraggiungibile")
+                    }
+                }
+            });
+            return;
+        }
         tracing::info!("SMS in prova a {to}: {text}");
         if let Ok(mut v) = self.0.sms.lock() {
             v.push((to.to_string(), text.to_string()));

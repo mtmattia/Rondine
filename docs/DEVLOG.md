@@ -206,3 +206,7 @@ Una riga per modifica: data, cosa è cambiato.
   rubrica finta: Luca trovato col numero verificato anche senza il proprio numero, Silvia con la
   scoperta a coppie dopo averlo messo, Zia da invitare; verifica del numero dall'app e controprova
   dalla CLI.
+- 2026-10-19 — SMS di verifica veri (SPEC §13.4): con `--sms-gateway`, `--sms-utente`,
+  `--sms-password` il nodo li spedisce da un telefono Android con "SMS Gateway for Android" in
+  modalità server locale (POST /message, Basic); nel log solo esito e numero mascherato. Guida in
+  `docs/NIDO.md`. 1 test con un finto gateway.

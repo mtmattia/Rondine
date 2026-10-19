@@ -600,8 +600,15 @@ biglietto, che `claim` sia firmata con la `node_key` di `GET /v1/info` del nodo 
 <nodo>". La fiducia è nel nodo che ha mandato l'SMS.
 
 ### 13.4 Invio degli SMS
-Per ora solo **in prova**: il nodo scrive il codice nel suo log invece di spedirlo. Il canale vero
-(telefono Android del nodo con un gateway SMS, o un servizio a pagamento) si sceglierà dopo.
+Il nodo spedisce gli SMS con un **telefono Android** che fa da gateway: l'app libera "SMS Gateway
+for Android" (Apache-2.0) in modalità server locale, raggiungibile dal nodo in rete locale o
+Tailscale. Il nodo fa `POST <gateway>/message` con autenticazione Basic (utente e password
+mostrati dall'app) e corpo `{"textMessage": {"text": "…"}, "phoneNumbers": ["+39…"]}`; l'SMS parte
+dalla SIM di quel telefono. Nel log del nodo restano solo l'esito e il numero mascherato, mai il
+codice.
+
+Senza gateway configurato il nodo è **in prova**: scrive numero e codice nel suo log invece di
+spedirli (per sviluppo e test).
 
 Limite noto: chi gestisce un nodo vede i numeri che verifica e potrebbe provare tutti i numeri
 contro il proprio elenco; l'Argon2id lo rallenta, non lo impedisce.

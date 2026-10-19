@@ -1,0 +1,1 @@
+Gruppi nell'app (fino a 100 persone, con foto, documenti, vocali e posizione); foto del profilo; rubrica come WhatsApp con chi usa Rondine in alto e gli altri da invitare; verifica del numero via SMS; la chat scende sempre fino all'ultimo messaggio.

@@ -1,0 +1,1 @@
+Groups in the app (up to 100 people, with photos, documents, voice messages and location); profile photo; WhatsApp-like address book with Rondine users on top and others to invite; phone number verification by SMS; chats always scroll to the latest message.

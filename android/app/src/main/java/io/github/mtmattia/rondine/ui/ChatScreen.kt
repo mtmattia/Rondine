@@ -109,42 +109,82 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.rondine_ffi.ContactInfo
 import uniffi.rondine_ffi.Message
+import uniffi.rondine_ffi.AttachmentInfo
+import uniffi.rondine_ffi.GroupInfo
+import uniffi.rondine_ffi.GroupMessageInfo
+import uniffi.rondine_ffi.LocationInfo
+import uniffi.rondine_ffi.MessageStatus
 import uniffi.rondine_ffi.RondineException
+
+/** Con chi si parla: una persona o un gruppo. La schermata è la stessa. */
+sealed interface ChatTarget {
+    val id: String
+    data class Person(override val id: String) : ChatTarget
+    data class Group(override val id: String) : ChatTarget
+}
+
+/** Un messaggio come lo mostra la chat, 1:1 o di gruppo. */
+data class UiMessage(
+    val id: String,
+    val outgoing: Boolean,
+    val body: String,
+    val ts: ULong,
+    val read: Boolean,
+    /** Spunte: solo nelle chat 1:1. */
+    val status: MessageStatus?,
+    val attachment: AttachmentInfo?,
+    val location: LocationInfo?,
+    val senderId: String,
+    /** Nome di chi scrive: solo nei gruppi. */
+    val senderName: String?,
+)
+
+private fun Message.ui() = UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null)
+private fun GroupMessageInfo.ui() =
+    UiMessage(id, outgoing, body, ts, read, null, attachment, location, if (outgoing) "io" else senderId, senderName)
 
 /** Elementi della conversazione, dal più recente (la lista è rovesciata). */
 private sealed interface ChatItem {
-    data class Msg(val m: Message, val firstOfRun: Boolean) : ChatItem
+    data class Msg(val m: UiMessage, val firstOfRun: Boolean) : ChatItem
     data class Day(val label: String) : ChatItem
     data object Notice : ChatItem
 }
 
-private fun buildItems(messages: List<Message>): List<ChatItem> {
+private fun buildItems(messages: List<UiMessage>): List<ChatItem> {
     val out = mutableListOf<ChatItem>()
     out += ChatItem.Notice
     var lastDay: java.time.LocalDate? = null
-    var lastOutgoing: Boolean? = null
+    // Una "serie" è di messaggi consecutivi dello stesso mittente.
+    var lastSender: String? = null
     for (m in messages) {
         val d = localDate(m.ts)
         if (d != lastDay) {
             out += ChatItem.Day(dayLabel(d))
             lastDay = d
-            lastOutgoing = null
+            lastSender = null
         }
-        out += ChatItem.Msg(m, firstOfRun = lastOutgoing != m.outgoing)
-        lastOutgoing = m.outgoing
+        out += ChatItem.Msg(m, firstOfRun = lastSender != m.senderId)
+        lastSender = m.senderId
     }
     return out.asReversed()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
+fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
+    val contactId = target.id
+    val isGroup = target is ChatTarget.Group
+    var group by remember { mutableStateOf<GroupInfo?>(null) }
+    /** "Sta scrivendo" solo nelle chat 1:1 (nei gruppi non ancora). */
+    fun typingTo(active: Boolean) {
+        if (!isGroup) Repo.typing(contactId, active)
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val revision by Repo.revision.collectAsState()
     var contact by remember { mutableStateOf<ContactInfo?>(null) }
-    var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
+    var messages by remember { mutableStateOf<List<UiMessage>>(emptyList()) }
     var text by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -165,31 +205,52 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
     var here by remember { mutableStateOf<android.location.Location?>(null) }
     var hereError by remember { mutableStateOf<String?>(null) }
     val chats by Repo.chats.collectAsState()
-    val typing = chats.any { it.contact.id == contactId && it.typing }
-    val onLan = chats.any { it.contact.id == contactId && it.onLan }
+    val typing = !isGroup && chats.any { it.contact.id == contactId && it.typing }
+    val onLan = !isGroup && chats.any { it.contact.id == contactId && it.onLan }
 
-    DisposableEffect(contactId) {
-        Repo.openChat = contactId
-        Notifier.cancel(context, contactId)
+    DisposableEffect(target) {
+        if (isGroup) {
+            Repo.openGroup = contactId
+            Notifier.cancelGroup(context, contactId)
+        } else {
+            Repo.openChat = contactId
+            Notifier.cancel(context, contactId)
+        }
         onDispose {
             if (Repo.openChat == contactId) Repo.openChat = null
-            Repo.typing(contactId, false)
+            if (Repo.openGroup == contactId) Repo.openGroup = null
+            typingTo(false)
         }
     }
 
-    LaunchedEffect(contactId, revision) {
+    LaunchedEffect(target, revision) {
         try {
             val r = Repo.client()
-            contact = r.contact(contactId)
-            messages = r.messages(contactId)
-            if (messages.any { !it.outgoing && !it.read }) {
-                // La conferma di lettura è un di più: senza rete non è un errore da mostrare.
-                try { r.markRead(contactId) } catch (_: RondineException) {}
-                Repo.refresh()
+            if (isGroup) {
+                group = r.group(contactId)
+                messages = r.groupMessages(contactId).map { it.ui() }
+                if (messages.any { !it.outgoing && !it.read }) {
+                    r.markGroupRead(contactId)
+                    Repo.refresh()
+                }
+            } else {
+                contact = r.contact(contactId)
+                messages = r.messages(contactId).map { it.ui() }
+                if (messages.any { !it.outgoing && !it.read }) {
+                    // La conferma di lettura è un di più: senza rete non è un errore da mostrare.
+                    try { r.markRead(contactId) } catch (_: RondineException) {}
+                    Repo.refresh()
+                }
             }
         } catch (e: RondineException) {
             snackbar.showSnackbar(e.userMessage)
         }
+    }
+
+    /** Manda un file alla persona o al gruppo. */
+    suspend fun sendFileHere(name: String, mime: String, data: ByteArray, caption: String?, thumb: ByteArray?, w: UInt?, h: UInt?) {
+        if (isGroup) Repo.client().sendGroupFile(contactId, name, mime, data, caption, thumb, w, h)
+        else Repo.client().sendFile(contactId, name, mime, data, caption, thumb, w, h)
     }
 
     fun onPicked(uri: android.net.Uri?, asPhoto: Boolean) {
@@ -252,10 +313,9 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
         locationOpen = false
         scope.launch {
             try {
-                Repo.client().sendLocation(
-                    contactId, l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy else null,
-                    liveFor?.toULong(),
-                )
+                val acc = if (l.hasAccuracy()) l.accuracy else null
+                if (isGroup) Repo.client().sendGroupLocation(contactId, l.latitude, l.longitude, acc, liveFor?.toULong())
+                else Repo.client().sendLocation(contactId, l.latitude, l.longitude, acc, liveFor?.toULong())
                 if (liveFor != null) io.github.mtmattia.rondine.location.LiveLocationService.start(context)
                 Repo.refresh()
             } catch (e: RondineException) {
@@ -279,7 +339,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
             keyboard?.hide()
             voicePaused = false
             voiceLevels = emptyList()
-            Repo.typing(contactId, false)
+            typingTo(false)
         } catch (e: Exception) {
             recorder.stop(false)
             scope.launch { snackbar.showSnackbar("Non riesco a registrare: ${e.message}") }
@@ -307,7 +367,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
             try {
                 val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())
                 val data = withContext(Dispatchers.IO) { f.readBytes() }
-                Repo.client().sendFile(contactId, "vocale-$stamp.m4a", VOICE_MIME, data, null, null, null, null)
+                sendFileHere("vocale-$stamp.m4a", VOICE_MIME, data, null, null, null, null)
                 Repo.refresh()
             } catch (e: RondineException) {
                 snackbar.showSnackbar("Vocale non inviato: ${e.userMessage}")
@@ -323,7 +383,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
         locationOpen = false
     }
 
-    fun download(m: Message) {
+    fun download(m: UiMessage) {
         if (m.id in downloading) return
         downloading = downloading + m.id
         scope.launch {
@@ -348,10 +408,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                 sending = true
                 scope.launch {
                     try {
-                        Repo.client().sendFile(
-                            contactId, f.name, f.mime, f.data, caption.trim().ifEmpty { null },
-                            f.thumb, f.width, f.height,
-                        )
+                        sendFileHere(f.name, f.mime, f.data, caption.trim().ifEmpty { null }, f.thumb, f.width, f.height)
                         text = ""
                         picked = null
                         Repo.refresh()
@@ -378,8 +435,22 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") }
                 },
                 title = {
-                    Row(
-                        Modifier.clickable(onClick = onSafety),
+                    val g = group
+                    if (isGroup) {
+                        Row(Modifier.clickable(onClick = onHeader), verticalAlignment = Alignment.CenterVertically) {
+                            GroupAvatar(contactId, 38.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(g?.name ?: "", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    g?.let { gr -> (listOf("Tu") + gr.members.map { it.name }).joinToString(", ") } ?: "",
+                                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    } else Row(
+                        Modifier.clickable(onClick = onHeader),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Avatar(c?.name ?: "", contactId, 38.dp)
@@ -421,11 +492,20 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                     }
                 },
                 actions = {
+                    if (isGroup) {
+                        Box {
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Altro") }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(text = { Text("Info gruppo") }, onClick = { menu = false; onHeader() })
+                            }
+                        }
+                        return@TopAppBar
+                    }
                     IconButton(onClick = { comingSoon("Le chiamate") }) { Icon(Icons.Filled.Call, "Chiama") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Altro") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(text = { Text("Numero di sicurezza") }, onClick = { menu = false; onSafety() })
+                            DropdownMenuItem(text = { Text("Numero di sicurezza") }, onClick = { menu = false; onHeader() })
                             DropdownMenuItem(
                                 text = { Text(if (c?.favorite == true) "Rimuovi dai preferiti" else "Aggiungi ai preferiti") },
                                 onClick = {
@@ -476,12 +556,17 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                 // Alla prima apertura si parte dal fondo: prima dei messaggi la lista ha solo
                 // l'avviso sulla cifratura, e resterebbe agganciata a quello (in cima).
                 var atBottomOnce by remember { mutableStateOf(false) }
+                // Quanti messaggi c'erano l'ultima volta: se ne arrivano più d'uno insieme, la
+                // lista resta agganciata a quello che vedevo, che sale di altrettante posizioni.
+                var seen by remember { mutableStateOf(0) }
                 LaunchedEffect(last?.id) {
                     if (last == null) return@LaunchedEffect
+                    val added = (messages.size - seen).coerceAtLeast(0)
+                    seen = messages.size
                     if (!atBottomOnce) {
                         listState.scrollToItem(0)
                         atBottomOnce = true
-                    } else if (last.outgoing || listState.firstVisibleItemIndex <= 1) {
+                    } else if (last.outgoing || listState.firstVisibleItemIndex <= added + 2) {
                         listState.animateScrollToItem(0)
                     }
                 }
@@ -501,14 +586,14 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                     }) { item ->
                         when (item) {
                             is ChatItem.Msg -> Bubble(
-                                item.m, item.firstOfRun,
+                                item.m, item.firstOfRun, isGroup,
                                 downloading = item.m.id in downloading,
                                 onOpen = { a ->
                                     openAttachment(context, a)?.let { scope.launch { snackbar.showSnackbar(it) } }
                                 },
                                 onDownload = { download(item.m) },
                                 onOpenLocation = { l ->
-                                    openInMaps(context, l.lat, l.lon, c?.name ?: "Posizione")
+                                    openInMaps(context, l.lat, l.lon, item.m.senderName ?: c?.name ?: "Posizione")
                                         ?.let { scope.launch { snackbar.showSnackbar(it) } }
                                 },
                                 onStopLocation = {
@@ -528,7 +613,14 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                     }
                 }
             }
-            if (c?.blocked == true) {
+            if (isGroup && group?.active == false) {
+                Text(
+                    "Non puoi più scrivere: non fai più parte del gruppo.",
+                    Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding(),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (c?.blocked == true) {
                 Text(
                     "Hai bloccato questo contatto.",
                     Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding(),
@@ -540,7 +632,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                     text = text,
                     onText = {
                         text = it
-                        Repo.typing(contactId, it.isNotBlank())
+                        typingTo(it.isNotBlank())
                     },
                     sending = sending,
                     emojiOpen = emojiOpen,
@@ -580,7 +672,8 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                         sending = true
                         scope.launch {
                             try {
-                                Repo.client().sendText(contactId, body)
+                                if (isGroup) Repo.client().sendGroupText(contactId, body)
+                                else Repo.client().sendText(contactId, body)
                                 text = ""
                                 Repo.refresh()
                             } catch (e: RondineException) {
@@ -615,7 +708,7 @@ fun ChatScreen(contactId: String, onBack: () -> Unit, onSafety: () -> Unit) {
                     )
                     emojiOpen -> EmojiPanel { e ->
                         text += e
-                        Repo.typing(contactId, true)
+                        typingTo(true)
                     }
                     attachMenu -> AttachPanel(
                         listOf(
@@ -708,8 +801,9 @@ private fun EncryptionNotice() {
 
 @Composable
 private fun Bubble(
-    m: Message,
+    m: UiMessage,
     firstOfRun: Boolean,
+    isGroup: Boolean,
     downloading: Boolean,
     onOpen: (uniffi.rondine_ffi.AttachmentInfo) -> Unit,
     onDownload: () -> Unit,
@@ -738,8 +832,14 @@ private fun Bubble(
             val loc = m.location
             val pad = if (a != null || loc != null) 4.dp else 0.dp
             Column(Modifier.padding(start = 10.dp - pad * 1.5f, end = 8.dp - pad, top = 6.dp - pad, bottom = 4.dp)) {
+                if (isGroup && !m.outgoing && firstOfRun && m.senderName != null) {
+                    Text(
+                        m.senderName, color = senderColor(m.senderId), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = pad * 1.5f, top = pad, bottom = 2.dp),
+                    )
+                }
                 if (loc != null) {
-                    LocationView(m, loc, onOpen = { onOpenLocation(loc) }, onStop = if (m.outgoing) onStopLocation else null)
+                    LocationView(m.ts, loc, onOpen = { onOpenLocation(loc) }, onStop = if (m.outgoing) onStopLocation else null)
                 }
                 if (a != null) {
                     AttachmentView(a, downloading, onOpen = { onOpen(a) }, onDownload = onDownload)
@@ -753,9 +853,10 @@ private fun Bubble(
                 }
                 Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                     Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
-                    if (m.outgoing) {
+                    val st = m.status
+                    if (m.outgoing && st != null) {
                         Spacer(Modifier.width(3.dp))
-                        MessageTicks(m.status, colors.bubbleMeta, 15.dp)
+                        MessageTicks(st, colors.bubbleMeta, 15.dp)
                     }
                 }
             }

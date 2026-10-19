@@ -55,7 +55,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.rondine_ffi.LocationInfo
-import uniffi.rondine_ffi.Message
 
 /** Durate della posizione in tempo reale, come su WhatsApp (SPEC §7.6: al massimo 8 ore). */
 val LIVE_DURATIONS = listOf(15L * 60 to "15 minuti", 3600L to "1 ora", 8L * 3600 to "8 ore")
@@ -192,7 +191,7 @@ private fun LocationRow(icon: androidx.compose.ui.graphics.vector.ImageVector, l
 /** Posizione nella bolla: un riquadro disegnato qui (niente mappe esterne), le coordinate e, se in
  *  tempo reale, fino a quando. Toccandola si apre nell'app di mappe. */
 @Composable
-fun LocationView(m: Message, l: LocationInfo, onOpen: () -> Unit, onStop: (() -> Unit)?) {
+fun LocationView(ts: ULong, l: LocationInfo, onOpen: () -> Unit, onStop: (() -> Unit)?) {
     val colors = LocalChatColors.current
     var now by remember { mutableLongStateOf(nowSecs()) }
     LaunchedEffect(l.liveUntil) {
@@ -244,7 +243,7 @@ fun LocationView(m: Message, l: LocationInfo, onOpen: () -> Unit, onStop: (() ->
                 append(formatCoords(l.lat, l.lon))
                 l.acc?.let { append(" · ±${it.toInt()} m") }
                 if (active) append(" · fino alle ${hourMinute(l.liveUntil!!)}")
-                if (live && l.updatedAt != m.ts) append(" · aggiornata alle ${hourMinute(l.updatedAt)}")
+                if (live && l.updatedAt != ts) append(" · aggiornata alle ${hourMinute(l.updatedAt)}")
             },
             color = colors.bubbleMeta, fontSize = 12.sp,
         )

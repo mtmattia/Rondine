@@ -30,7 +30,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import io.github.mtmattia.rondine.ui.ChatScreen
-import io.github.mtmattia.rondine.ui.GroupChatScreen
+import io.github.mtmattia.rondine.ui.ChatTarget
 import io.github.mtmattia.rondine.ui.GroupInfoScreen
 import io.github.mtmattia.rondine.ui.NewGroupScreen
 import io.github.mtmattia.rondine.ui.HomeScreen
@@ -175,7 +175,7 @@ class MainActivity : ComponentActivity() {
             }
             composable("chat/{id}") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable
-                ChatScreen(id, onBack = { nav.popBackStack() }, onSafety = { nav.navigate("sicurezza/$id") })
+                ChatScreen(ChatTarget.Person(id), onBack = { nav.popBackStack() }, onHeader = { nav.navigate("sicurezza/$id") })
             }
             composable("nuova") {
                 NewChatScreen(
@@ -193,7 +193,7 @@ class MainActivity : ComponentActivity() {
             }
             composable("gruppo/{id}") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable
-                GroupChatScreen(id, onBack = { nav.popBackStack() }, onInfo = { nav.navigate("gruppo/$id/info") })
+                ChatScreen(ChatTarget.Group(id), onBack = { nav.popBackStack() }, onHeader = { nav.navigate("gruppo/$id/info") })
             }
             composable("gruppo/{id}/info") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable

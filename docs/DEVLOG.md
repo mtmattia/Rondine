@@ -180,3 +180,8 @@ Una riga per modifica: data, cosa è cambiato.
   stanno nel messaggio; la posizione in tempo reale si aggiorna per tutti i membri con depositi
   silenziosi. Client, CLI (`rondine gruppo manda`, `rondine gruppo posizione`) e ponte. 1 test con
   membri su nodi diversi.
+- 2026-10-19 — App: una sola schermata di chat per persone e gruppi, quindi nei gruppi anche
+  allegati, fotocamera, vocali, posizione ed emoji; nei gruppi il nome colorato di chi scrive.
+  Corretto: se arrivavano più messaggi insieme la chat non scendeva fino all'ultimo. Provato
+  sull'emulatore: foto dall'app ad Anna e Bruno (una sola copia sul nodo), PDF e posizione in
+  tempo reale da Bruno all'app.

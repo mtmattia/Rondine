@@ -448,3 +448,86 @@ async fn rispondere_e_cancellare_nel_gruppo() -> R {
     assert!(!ids.contains(&r.id), "quello di Bruno deve sparire");
     Ok(())
 }
+
+/// Backup e ripristino (SPEC §7.8): telefono perso, profilo ripristinato altrove con il codice.
+/// Le chat 1:1 ripartono da sole, l'amministratore riaggiunge al gruppo; lo storico resta.
+#[tokio::test]
+async fn backup_e_ripristino() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let mut carla = profile(&tmp, "Carla", &node).await?;
+    connect(&mut silvia, &mut mattia).await?;
+    connect(&mut silvia, &mut carla).await?;
+    sync_ok(&mut mattia).await?;
+    // Silvia è l'amministratrice del gruppo.
+    let g = silvia
+        .create_group("Gita", &[mattia.identity(), carla.identity()])
+        .await?;
+    sync_ok(&mut mattia).await?;
+    sync_ok(&mut carla).await?;
+    mattia
+        .send_text(&silvia.identity(), "prima del backup")
+        .await?;
+    sync_ok(&mut silvia).await?;
+
+    let (backup, code) = mattia.export_backup()?;
+    assert_eq!(code.chars().filter(char::is_ascii_digit).count(), 30);
+    // Dopo il backup si va avanti: le chiavi MLS del vecchio telefono cambiano.
+    mattia
+        .send_text(&silvia.identity(), "dopo il backup")
+        .await?;
+    sync_ok(&mut silvia).await?;
+    let me = mattia.identity();
+    drop(mattia); // telefono perso
+
+    // Codice sbagliato: niente.
+    assert!(
+        Client::restore_backup(&tmp.path().join("Rotto"), &backup, "123")
+            .await
+            .is_err()
+    );
+    let mut nuovo = Client::restore_backup(&tmp.path().join("Mattia2"), &backup, &code).await?;
+    assert_eq!(nuovo.identity(), me);
+    assert!(
+        nuovo
+            .messages_with(&silvia.identity())
+            .iter()
+            .any(|m| m.body == "prima del backup"),
+        "lo storico deve esserci"
+    );
+
+    // Primo giro: il nuovo telefono riapre le chat e chiede di rientrare nel gruppo.
+    nuovo.sync_all().await?;
+    sync_ok(&mut silvia).await?; // riceve il saluto nuovo e la richiesta, e riaggiunge
+    sync_ok(&mut carla).await?;
+    nuovo.sync_all().await?; // entra di nuovo nel gruppo
+
+    nuovo.send_text(&silvia.identity(), "sono tornato").await?;
+    assert!(
+        silvia
+            .sync()
+            .await?
+            .iter()
+            .any(|e| matches!(e, Event::Message(m) if m.body == "sono tornato"))
+    );
+    silvia.send_text(&me, "bentornato").await?;
+    assert!(
+        nuovo
+            .sync()
+            .await?
+            .iter()
+            .any(|e| matches!(e, Event::Message(m) if m.body == "bentornato"))
+    );
+    assert!(
+        nuovo.find_group("Gita")?.active,
+        "deve essere rientrato nel gruppo"
+    );
+    silvia.send_group_text(&g.id, "ciao a tutti").await?;
+    assert_eq!(group_texts(&mut nuovo).await?, ["ciao a tutti"]);
+    nuovo.send_group_text(&g.id, "eccomi").await?;
+    // Carla ritira insieme il messaggio di Silvia e quello di Mattia rientrato.
+    assert_eq!(group_texts(&mut carla).await?, ["ciao a tutti", "eccomi"]);
+    Ok(())
+}

@@ -42,6 +42,15 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         secondi: u64,
     },
+    /// Ripristina un profilo da un backup (SPEC §7.8) nella cartella del profilo.
+    Ripristina {
+        file: PathBuf,
+        /// Il codice di 30 cifre del backup.
+        #[arg(long)]
+        codice: String,
+    },
+    /// Salva un backup cifrato del profilo e stampa il codice per aprirlo (SPEC §7.8).
+    Backup { file: PathBuf },
     /// Mostra chi sei e il tuo link d'invito.
     Io,
     /// Aggiunge il nodo, o passa a un altro (la vecchia casella si ritira ancora per 30 giorni).
@@ -617,6 +626,20 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if let Cmd::Ripristina { file, codice } = &cli.cmd {
+        let data = std::fs::read(file).context("lettura del backup")?;
+        let mut c = Client::restore_backup(&dir, &data, codice).await?;
+        println!("Profilo ripristinato in {}", dir.display());
+        println!("Chiave: {}", c.identity());
+        // Riapre subito le chat e chiede di rientrare nei gruppi.
+        let s = c.sync_all().await?;
+        print_events(&s.events, &c);
+        println!(
+            "Chat riaperte con i contatti; i gruppi ti riaggiungono quando l'amministratore è in linea."
+        );
+        return Ok(());
+    }
+
     let mut c = Client::open(&dir).with_context(|| {
         format!(
             "nessun profilo in {} (crealo con `rondine crea --nome … --nodo …`)",
@@ -625,7 +648,13 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     match cli.cmd {
-        Cmd::Crea { .. } => {}
+        Cmd::Crea { .. } | Cmd::Ripristina { .. } => {}
+        Cmd::Backup { file } => {
+            let (data, code) = c.export_backup()?;
+            std::fs::write(&file, data).context("scrittura del backup")?;
+            println!("Backup salvato in {}.", file.display());
+            println!("Codice per aprirlo (annotalo, non si può recuperare):\n{code}");
+        }
         Cmd::Nodo { url } => {
             c.set_node(&url).await?;
             println!(

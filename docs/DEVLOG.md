@@ -220,3 +220,8 @@ Una riga per modifica: data, cosa è cambiato.
   Svuota chat, anche per i gruppi. Tolte le schede vuote (Aggiornamenti, Community, Chiamate) e il
   tasto Chiama "in arrivo". Le chat corte stanno in basso, vicino alla barra. Provato
   sull'emulatore con la CLI.
+- 2026-10-19 — Backup e ripristino (SPEC §7.8): file cifrato con XChaCha20-Poly1305 e chiave
+  Argon2id da un codice di 30 cifre; contiene identità, contatti, messaggi, gruppi e foto del
+  profilo, non lo stato MLS. Al ripristino: key package nuovi al posto dei vecchi (`replace`),
+  chat 1:1 riaperte con `hello` `reset`, richiesta `rejoin` agli amministratori dei gruppi, che
+  tolgono e riaggiungono. CLI `rondine backup` / `rondine ripristina`, ponte UniFFI. 2 test.

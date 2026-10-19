@@ -60,6 +60,8 @@ pub struct GroupDelivery {
 /// Azioni di rete da fare dopo aver elaborato la casella.
 #[derive(Debug)]
 pub(crate) enum Pending {
+    /// Un membro ripristinato da un backup chiede di rientrare: lo tolgo e lo riaggiungo.
+    Rejoin(String, PublicKey),
     /// Mandare al gruppo il mio biglietto con il permesso `gruppo`.
     Announce(String),
     /// Togliere un membro che ha chiesto di uscire (solo amministratore).
@@ -584,6 +586,23 @@ impl Client {
         self.save()
     }
 
+    /// Richiesta di rientro dopo un ripristino (SPEC §7.8): vale se sono l'amministratore e chi
+    /// chiede è tra i membri del gruppo.
+    pub(crate) fn received_rejoin(&mut self, sender: PublicKey, gid: &str) {
+        let me = self.identity.public();
+        let ok = self.state.group_chats.iter().any(|g| {
+            g.id == gid
+                && g.active
+                && g.admin == me
+                && g.members.iter().any(|m| m.identity == sender)
+        });
+        if ok {
+            self.batch
+                .pending
+                .push(Pending::Rejoin(gid.to_string(), sender));
+        }
+    }
+
     /// Cifra un messaggio nel gruppo e lo consegna a tutti i membri.
     pub(crate) async fn group_send(
         &mut self,
@@ -986,6 +1005,10 @@ impl Client {
                 Pending::Announce(gid) => self.announce(gid).await,
                 Pending::Remove(gid, who) => self.remove_group_member(gid, who).await,
                 Pending::Revoke(id) => self.revoke_permit(id).await,
+                Pending::Rejoin(gid, who) => {
+                    let _ = self.remove_group_member(gid, who).await;
+                    self.add_group_members(gid, std::slice::from_ref(who)).await
+                }
             };
             if let Err(e) = res {
                 events.push(Event::Rejected(format!("gruppo: {e}")));
@@ -1001,7 +1024,14 @@ impl Client {
             return Ok(());
         }
         let card = self.my_group_card(i).await?;
-        let envelope = self.group_encrypt(&gid_bytes(gid)?, &AppMessage::Hello { v: 1, card })?;
+        let envelope = self.group_encrypt(
+            &gid_bytes(gid)?,
+            &AppMessage::Hello {
+                v: 1,
+                card,
+                reset: false,
+            },
+        )?;
         let members = self.state.group_chats[i].members.clone();
         self.fanout(&members, &envelope).await;
         // Con il biglietto anche la foto, se ce l'ho (SPEC §7.7).

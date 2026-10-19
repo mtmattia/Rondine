@@ -253,6 +253,12 @@ pub struct State {
     /// Segreti già calcolati dei numeri della rubrica (SPEC §9, §13.1): l'Argon2 non si rifà.
     #[serde(default)]
     pub discovery_cache: Vec<DiscoverySecret>,
+    /// Ripristinato da un backup e non ancora ricollegato (SPEC §7.8).
+    #[serde(default)]
+    pub pending_restore: bool,
+    /// Gruppi in cui chiedere di rientrare dopo il ripristino.
+    #[serde(default)]
+    pub rejoin_groups: Vec<String>,
 }
 
 /// Segreti di un numero della rubrica: hash per i numeri verificati e, se avevo un numero, luogo

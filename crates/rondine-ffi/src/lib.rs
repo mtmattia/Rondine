@@ -155,6 +155,13 @@ impl From<Delivery> for MessageStatus {
     }
 }
 
+/// Un backup appena fatto: il file e il codice per aprirlo.
+#[derive(uniffi::Record)]
+pub struct BackupFile {
+    pub data: Vec<u8>,
+    pub code: String,
+}
+
 /// Un numero della rubrica che corrisponde a qualcuno su Rondine.
 #[derive(uniffi::Record, Clone)]
 pub struct AddressBookMatchInfo {
@@ -405,6 +412,16 @@ fn message(m: &ChatMessage) -> Message {
 
 fn key(id: &str) -> Result<PublicKey> {
     Ok(PublicKey::from_b64(id)?)
+}
+
+/// Ripristina un profilo da un backup (SPEC §7.8) nella cartella, che deve essere vuota.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn restore_profile(dir: String, backup: Vec<u8>, code: String) -> Result<Arc<Rondine>> {
+    let client = on_runtime(async move {
+        Ok(Client::restore_backup(&PathBuf::from(dir), &backup, &code).await?)
+    })
+    .await?;
+    Ok(Rondine::new(client))
 }
 
 /// Apre il profilo nella cartella, se esiste.
@@ -983,6 +1000,13 @@ impl Rondine {
     /// Silenzia o riattiva le notifiche di una chat (1:1 o gruppo).
     pub async fn set_muted(&self, id: String, muted: bool) -> Result<()> {
         Ok(self.with(move |c| c.set_muted(&id, muted)).await?)
+    }
+
+    /// Backup cifrato del profilo e codice di 30 cifre per aprirlo (SPEC §7.8).
+    pub async fn export_backup(&self) -> Result<BackupFile> {
+        let c = self.client.lock().await;
+        let (data, code) = c.export_backup()?;
+        Ok(BackupFile { data, code })
     }
 
     pub async fn mark_group_read(&self, id: String) -> Result<()> {

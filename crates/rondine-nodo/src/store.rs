@@ -348,6 +348,12 @@ impl Store {
 
     // --- key package ---
 
+    pub fn delete_keypackages(&self, inbox: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM keypackages WHERE inbox = ?1", [inbox])?;
+        Ok(())
+    }
+
     pub fn add_keypackages(&self, inbox: &str, items: &[Vec<u8>]) -> Result<()> {
         let mut stmt = self
             .conn

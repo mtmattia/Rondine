@@ -25,7 +25,12 @@ pub enum AppMessage {
     Hello {
         v: u32,
         card: SignedCard,
+        /// Dopo un ripristino (SPEC §7.8): questa chat sostituisce le precedenti.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reset: bool,
     },
+    /// Chiede all'amministratore di essere riaggiunti al gruppo dopo un ripristino (SPEC §7.8).
+    Rejoin { v: u32, group: String },
     Text {
         v: u32,
         id: String,
@@ -36,22 +41,11 @@ pub enum AppMessage {
         reply: Option<String>,
     },
     /// Cancella per tutti messaggi già mandati da chi lo manda (SPEC §7.1b).
-    Delete {
-        v: u32,
-        ids: Vec<String>,
-    },
+    Delete { v: u32, ids: Vec<String> },
     /// "Sta scrivendo" (SPEC §7.3): viaggia in un deposito effimero.
-    Typing {
-        v: u32,
-        active: bool,
-        ts: u64,
-    },
+    Typing { v: u32, active: bool, ts: u64 },
     /// "Sono collegato": indirizzi per la consegna diretta (SPEC §12.3).
-    Online {
-        v: u32,
-        addrs: Vec<String>,
-        ts: u64,
-    },
+    Online { v: u32, addrs: Vec<String>, ts: u64 },
     /// Busta affidata a un postino della mesh (SPEC §12.5).
     Relay {
         v: u32,
@@ -75,9 +69,7 @@ pub enum AppMessage {
         cards: Vec<SignedCard>,
     },
     /// Richiesta di uscire da un gruppo (SPEC §7.4).
-    Leave {
-        v: u32,
-    },
+    Leave { v: u32 },
     /// Foto o documento (SPEC §7.5).
     File(Box<FileMsg>),
     /// Posizione, fissa o in tempo reale (SPEC §7.6).
@@ -185,6 +177,7 @@ impl AppMessage {
             AppMessage::Location(l) | AppMessage::LocationUpdate(l) => l.v,
             AppMessage::Profile { v, .. } => *v,
             AppMessage::Delete { v, .. } => *v,
+            AppMessage::Rejoin { v, .. } => *v,
             AppMessage::Unknown => crate::PROTOCOL_VERSION,
         }
     }

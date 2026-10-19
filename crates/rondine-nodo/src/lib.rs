@@ -715,6 +715,9 @@ async fn ack_messages(
 #[derive(Serialize, Deserialize)]
 pub struct KeyPackageUpload {
     pub items: Vec<String>,
+    /// Toglie prima quelli vecchi (dopo un ripristino, SPEC §7.8).
+    #[serde(default)]
+    pub replace: bool,
 }
 
 async fn upload_keypackages(
@@ -736,6 +739,9 @@ async fn upload_keypackages(
         return Err(ApiError::bad("key package troppo grande"));
     }
     let db = s.db()?;
+    if req.replace {
+        db.delete_keypackages(&inbox)?;
+    }
     if db.count_keypackages(&inbox)? + items.len() as u64 > MAX_KEYPACKAGES {
         return Err(ApiError::bad("troppi key package"));
     }

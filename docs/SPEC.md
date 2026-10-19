@@ -199,6 +199,7 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "location", ... }          // §7.6
 { "v": 1, "type": "location_update", ... }   // §7.6
 { "v": 1, "type": "profile", ... }           // §7.7
+{ "v": 1, "type": "rejoin", "group": "<id>" } // §7.8
 ```
 
 Un `type` sconosciuto (da una versione più nuova dell'app) si **ignora** senza errori: così i
@@ -348,6 +349,28 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
   - a un gruppo, entrando (insieme al proprio `hello`).
 - Chi la riceve tiene, per ogni mittente, quella con `ts` più recente.
 
+### 7.8 Backup e ripristino
+
+**File di backup** (resta sul telefono o dove lo mette la persona): `RONDINE-BACKUP\n`, un byte di
+versione (1), 16 byte di sale, 24 byte di nonce, poi `XChaCha20-Poly1305(chiave, nonce, dati)`
+con `chiave = Argon2id(codice, sale, m = 65536 KiB, t = 3, p = 1, 32 byte)`. Il **codice** è di
+30 cifre casuali (circa 100 bit), mostrato una volta all'utente. `dati` è il JSON
+`{ "v": 1, "created_at", "state": <stato del client>, "photos": { "<chi>": "<b64 JPEG>" } }`:
+identità, contatti, messaggi, gruppi, foto del profilo. Non contiene lo stato MLS (le chiavi delle
+conversazioni cambiano a ogni messaggio, uno vecchio non serve) né foto e documenti delle chat.
+
+**Ripristino.** Stessa identità quindi stessa casella e stessi permessi; dispositivo MLS nuovo:
+1. il client carica key package nuovi con `{"items": […], "replace": true}`: il nodo butta quelli
+   vecchi, che nessuno saprebbe più aprire;
+2. a ogni contatto riapre la chat 1:1 (§7.1) con un `hello` che porta `"reset": true`: chi lo
+   riceve tiene, per quel contatto, solo la chat nuova;
+3. per ogni gruppo chiede all'amministratore, nella chat 1:1, `{"type": "rejoin", "group": "<id>"}`:
+   se chi chiede è tra i membri, l'amministratore lo toglie e lo riaggiunge (§7.4). Chi rientra
+   non vede i messaggi di gruppo scambiati mentre era fuori.
+
+I messaggi arrivati dopo il backup e prima del ripristino non si possono più leggere. Il backup
+va usato su un telefono alla volta.
+
 ## 8. Sveglia push
 
 Il proprietario registra un bersaglio:
@@ -445,7 +468,7 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `DELETE /v1/inboxes/{inbox}/files/{id}` | proprietario | cancella il file |
 | `POST /v1/inboxes/{inbox}/shared` | proprietario | corpo: file cifrato → `{id}` (§6.2, gruppi) |
 | `GET /v1/shared/{id}` | — | i byte del file condiviso |
-| `POST /v1/inboxes/{inbox}/keypackages` | proprietario | `{items: [b64]}` |
+| `POST /v1/inboxes/{inbox}/keypackages` | proprietario | `{items: [b64], replace?}`; con `replace` toglie prima quelli vecchi (§7.8) |
 | `POST /v1/inboxes/{inbox}/keypackages/claim` | permesso | `{permit}` → `{keypackage}`; l'ultimo resta e si riusa |
 | `POST /v1/wake` | permesso | `{permit}` |
 | `PUT /v1/names/{nome}` | firma nel record | registra o aggiorna `Signed<NameClaim>` |

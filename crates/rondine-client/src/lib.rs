@@ -1,5 +1,6 @@
 //! Client Rondine: tutto ciò che l'app sa fare, come funzioni (CLAUDE.md, regola 5).
 
+mod backup;
 mod error;
 mod groups;
 mod lan;
@@ -102,16 +103,16 @@ use groups::Batch;
 
 use net::{Net, parse};
 
-const STATE_FILE: &str = "stato.json";
-const MLS_FILE: &str = "mls.bin";
+pub(crate) const STATE_FILE: &str = "stato.json";
+pub(crate) const MLS_FILE: &str = "mls.bin";
 /// Cartella del profilo con foto e documenti (SPEC §7.5).
 const FILES_DIR: &str = "file";
 /// Id al massimo in un `delete` (SPEC §7.1b).
 const MAX_DELETE_IDS: usize = 100;
 /// Cartella del profilo con le foto: la mia (`io.jpg`) e quelle ricevute (SPEC §7.7).
-const PHOTOS_DIR: &str = "foto";
+pub(crate) const PHOTOS_DIR: &str = "foto";
 /// Key package caricati sul nodo alla creazione (l'ultimo è di riserva).
-const KEYPACKAGE_BATCH: usize = 20;
+pub(crate) const KEYPACKAGE_BATCH: usize = 20;
 /// Key package offerti in rete locale a chi avvia una chat (SPEC §12.2).
 const LAN_KEYPACKAGES: usize = 5;
 /// Durata delle voci in bacheca: si ripubblicano prima che scadano.
@@ -311,6 +312,8 @@ impl Client {
                 my_photo_ts: 0,
                 photos: Vec::new(),
                 discovery_cache: Vec::new(),
+                pending_restore: false,
+                rejoin_groups: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -364,6 +367,8 @@ impl Client {
                 my_photo_ts: 0,
                 photos: Vec::new(),
                 discovery_cache: Vec::new(),
+                pending_restore: false,
+                rejoin_groups: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -457,7 +462,16 @@ impl Client {
                 cm.my_permit_id = Some(permit_id);
             }
             // Chi non è raggiungibile adesso lo riceve dalla coda o dalla mesh.
-            let _ = self.send_app(&c, &AppMessage::Hello { v: 1, card }).await;
+            let _ = self
+                .send_app(
+                    &c,
+                    &AppMessage::Hello {
+                        v: 1,
+                        card,
+                        reset: false,
+                    },
+                )
+                .await;
         }
         // I gruppi ricevono il biglietto con un permesso `gruppo` del nodo nuovo (SPEC §7.4).
         for g in self.state.group_chats.iter_mut().filter(|g| g.active) {
@@ -1222,6 +1236,12 @@ impl Client {
     }
 
     async fn start_chat(&mut self, peer: &PublicKey) -> Result<()> {
+        self.start_chat_with(peer, false).await
+    }
+
+    /// Apre una chat 1:1; con `reset` (dopo un ripristino, SPEC §7.8) il contatto la tiene come
+    /// unica chat con me.
+    pub(crate) async fn start_chat_with(&mut self, peer: &PublicKey, reset: bool) -> Result<()> {
         let contact = self
             .state
             .contacts
@@ -1245,6 +1265,7 @@ impl Client {
         let hello = serde_json::to_vec(&AppMessage::Hello {
             v: 1,
             card: my_card,
+            reset,
         })?;
         let first = self.device.encrypt(&group_id, &hello)?;
         let envelope = Envelope::Welcome {
@@ -2409,6 +2430,8 @@ impl Client {
     /// Come [`Client::sync`], con anche gli eventi dei gruppi (SPEC §7.4).
     pub async fn sync_all(&mut self) -> Result<Synced> {
         self.batch = Batch::default();
+        // Appena ripristinato da un backup: chat da riaprire e gruppi da cui rientrare (§7.8).
+        self.finish_restore().await;
         let mut events = self.flush_outbox().await;
         let path = format!("/v1/inboxes/{}/messages", self.state.inbox);
         let mut ids = Vec::new();
@@ -2639,8 +2662,8 @@ impl Client {
         }
         let app: AppMessage = serde_json::from_slice(&plaintext)?;
         check_version(app.version())?;
-        let card = match app {
-            AppMessage::Hello { card, .. } => card,
+        let (card, reset) = match app {
+            AppMessage::Hello { card, reset, .. } => (card, reset),
             // Invito a un gruppo (SPEC §7.4).
             AppMessage::Group {
                 name, admin, cards, ..
@@ -2675,7 +2698,12 @@ impl Client {
                 c.card = card;
                 c.display_name = info.display_name;
                 c.username = info.username;
-                c.groups.push(group);
+                // Dopo un suo ripristino le chat vecchie non valgono più (SPEC §7.8).
+                if reset {
+                    c.groups = vec![group];
+                } else {
+                    c.groups.push(group);
+                }
             }
             None => {
                 events.push(Event::NewContact {
@@ -2743,6 +2771,10 @@ impl Client {
         check_version(app.version())?;
         match app {
             AppMessage::Delete { ids, .. } => Ok(self.received_delete(sender, ids)),
+            AppMessage::Rejoin { group, .. } => {
+                self.received_rejoin(sender, &group);
+                Ok(Vec::new())
+            }
             AppMessage::Text {
                 id,
                 ts,
@@ -3150,7 +3182,7 @@ async fn issue_permit(
     )
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, bytes)?;
     #[cfg(unix)]

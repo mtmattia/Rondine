@@ -111,10 +111,27 @@ const LAN_KEYPACKAGES: usize = 5;
 /// Durata delle voci in bacheca: si ripubblicano prima che scadano.
 const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 
+/// Dove mettere un file troppo grande per stare nel messaggio (SPEC §7.5).
+pub(crate) enum FileDest<'a> {
+    /// Nella casella del contatto (chat 1:1).
+    Mailbox { card: &'a SignedCard, name: &'a str },
+    /// Tra i file condivisi del mio nodo (gruppi).
+    Shared,
+}
+
+/// L'id restituito dal nodo dopo un caricamento.
+fn uploaded_id(res: &[u8]) -> Result<String> {
+    let up: serde_json::Value = parse(res)?;
+    up["id"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| Error::Invalid("il nodo non ha dato l'id del file".into()))
+}
+
 /// Come depositare una busta (SPEC §6): normale, effimera ("sta scrivendo") o silenziosa (senza
 /// sveglia, per la posizione in tempo reale).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Kind {
+pub(crate) enum Kind {
     Normal,
     Ephemeral,
     Quiet,
@@ -1455,98 +1472,34 @@ impl Client {
     /// Manda una foto o un documento. Il file si cifra qui; se è piccolo viaggia dentro il
     /// messaggio, altrimenti si carica nella casella del contatto sul suo nodo.
     pub async fn send_file(&mut self, to: &PublicKey, file: NewFile) -> Result<ChatMessage> {
-        if file.data.is_empty() {
-            return Err(Error::Invalid("file vuoto".into()));
-        }
-        if file
-            .thumb
-            .as_ref()
-            .is_some_and(|t| t.len() > rondine_core::file::MAX_THUMB_BYTES)
-        {
-            return Err(Error::Invalid("anteprima troppo grande".into()));
-        }
         let contact = self.chat_contact(to).await?;
-        let sealed = rondine_core::file::seal(&file.data)?;
-        let id = random_id();
-        let (at, data) = if sealed.ciphertext.len() <= rondine_core::file::MAX_INLINE_BYTES {
-            (None, Some(b64::encode(&sealed.ciphertext)))
-        } else {
-            let info = verify_card(&contact.card)?;
-            let Some((node, inbox, permit)) = info.mailbox() else {
-                return Err(Error::Invalid(format!(
-                    "{} non ha un nodo: si possono mandare solo file fino a 64 KiB",
-                    contact.display_name
-                )));
-            };
-            let res = self
-                .net
-                .upload_file(
-                    node,
-                    &format!("/v1/inboxes/{inbox}/files"),
-                    permit,
-                    sealed.ciphertext,
-                )
-                .await?;
-            let up: serde_json::Value = parse(&res)?;
-            let file_id = up["id"]
-                .as_str()
-                .ok_or_else(|| Error::Invalid("il nodo non ha dato l'id del file".into()))?;
-            (
-                Some(rondine_core::file::FileAt {
-                    node: node.to_string(),
-                    file: file_id.to_string(),
-                }),
-                None,
+        let (f, attachment) = self
+            .seal_file(
+                &file,
+                FileDest::Mailbox {
+                    card: &contact.card,
+                    name: &contact.display_name,
+                },
             )
-        };
-        let caption = file
-            .caption
-            .as_deref()
-            .map(str::trim)
-            .filter(|c| !c.is_empty())
-            .map(str::to_string);
-        let ts = now();
-        let path = self.store_file(&id, &file.name, &file.data)?;
-        let app = AppMessage::File(Box::new(FileMsg {
-            v: 1,
-            id: id.clone(),
-            ts,
-            name: rondine_core::file::safe_name(&file.name),
-            mime: file.mime.clone(),
-            size: file.data.len() as u64,
-            caption: caption.clone(),
-            key: sealed.key,
-            hash: sealed.hash,
-            at,
-            data,
-            thumb: file.thumb.as_ref().map(b64::encode),
-            width: file.width,
-            height: file.height,
-        }));
+            .await?;
         let mut msg = ChatMessage {
-            id,
+            id: f.id.clone(),
             contact: *to,
             outgoing: true,
-            body: caption.unwrap_or_default(),
-            ts,
+            body: f.caption.clone().unwrap_or_default(),
+            ts: f.ts,
             read: true,
             status: Delivery::Sent,
             location: None,
-            attachment: Some(Attachment {
-                name: rondine_core::file::safe_name(&file.name),
-                mime: file.mime,
-                size: file.data.len() as u64,
-                path: Some(path.to_string_lossy().into_owned()),
-                thumb: file.thumb,
-                width: file.width,
-                height: file.height,
-                key: String::new(),
-                hash: String::new(),
-                at: None,
-            }),
+            attachment: Some(attachment),
         };
         if self
-            .send_app_with(&contact, &app, Kind::Normal, Some(&msg.id))
+            .send_app_with(
+                &contact,
+                &AppMessage::File(Box::new(f)),
+                Kind::Normal,
+                Some(&msg.id),
+            )
             .await?
             == Route::Queued
         {
@@ -1558,63 +1511,194 @@ impl Client {
         Ok(msg)
     }
 
-    /// Scarica dal mio nodo il file di un messaggio ricevuto, lo decifra e lo salva sul
-    /// telefono; poi lo cancella dal nodo. Restituisce dove l'ha salvato.
-    pub async fn download(&mut self, message_id: &str) -> Result<PathBuf> {
-        let m = self
-            .state
+    /// Cifra un file e lo mette dove chi riceve può prenderlo (SPEC §7.5): dentro il messaggio
+    /// se è piccolo, altrimenti nella casella del contatto (chat 1:1) o tra i file condivisi del
+    /// mio nodo (gruppi). Restituisce il messaggio `file` e l'allegato per me, già sul telefono.
+    pub(crate) async fn seal_file(
+        &mut self,
+        file: &NewFile,
+        dest: FileDest<'_>,
+    ) -> Result<(FileMsg, Attachment)> {
+        if file.data.is_empty() {
+            return Err(Error::Invalid("file vuoto".into()));
+        }
+        if file
+            .thumb
+            .as_ref()
+            .is_some_and(|t| t.len() > rondine_core::file::MAX_THUMB_BYTES)
+        {
+            return Err(Error::Invalid("anteprima troppo grande".into()));
+        }
+        let sealed = rondine_core::file::seal(&file.data)?;
+        let id = random_id();
+        let (at, data) = if sealed.ciphertext.len() <= rondine_core::file::MAX_INLINE_BYTES {
+            (None, Some(b64::encode(&sealed.ciphertext)))
+        } else {
+            let at = match dest {
+                FileDest::Mailbox { card, name } => {
+                    let info = verify_card(card)?;
+                    let Some((node, inbox, permit)) = info.mailbox() else {
+                        return Err(Error::Invalid(format!(
+                            "{name} non ha un nodo: si possono mandare solo file fino a 64 KiB"
+                        )));
+                    };
+                    let res = self
+                        .net
+                        .upload_file(
+                            node,
+                            &format!("/v1/inboxes/{inbox}/files"),
+                            permit,
+                            sealed.ciphertext,
+                        )
+                        .await?;
+                    rondine_core::file::FileAt {
+                        node: node.to_string(),
+                        file: Some(uploaded_id(&res)?),
+                        shared: None,
+                    }
+                }
+                FileDest::Shared => {
+                    if !self.has_node() {
+                        return Err(Error::Invalid(
+                            "senza un nodo nei gruppi si possono mandare solo file fino a 64 KiB"
+                                .into(),
+                        ));
+                    }
+                    let path = format!("/v1/inboxes/{}/shared", self.state.inbox);
+                    let res = self
+                        .net
+                        .owner_upload(&self.identity, &self.state.node, &path, sealed.ciphertext)
+                        .await?;
+                    rondine_core::file::FileAt {
+                        node: self.state.node.clone(),
+                        file: None,
+                        shared: Some(uploaded_id(&res)?),
+                    }
+                }
+            };
+            (Some(at), None)
+        };
+        let caption = file
+            .caption
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string);
+        let ts = now();
+        let name = rondine_core::file::safe_name(&file.name);
+        let path = self.store_file(&id, &file.name, &file.data)?;
+        let msg = FileMsg {
+            v: 1,
+            id,
+            ts,
+            name: name.clone(),
+            mime: file.mime.clone(),
+            size: file.data.len() as u64,
+            caption,
+            key: sealed.key,
+            hash: sealed.hash,
+            at,
+            data,
+            thumb: file.thumb.as_ref().map(b64::encode),
+            width: file.width,
+            height: file.height,
+        };
+        let mine = Attachment {
+            name,
+            mime: file.mime.clone(),
+            size: file.data.len() as u64,
+            path: Some(path.to_string_lossy().into_owned()),
+            thumb: file.thumb.clone(),
+            width: file.width,
+            height: file.height,
+            key: String::new(),
+            hash: String::new(),
+            at: None,
+        };
+        Ok((msg, mine))
+    }
+
+    /// L'allegato di un messaggio, 1:1 o di gruppo.
+    fn attachment_of(&self, message_id: &str) -> Option<Attachment> {
+        self.state
             .messages
             .iter()
             .find(|m| m.id == message_id)
-            .ok_or_else(|| Error::NotFound("messaggio sconosciuto".into()))?;
-        let a = m
-            .attachment
-            .clone()
-            .ok_or_else(|| Error::Invalid("il messaggio non ha un file".into()))?;
+            .and_then(|m| m.attachment.clone())
+            .or_else(|| {
+                self.state
+                    .group_messages
+                    .iter()
+                    .find(|m| m.id == message_id)
+                    .and_then(|m| m.attachment.clone())
+            })
+    }
+
+    fn attachment_mut(&mut self, message_id: &str) -> Option<&mut Attachment> {
+        if let Some(m) = self.state.messages.iter_mut().find(|m| m.id == message_id) {
+            return m.attachment.as_mut();
+        }
+        self.state
+            .group_messages
+            .iter_mut()
+            .find(|m| m.id == message_id)
+            .and_then(|m| m.attachment.as_mut())
+    }
+
+    /// Scarica il file di un messaggio ricevuto (dalla mia casella o, nei gruppi, dai file
+    /// condivisi del nodo di chi l'ha mandato), lo decifra e lo salva sul telefono. Dalla mia
+    /// casella poi lo cancella. Restituisce dove l'ha salvato.
+    pub async fn download(&mut self, message_id: &str) -> Result<PathBuf> {
+        let a = self
+            .attachment_of(message_id)
+            .ok_or_else(|| Error::NotFound("messaggio sconosciuto o senza file".into()))?;
         if let Some(p) = &a.path
             && Path::new(p).exists()
         {
             return Ok(PathBuf::from(p));
         }
-        let Some(at) = a.at else {
+        let Some(at) = a.at.clone() else {
             return Err(Error::NotFound("il file non è più disponibile".into()));
         };
-        self.require_node()?;
-        if node_host(&at.node)? != node_host(&self.state.node)? {
-            return Err(Error::Invalid(
-                "il file è su un nodo che non è il mio".into(),
-            ));
-        }
-        let path = format!("/v1/inboxes/{}/files/{}", self.state.inbox, at.file);
-        let sealed = self
-            .net
-            .owner_file(&self.identity, &self.state.node, &path)
-            .await?;
+        let (sealed, mine) = match (&at.shared, &at.file) {
+            (Some(shared), _) => (self.net.get_shared(&at.node, shared).await?, None),
+            (None, Some(file)) => {
+                self.require_node()?;
+                if node_host(&at.node)? != node_host(&self.state.node)? {
+                    return Err(Error::Invalid(
+                        "il file è su un nodo che non è il mio".into(),
+                    ));
+                }
+                let path = format!("/v1/inboxes/{}/files/{file}", self.state.inbox);
+                let bytes = self
+                    .net
+                    .owner_file(&self.identity, &self.state.node, &path)
+                    .await?;
+                (bytes, Some(path))
+            }
+            (None, None) => return Err(Error::Invalid("file senza indirizzo".into())),
+        };
         let plain = rondine_core::file::open(&sealed, &a.key, &a.hash)?;
         let saved = self.store_file(message_id, &a.name, &plain)?;
-        if let Some(att) = self
-            .state
-            .messages
-            .iter_mut()
-            .find(|m| m.id == message_id)
-            .and_then(|m| m.attachment.as_mut())
-        {
+        if let Some(att) = self.attachment_mut(message_id) {
             att.path = Some(saved.to_string_lossy().into_owned());
             att.at = None;
             att.key.clear();
         }
         self.save()?;
-        // È sul telefono: dal nodo si può togliere. Se non riesce, scade da solo.
-        let _ = self
-            .net
-            .owner::<()>(
-                &self.identity,
-                Method::DELETE,
-                &self.state.node,
-                &path,
-                None,
-            )
-            .await;
+        // Era nella mia casella ed è sul telefono: dal nodo si toglie. Se non riesce, scade.
+        if let Some(path) = mine {
+            let _ = self
+                .net
+                .owner::<()>(
+                    &self.identity,
+                    Method::DELETE,
+                    &self.state.node,
+                    &path,
+                    None,
+                )
+                .await;
+        }
         Ok(saved)
     }
 
@@ -1630,40 +1714,47 @@ impl Client {
         Ok(path)
     }
 
-    /// Un `file` ricevuto in una chat 1:1: se il file è dentro il messaggio si salva subito,
+    /// L'allegato di un `file` ricevuto: se il file è dentro il messaggio si salva subito,
     /// altrimenti lo scarica `sync`.
-    fn received_file(&mut self, sender: PublicKey, f: FileMsg) -> Result<Vec<Event>> {
-        if self.state.messages.iter().any(|m| m.id == f.id) {
-            return Ok(Vec::new());
-        }
+    pub(crate) fn received_attachment(&mut self, f: &FileMsg) -> Result<Attachment> {
         if f.size > rondine_core::file::MAX_FILE_BYTES {
             return Err(Error::Invalid("file troppo grande".into()));
         }
         let name = rondine_core::file::safe_name(&f.name);
         let mut attachment = Attachment {
             name: name.clone(),
-            mime: f.mime,
+            mime: f.mime.clone(),
             size: f.size,
             path: None,
             thumb: f
                 .thumb
-                .and_then(|t| b64::decode(&t).ok())
+                .as_deref()
+                .and_then(|t| b64::decode(t).ok())
                 .filter(|t| t.len() <= rondine_core::file::MAX_THUMB_BYTES),
             width: f.width,
             height: f.height,
-            key: f.key,
-            hash: f.hash,
-            at: f.at,
+            key: f.key.clone(),
+            hash: f.hash.clone(),
+            at: f.at.clone(),
         };
-        if let Some(data) = f.data {
+        if let Some(data) = &f.data {
             let plain =
-                rondine_core::file::open(&b64::decode(&data)?, &attachment.key, &attachment.hash)?;
+                rondine_core::file::open(&b64::decode(data)?, &attachment.key, &attachment.hash)?;
             let path = self.store_file(&f.id, &name, &plain)?;
             attachment.path = Some(path.to_string_lossy().into_owned());
             attachment.key.clear();
         } else if attachment.at.is_none() {
             return Err(Error::Invalid("file senza contenuto".into()));
         }
+        Ok(attachment)
+    }
+
+    /// Un `file` ricevuto in una chat 1:1.
+    fn received_file(&mut self, sender: PublicKey, f: FileMsg) -> Result<Vec<Event>> {
+        if self.state.messages.iter().any(|m| m.id == f.id) {
+            return Ok(Vec::new());
+        }
+        let attachment = self.received_attachment(&f)?;
         let m = ChatMessage {
             id: f.id,
             contact: sender,
@@ -1769,18 +1860,27 @@ impl Client {
         update: Option<(f64, f64, Option<f32>)>,
     ) -> Result<bool> {
         let t = now();
-        let m = self
+        // La posizione può essere in una chat 1:1 o in un gruppo.
+        let (loc, to, group) = if let Some(m) = self
             .state
             .messages
             .iter()
             .find(|m| m.id == message_id && m.outgoing)
-            .ok_or_else(|| Error::NotFound("posizione sconosciuta".into()))?;
-        let loc = m
-            .location
-            .clone()
+        {
+            (m.location.clone(), Some(m.contact), None)
+        } else if let Some(m) = self
+            .state
+            .group_messages
+            .iter()
+            .find(|m| m.id == message_id && m.outgoing)
+        {
+            (m.location.clone(), None, Some(m.group.clone()))
+        } else {
+            return Err(Error::NotFound("posizione sconosciuta".into()));
+        };
+        let loc = loc
             .filter(|l| l.is_live(t))
             .ok_or_else(|| Error::Invalid("la posizione non è più in tempo reale".into()))?;
-        let to = m.contact;
         // Troppo presto dopo l'ultimo aggiornamento: si salta, il prossimo porterà quella nuova.
         if update.is_some() && t < loc.updated_at + self.location_gap {
             return Ok(false);
@@ -1803,6 +1903,13 @@ impl Client {
         if !msg.valid() {
             return Err(Error::Invalid("posizione non valida".into()));
         }
+        let fresh = Location {
+            lat,
+            lon,
+            acc,
+            live_until,
+            updated_at: t,
+        };
         if let Some(l) = self
             .state
             .messages
@@ -1810,24 +1917,29 @@ impl Client {
             .find(|m| m.id == message_id)
             .and_then(|m| m.location.as_mut())
         {
-            *l = Location {
-                lat,
-                lon,
-                acc,
-                live_until,
-                updated_at: t,
-            };
+            *l = fresh.clone();
+        }
+        if let Some(l) = self
+            .state
+            .group_messages
+            .iter_mut()
+            .find(|m| m.id == message_id)
+            .and_then(|m| m.location.as_mut())
+        {
+            *l = fresh;
         }
         self.save()?;
-        let contact = self.chat_contact(&to).await?;
         // L'ultima posizione (o la fine) deve arrivare: silenziosa ma non effimera.
-        self.send_app_with(
-            &contact,
-            &AppMessage::LocationUpdate(msg),
-            Kind::Quiet,
-            None,
-        )
-        .await?;
+        let app = AppMessage::LocationUpdate(msg);
+        match (to, group) {
+            (Some(to), _) => {
+                let contact = self.chat_contact(&to).await?;
+                self.send_app_with(&contact, &app, Kind::Quiet, None)
+                    .await?;
+            }
+            (None, Some(gid)) => self.group_send(&gid, &app, Kind::Quiet).await?,
+            (None, None) => {}
+        }
         Ok(true)
     }
 
@@ -2164,10 +2276,20 @@ impl Client {
                 )));
             }
         }
-        Ok(Synced {
-            events,
-            groups: std::mem::take(&mut self.batch.groups),
-        })
+        // Anche i file dei gruppi si scaricano subito, dai file condivisi di chi li ha mandati.
+        let mut groups = std::mem::take(&mut self.batch.groups);
+        for e in groups.iter_mut() {
+            if let GroupEvent::Message(m) = e
+                && m.attachment.as_ref().is_some_and(|a| a.at.is_some())
+                && let Ok(p) = self.download(&m.id).await
+                && let Some(a) = m.attachment.as_mut()
+            {
+                a.path = Some(p.to_string_lossy().into_owned());
+                a.at = None;
+                a.key.clear();
+            }
+        }
+        Ok(Synced { events, groups })
     }
 
     /// Elabora una busta una volta sola: i doppioni (da altre vie) si scartano in silenzio.

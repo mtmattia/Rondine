@@ -174,6 +174,12 @@ pub struct GroupMessage {
     pub body: String,
     pub ts: u64,
     pub read: bool,
+    /// Foto o documento (SPEC §7.5); `body` è la didascalia.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<Attachment>,
+    /// Posizione (SPEC §7.6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<Location>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

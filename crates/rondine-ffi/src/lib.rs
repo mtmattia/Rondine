@@ -177,6 +177,8 @@ pub struct GroupMessageInfo {
     pub body: String,
     pub ts: u64,
     pub read: bool,
+    pub attachment: Option<AttachmentInfo>,
+    pub location: Option<LocationInfo>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -241,6 +243,8 @@ fn group_message(c: &Client, m: &GroupMessage) -> GroupMessageInfo {
         body: m.body.clone(),
         ts: m.ts,
         read: m.read,
+        attachment: m.attachment.as_ref().map(attachment_info),
+        location: m.location.as_ref().map(location_info),
     }
 }
 
@@ -298,6 +302,28 @@ fn contact_info(c: &Contact) -> ContactInfo {
             Source::Messaggio => "messaggio",
         }
         .into(),
+    }
+}
+
+fn attachment_info(a: &rondine_client::Attachment) -> AttachmentInfo {
+    AttachmentInfo {
+        name: a.name.clone(),
+        mime: a.mime.clone(),
+        size: a.size,
+        path: a.path.clone(),
+        thumb: a.thumb.clone(),
+        width: a.width,
+        height: a.height,
+    }
+}
+
+fn location_info(l: &rondine_client::Location) -> LocationInfo {
+    LocationInfo {
+        lat: l.lat,
+        lon: l.lon,
+        acc: l.acc,
+        live_until: l.live_until,
+        updated_at: l.updated_at,
     }
 }
 
@@ -431,7 +457,7 @@ fn view_of(c: &Client) -> View {
             .push(message(m));
     }
     let t = rondine_core::now();
-    let live = s
+    let mut live: Vec<LiveShare> = s
         .messages
         .iter()
         .filter(|m| m.outgoing && m.location.as_ref().is_some_and(|l| l.is_live(t)))
@@ -441,6 +467,17 @@ fn view_of(c: &Client) -> View {
             until: m.location.as_ref().and_then(|l| l.live_until).unwrap_or(t),
         })
         .collect();
+    // Anche nei gruppi: `contact_id` è l'id del gruppo.
+    live.extend(
+        s.group_messages
+            .iter()
+            .filter(|m| m.outgoing && m.location.as_ref().is_some_and(|l| l.is_live(t)))
+            .map(|m| LiveShare {
+                message_id: m.id.clone(),
+                contact_id: m.group.clone(),
+                until: m.location.as_ref().and_then(|l| l.live_until).unwrap_or(t),
+            }),
+    );
     let mut group_messages: std::collections::HashMap<String, Vec<GroupMessageInfo>> =
         Default::default();
     for m in &s.group_messages {
@@ -764,6 +801,55 @@ impl Rondine {
         .await
     }
 
+    /// Foto, documento o vocale nel gruppo (SPEC §7.5).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_group_file(
+        &self,
+        id: String,
+        name: String,
+        mime: String,
+        data: Vec<u8>,
+        caption: Option<String>,
+        thumb: Option<Vec<u8>>,
+        width: Option<u32>,
+        height: Option<u32>,
+    ) -> Result<GroupMessageInfo> {
+        let file = NewFile {
+            name,
+            mime,
+            data,
+            caption,
+            thumb,
+            width,
+            height,
+        };
+        self.run(move |c| {
+            Box::pin(async move {
+                let m = c.send_group_file(&id, file).await?;
+                Ok(group_message(c, &m))
+            })
+        })
+        .await
+    }
+
+    /// Posizione nel gruppo; con `live_for` (secondi) in tempo reale.
+    pub async fn send_group_location(
+        &self,
+        id: String,
+        lat: f64,
+        lon: f64,
+        acc: Option<f32>,
+        live_for: Option<u64>,
+    ) -> Result<GroupMessageInfo> {
+        self.run(move |c| {
+            Box::pin(async move {
+                let m = c.send_group_location(&id, lat, lon, acc, live_for).await?;
+                Ok(group_message(c, &m))
+            })
+        })
+        .await
+    }
+
     pub async fn mark_group_read(&self, id: String) -> Result<()> {
         Ok(self.with(|c| c.mark_group_read(&id)).await?)
     }
@@ -820,7 +906,10 @@ impl Rondine {
                     body: m.body,
                     ts: m.ts,
                     read: m.read,
+                    attachment: m.attachment.as_ref().map(attachment_info),
+                    location: m.location.as_ref().map(location_info),
                 }),
+                GroupEvent::LocationUpdate { .. } => out.locations_changed = true,
                 GroupEvent::Joined { .. }
                 | GroupEvent::MembersChanged { .. }
                 | GroupEvent::Removed { .. } => out.groups_changed = true,

@@ -133,6 +133,23 @@ enum GruppoCmd {
     },
     /// Mostra la conversazione del gruppo.
     Leggi { gruppo: String },
+    /// Manda una foto o un documento al gruppo.
+    Manda {
+        gruppo: String,
+        file: PathBuf,
+        #[arg(long)]
+        didascalia: Option<String>,
+    },
+    /// Manda una posizione al gruppo; con --minuti in tempo reale (al massimo 480).
+    Posizione {
+        gruppo: String,
+        #[arg(allow_hyphen_values = true)]
+        lat: f64,
+        #[arg(allow_hyphen_values = true)]
+        lon: f64,
+        #[arg(long)]
+        minuti: Option<u64>,
+    },
     /// Mostra i membri.
     Membri { gruppo: String },
     /// Aggiunge contatti (solo l'amministratore).
@@ -235,7 +252,21 @@ fn numbers(list: Vec<String>, file: Option<PathBuf>) -> anyhow::Result<Vec<Strin
 
 /// Testo di un messaggio, con l'eventuale file: dove sta, o come scaricarlo.
 fn text(m: &ChatMessage) -> String {
-    if let Some(l) = &m.location {
+    parts(&m.id, &m.body, m.attachment.as_ref(), m.location.as_ref())
+}
+
+fn group_text(m: &rondine_client::GroupMessage) -> String {
+    parts(&m.id, &m.body, m.attachment.as_ref(), m.location.as_ref())
+}
+
+/// Testo, file o posizione di un messaggio (1:1 o di gruppo).
+fn parts(
+    id: &str,
+    body: &str,
+    attachment: Option<&rondine_client::Attachment>,
+    location: Option<&rondine_client::Location>,
+) -> String {
+    if let Some(l) = location {
         let live = match l.live_until {
             Some(u) if u > rondine_core::now() => format!(
                 " · in tempo reale ancora {} min",
@@ -244,23 +275,23 @@ fn text(m: &ChatMessage) -> String {
             Some(_) => " · condivisione finita".into(),
             None => String::new(),
         };
-        return format!("[posizione {:.5},{:.5}{live} · id {}]", l.lat, l.lon, m.id);
+        return format!("[posizione {:.5},{:.5}{live} · id {id}]", l.lat, l.lon);
     }
-    let Some(a) = &m.attachment else {
-        return m.body.clone();
+    let Some(a) = attachment else {
+        return body.to_string();
     };
     let kb = a.size.div_ceil(1024);
     let file = match &a.path {
         Some(p) => format!("[file {} · {kb} KiB · {p}]", a.name),
         None => format!(
             "[file {} · {kb} KiB · da scaricare: rondine scarica {}]",
-            a.name, m.id
+            a.name, id
         ),
     };
-    if m.body.is_empty() {
+    if body.is_empty() {
         file
     } else {
-        format!("{} {file}", m.body)
+        format!("{body} {file}")
     }
 }
 
@@ -343,7 +374,13 @@ fn print_group_events(events: &[GroupEvent], client: &Client) {
             GroupEvent::Message(m) => {
                 let g = group(&m.group);
                 let name = g.map(|g| g.name.as_str()).unwrap_or("?");
-                println!("[{name}] {}: {}", who(client, g, &m.sender), m.body);
+                println!("[{name}] {}: {}", who(client, g, &m.sender), group_text(m));
+            }
+            GroupEvent::LocationUpdate { group: gid, id } => {
+                if let Some(m) = client.group_messages(gid).into_iter().find(|m| &m.id == id) {
+                    let name = group(gid).map(|g| g.name.as_str()).unwrap_or("?");
+                    println!("~ [{name}] posizione aggiornata: {}", group_text(m));
+                }
             }
             GroupEvent::MembersChanged { group: id } => {
                 if let Some(g) = group(id) {
@@ -439,10 +476,33 @@ async fn group_cmd(c: &mut Client, cmd: GruppoCmd) -> anyhow::Result<()> {
                 println!("Inviato, ma non consegnato a: {}", names.join(", "));
             }
         }
+        GruppoCmd::Manda {
+            gruppo,
+            file,
+            didascalia,
+        } => {
+            let id = c.find_group(&gruppo)?.id.clone();
+            let mut f = NewFile::from_path(&file)?;
+            f.caption = didascalia;
+            let m = c.send_group_file(&id, f).await?;
+            println!("Inviato: {}", group_text(&m));
+        }
+        GruppoCmd::Posizione {
+            gruppo,
+            lat,
+            lon,
+            minuti,
+        } => {
+            let id = c.find_group(&gruppo)?.id.clone();
+            let m = c
+                .send_group_location(&id, lat, lon, None, minuti.map(|m| m * 60))
+                .await?;
+            println!("Inviata: {}", group_text(&m));
+        }
         GruppoCmd::Leggi { gruppo } => {
             let g = c.find_group(&gruppo)?.clone();
             for m in c.group_messages(&g.id) {
-                println!("{}: {}", who(c, Some(&g), &m.sender), m.body);
+                println!("{}: {}", who(c, Some(&g), &m.sender), group_text(m));
             }
             c.mark_group_read(&g.id)?;
         }

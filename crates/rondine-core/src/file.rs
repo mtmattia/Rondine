@@ -13,11 +13,15 @@ pub const MAX_INLINE_BYTES: usize = 64 * 1024;
 /// Dimensione massima dell'anteprima JPEG.
 pub const MAX_THUMB_BYTES: usize = 16 * 1024;
 
-/// Dove sta il file cifrato quando non è dentro il messaggio: nella casella di chi riceve.
+/// Dove sta il file cifrato quando non è dentro il messaggio: nella casella di chi riceve
+/// (`file`, chat 1:1) o tra i file condivisi del nodo di chi manda (`shared`, gruppi).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct FileAt {
     pub node: String,
-    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared: Option<String>,
 }
 
 /// File cifrato, pronto da spedire, con ciò che serve per decifrarlo.

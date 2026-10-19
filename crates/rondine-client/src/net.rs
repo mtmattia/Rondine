@@ -162,6 +162,30 @@ impl Net {
         self.send(req).await
     }
 
+    /// Carica un file cifrato tra i file condivisi del mio nodo (SPEC §6.2, gruppi).
+    pub async fn owner_upload(
+        &self,
+        id: &Identity,
+        base: &str,
+        path: &str,
+        data: Vec<u8>,
+    ) -> Result<Vec<u8>> {
+        let header = auth::header(id, "POST", path, now(), &data);
+        let req = self
+            .files
+            .post(Self::url(base, path))
+            .header("authorization", header)
+            .header("content-type", "application/octet-stream")
+            .body(data);
+        self.send(req).await
+    }
+
+    /// Scarica un file condiviso: basta l'id (SPEC §6.2).
+    pub async fn get_shared(&self, base: &str, id: &str) -> Result<Vec<u8>> {
+        let req = self.files.get(Self::url(base, &format!("/v1/shared/{id}")));
+        self.send(req).await
+    }
+
     /// Richiesta firmata dal proprietario (intestazione `Authorization: Rondine …`).
     pub async fn owner<B: Serialize>(
         &self,

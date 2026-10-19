@@ -168,6 +168,18 @@ Foto e documenti cifrati (§7.5) si caricano nella casella di chi riceve, separa
 
 Il nodo vede solo la dimensione del file cifrato.
 
+**File condivisi (gruppi).** Nei gruppi lo stesso messaggio arriva a tutti, quindi il file cifrato
+si carica una volta sola **sul nodo di chi lo manda**:
+
+- `POST /v1/inboxes/{inbox}/shared` (proprietario), corpo: il file cifrato → `{id}`; `id` sono
+  16 byte casuali in b64 e fanno da chiave d'accesso: li conosce solo chi riceve il messaggio MLS.
+- `GET /v1/shared/{id}` (nessuna autenticazione) → i byte.
+- Stessi limiti dei file nella casella (64 MiB + 16 byte, 512 MiB per casella, 30 giorni). Non si
+  cancellano dopo il primo download: servono a tutti i membri.
+
+Il nodo di chi manda vede, oltre alla dimensione, quante volte e da quali indirizzi IP il file
+viene scaricato.
+
 ## 7. Messaggi applicativi (dentro MLS)
 
 Ciphersuite: `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`. Credenziale `Basic`, con
@@ -268,6 +280,8 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
 ```
 
 - `size` è la dimensione del file in chiaro; al massimo **64 MiB**.
+- Nei gruppi `at` è `{"node": "<nodo di chi manda>", "shared": "<id>"}` (file condiviso, §6.2)
+  invece di `{"node", "file"}`.
 - Il file cifrato sta in `at` (caricato nella casella di chi riceve, §6.2) **oppure** in `data`
   (dentro il messaggio, solo se è al massimo 64 KiB). Si usa `data` per i file piccoli e verso chi
   non ha un nodo; un file più grande verso chi non ha un nodo non si può mandare (per ora).
@@ -294,6 +308,8 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
 - Chi riceve un `location_update` aggiorna il messaggio `location` con quell'`id` solo se viene
   dallo stesso contatto, se `ts` non è più vecchio dell'ultimo e se il messaggio è ancora in tempo
   reale; `live_until` può solo diminuire.
+- Nei gruppi valgono le stesse regole: `location` e `location_update` arrivano a tutti i membri
+  (§7.4), gli aggiornamenti come depositi silenziosi.
 - **Mappa su due livelli.** Il punto esatto non va mai a un servizio di mappe. L'app scarica
   solo le 4 tessere (zoom 15) del quadrato fisso di zoom 14 che contiene il punto (circa 2,4 km
   di lato all'equatore, 1,7 km a 45° di latitudine): il server delle mappe vede quale quadrato,
@@ -388,6 +404,8 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `POST /v1/inboxes/{inbox}/files` | permesso (intestazione) | corpo: file cifrato → `{id}` (§6.2) |
 | `GET /v1/inboxes/{inbox}/files/{id}` | proprietario | i byte del file cifrato |
 | `DELETE /v1/inboxes/{inbox}/files/{id}` | proprietario | cancella il file |
+| `POST /v1/inboxes/{inbox}/shared` | proprietario | corpo: file cifrato → `{id}` (§6.2, gruppi) |
+| `GET /v1/shared/{id}` | — | i byte del file condiviso |
 | `POST /v1/inboxes/{inbox}/keypackages` | proprietario | `{items: [b64]}` |
 | `POST /v1/inboxes/{inbox}/keypackages/claim` | permesso | `{permit}` → `{keypackage}`; l'ultimo resta e si riusa |
 | `POST /v1/wake` | permesso | `{permit}` |

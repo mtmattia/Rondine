@@ -174,3 +174,9 @@ Una riga per modifica: data, cosa è cambiato.
   era stato tolto e veniva riaggiunto non rientrava (`GroupAlreadyExists`): il gruppo MLS non più
   attivo ora lascia il posto all'invito nuovo, uno attivo mai. 2 test; provato sull'emulatore con
   due membri dalla CLI.
+- 2026-10-19 — Foto, documenti, vocali e posizione nei gruppi (SPEC §6.2, §7.5, §7.6): i file grandi
+  si caricano una volta sola tra i file condivisi del nodo di chi manda (`POST
+  /v1/inboxes/{inbox}/shared`, `GET /v1/shared/{id}`, l'id fa da chiave d'accesso), quelli piccoli
+  stanno nel messaggio; la posizione in tempo reale si aggiorna per tutti i membri con depositi
+  silenziosi. Client, CLI (`rondine gruppo manda`, `rondine gruppo posizione`) e ponte. 1 test con
+  membri su nodi diversi.

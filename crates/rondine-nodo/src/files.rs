@@ -55,6 +55,49 @@ pub async fn upload(
     Ok((StatusCode::CREATED, Json(Deposited { id })))
 }
 
+/// `POST /v1/inboxes/{inbox}/shared`: il proprietario carica un file cifrato da far scaricare a
+/// tutti i membri di un gruppo (SPEC §6.2); l'id casuale fa da chiave d'accesso.
+pub async fn upload_shared(
+    State(s): State<AppState>,
+    Path(inbox): Path<String>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<(StatusCode, Json<Deposited>)> {
+    s.owner_of(&inbox, &headers, &method, &uri, &body)?;
+    if body.is_empty() || body.len() > MAX_SEALED_BYTES {
+        return Err(ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_large",
+            "file troppo grande (massimo 64 MiB)",
+        ));
+    }
+    let id = random_id();
+    let db = s.db()?;
+    if db.shared_bytes(&inbox)? + body.len() as u64 > MAX_INBOX_FILE_BYTES {
+        return Err(ApiError::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "inbox_full",
+            "non c'è più spazio per i file condivisi",
+        ));
+    }
+    db.put_shared(&id, &inbox, &body, now())?;
+    Ok((StatusCode::CREATED, Json(Deposited { id })))
+}
+
+/// `GET /v1/shared/{id}`: chiunque abbia l'id scarica il file (cifrato).
+pub async fn fetch_shared(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    let data = s
+        .db()?
+        .shared(&id)?
+        .ok_or_else(|| ApiError::not_found("file sconosciuto o scaduto"))?;
+    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], data))
+}
+
 /// `GET /v1/inboxes/{inbox}/files/{id}`: il proprietario ritira il file.
 pub async fn fetch(
     State(s): State<AppState>,

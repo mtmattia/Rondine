@@ -139,6 +139,11 @@ pub fn router(state: AppState) -> Router {
             post(files::upload).layer(DefaultBodyLimit::max(files::MAX_SEALED_BYTES)),
         )
         .route(
+            "/v1/inboxes/{inbox}/shared",
+            post(files::upload_shared).layer(DefaultBodyLimit::max(files::MAX_SEALED_BYTES)),
+        )
+        .route("/v1/shared/{id}", get(files::fetch_shared))
+        .route(
             "/v1/inboxes/{inbox}/files/{id}",
             get(files::fetch).delete(files::delete),
         )

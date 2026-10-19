@@ -197,7 +197,7 @@ mod tests {
         let AppMessage::File(ref m) = f else {
             return Err(crate::Error::Invalid("non è un file"));
         };
-        assert_eq!(m.at.as_ref().map(|a| a.file.as_str()), Some("f"));
+        assert_eq!(m.at.as_ref().and_then(|a| a.file.as_deref()), Some("f"));
         assert!(serde_json::to_string(&f)?.starts_with(r#"{"type":"file","v":1,"#));
         let u: AppMessage = serde_json::from_str(
             r#"{"type":"location_update","v":1,"id":"x","ts":5,"lat":45.5,"lon":9.2,"live_until":60}"#,

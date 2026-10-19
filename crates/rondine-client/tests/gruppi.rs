@@ -1,6 +1,6 @@
 //! Test di accettazione dei gruppi (SPEC §7.4): nodi veri in-process e più client.
 
-use rondine_client::{Client, Error, Event, GroupEvent, Synced};
+use rondine_client::{Client, Error, Event, GroupEvent, NewFile, Synced};
 use rondine_core::Identity;
 use rondine_nodo::{AppState, Config, Store};
 use tempfile::TempDir;
@@ -262,5 +262,88 @@ async fn tolto_e_riaggiunto_rientra() -> R {
     assert_eq!(group_texts(&mut bruno).await?, ["bentornato"]);
     bruno.send_group_text(&g.id, "grazie").await?;
     assert_eq!(group_texts(&mut anna).await?, ["grazie"]);
+    Ok(())
+}
+
+fn fake_file(len: usize) -> Vec<u8> {
+    (0..len).map(|i| (i * 31 % 251) as u8).collect()
+}
+
+/// Messaggi di gruppo con file o posizione arrivati in una sincronizzazione.
+async fn group_messages(
+    c: &mut Client,
+) -> Result<Vec<rondine_client::GroupMessage>, Box<dyn std::error::Error>> {
+    Ok(sync_ok(c)
+        .await?
+        .groups
+        .into_iter()
+        .filter_map(|e| match e {
+            GroupEvent::Message(m) => Some(m),
+            _ => None,
+        })
+        .collect())
+}
+
+/// Foto (grande, condivisa dal nodo di chi manda), documento piccolo (dentro il messaggio) e
+/// posizione in tempo reale in un gruppo con membri su nodi diversi (SPEC §6.2, §7.5, §7.6).
+#[tokio::test]
+async fn file_e_posizione_nel_gruppo() -> R {
+    let (n1, n2) = (start_node().await?, start_node().await?);
+    let tmp = TempDir::new()?;
+    let mut anna = profile(&tmp, "Anna", &n1).await?;
+    let mut bruno = profile(&tmp, "Bruno", &n2).await?;
+    let mut carla = profile(&tmp, "Carla", &n2).await?;
+    connect(&mut anna, &mut bruno).await?;
+    connect(&mut anna, &mut carla).await?;
+    let g = anna
+        .create_group("Gita", &[bruno.identity(), carla.identity()])
+        .await?;
+    sync_ok(&mut bruno).await?;
+    sync_ok(&mut carla).await?;
+
+    // Foto da 300 KiB: una sola copia, sul nodo di Anna; la scaricano tutti.
+    let foto = fake_file(300 * 1024);
+    let mut f = NewFile::new("lago.jpg", "image/jpeg", foto.clone());
+    f.caption = Some("che posto".into());
+    let sent = anna.send_group_file(&g.id, f).await?;
+    assert_eq!(sent.body, "che posto");
+    for c in [&mut bruno, &mut carla] {
+        let m = group_messages(c).await?.pop().ok_or("niente foto")?;
+        assert_eq!(m.body, "che posto");
+        let a = m.attachment.ok_or("niente allegato")?;
+        assert_eq!(std::fs::read(a.path.ok_or("non scaricata")?)?, foto);
+    }
+
+    // Documento piccolo: dentro il messaggio, anche Bruno lo manda.
+    let doc = fake_file(2000);
+    bruno
+        .send_group_file(
+            &g.id,
+            NewFile::new("orari.pdf", "application/pdf", doc.clone()),
+        )
+        .await?;
+    let m = group_messages(&mut anna)
+        .await?
+        .pop()
+        .ok_or("niente documento")?;
+    let a = m.attachment.ok_or("niente allegato")?;
+    assert_eq!(std::fs::read(a.path.ok_or("non salvato")?)?, doc);
+    group_messages(&mut carla).await?;
+
+    // Posizione in tempo reale: l'aggiornamento sposta lo stesso messaggio per tutti.
+    anna.set_location_interval(0);
+    let live = anna
+        .send_group_location(&g.id, 45.0, 9.0, None, Some(600))
+        .await?;
+    group_messages(&mut bruno).await?;
+    anna.update_location(&live.id, 45.1, 9.2, None).await?;
+    sync_ok(&mut bruno).await?;
+    let loc = bruno
+        .group_messages(&g.id)
+        .into_iter()
+        .find(|m| m.id == live.id)
+        .and_then(|m| m.location.clone())
+        .ok_or("posizione sparita")?;
+    assert_eq!((loc.lat, loc.lon), (45.1, 9.2));
     Ok(())
 }

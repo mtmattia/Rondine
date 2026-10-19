@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS files (
     received_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS files_inbox ON files (inbox);
+CREATE TABLE IF NOT EXISTS shared_files (
+    id TEXT PRIMARY KEY,
+    inbox TEXT NOT NULL,
+    data BLOB NOT NULL,
+    received_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS shared_inbox ON shared_files (inbox);
 CREATE TABLE IF NOT EXISTS phone_pending (
     inbox TEXT PRIMARY KEY,
     phone_hash TEXT NOT NULL,
@@ -493,6 +500,34 @@ impl Store {
             .map(to_u64)
     }
 
+    // --- file condivisi (SPEC §6.2, gruppi) ---
+
+    pub fn put_shared(&self, id: &str, inbox: &str, data: &[u8], now: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO shared_files (id, inbox, data, received_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, inbox, data, to_i64(now)],
+        )?;
+        Ok(())
+    }
+
+    pub fn shared(&self, id: &str) -> Result<Option<Vec<u8>>> {
+        self.conn
+            .query_row("SELECT data FROM shared_files WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()
+    }
+
+    pub fn shared_bytes(&self, inbox: &str) -> Result<u64> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM shared_files WHERE inbox = ?1",
+                [inbox],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(to_u64)
+    }
+
     // --- pulizia ---
 
     pub fn purge(&self, now: u64, message_ttl: u64) -> Result<()> {
@@ -506,6 +541,10 @@ impl Store {
         )?;
         self.conn.execute(
             "DELETE FROM files WHERE received_at < ?1",
+            [to_i64(now.saturating_sub(message_ttl))],
+        )?;
+        self.conn.execute(
+            "DELETE FROM shared_files WHERE received_at < ?1",
             [to_i64(now.saturating_sub(message_ttl))],
         )?;
         self.conn

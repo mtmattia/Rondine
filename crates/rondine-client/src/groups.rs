@@ -11,6 +11,7 @@ const MAX_GROUP_NAME: usize = 64;
 
 /// Cosa è successo in un gruppo durante una sincronizzazione.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)] // eventi di breve vita: non vale la pena di un Box
 pub enum GroupEvent {
     Joined {
         group: String,
@@ -25,6 +26,11 @@ pub enum GroupEvent {
     /// Sono stato tolto dal gruppo.
     Removed {
         group: String,
+    },
+    /// Si è spostata (o ha smesso) una posizione in tempo reale nel gruppo (SPEC §7.6).
+    LocationUpdate {
+        group: String,
+        id: String,
     },
 }
 
@@ -251,9 +257,22 @@ impl Client {
     /// Consegna la stessa busta a più membri, con le vie di SPEC §12.4 (nodo, diretto, coda e
     /// mesh); restituisce chi non l'ha ricevuta né l'ha in coda.
     async fn fanout(&mut self, to: &[GroupMember], envelope: &Envelope) -> Vec<PublicKey> {
+        self.fanout_kind(to, envelope, crate::Kind::Normal).await
+    }
+
+    async fn fanout_kind(
+        &mut self,
+        to: &[GroupMember],
+        envelope: &Envelope,
+        kind: crate::Kind,
+    ) -> Vec<PublicKey> {
         let mut failed = Vec::new();
         for m in to {
-            if self.deposit(&m.card, envelope).await.is_err() {
+            if self
+                .deposit_with(&m.card, envelope, kind, None)
+                .await
+                .is_err()
+            {
                 failed.push(m.identity);
             }
         }
@@ -463,6 +482,8 @@ impl Client {
             body: body.to_string(),
             ts: now(),
             read: true,
+            attachment: None,
+            location: None,
         };
         let envelope = self.group_encrypt(
             &gid_bytes(gid)?,
@@ -485,6 +506,104 @@ impl Client {
             message,
             undelivered,
         })
+    }
+
+    /// Cifra un messaggio nel gruppo e lo consegna a tutti i membri.
+    pub(crate) async fn group_send(
+        &mut self,
+        gid: &str,
+        app: &AppMessage,
+        kind: crate::Kind,
+    ) -> Result<()> {
+        let g = self.state.group_chats[self.group_index(gid)?].clone();
+        if !g.active {
+            return Err(Error::Invalid("non fai più parte del gruppo".into()));
+        }
+        let envelope = self.group_encrypt(&gid_bytes(gid)?, app)?;
+        let failed = self.fanout_kind(&g.members, &envelope, kind).await;
+        if !g.members.is_empty() && failed.len() == g.members.len() {
+            return Err(Error::Invalid(
+                "impossibile consegnare il messaggio a qualcuno".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Foto, documento o vocale nel gruppo (SPEC §7.5): se è grande, una sola copia cifrata tra
+    /// i file condivisi del mio nodo, che ogni membro scarica da lì.
+    pub async fn send_group_file(
+        &mut self,
+        gid: &str,
+        file: crate::NewFile,
+    ) -> Result<GroupMessage> {
+        let i = self.group_index(gid)?;
+        if !self.state.group_chats[i].active {
+            return Err(Error::Invalid("non fai più parte del gruppo".into()));
+        }
+        let (f, attachment) = self.seal_file(&file, crate::FileDest::Shared).await?;
+        let message = GroupMessage {
+            id: f.id.clone(),
+            group: gid.to_string(),
+            sender: self.identity.public(),
+            outgoing: true,
+            body: f.caption.clone().unwrap_or_default(),
+            ts: f.ts,
+            read: true,
+            attachment: Some(attachment),
+            location: None,
+        };
+        self.group_send(gid, &AppMessage::File(Box::new(f)), crate::Kind::Normal)
+            .await?;
+        self.state.group_messages.push(message.clone());
+        self.save()?;
+        Ok(message)
+    }
+
+    /// Posizione nel gruppo, fissa o in tempo reale (SPEC §7.6); si aggiorna con
+    /// [`Client::update_location`] come nelle chat 1:1.
+    pub async fn send_group_location(
+        &mut self,
+        gid: &str,
+        lat: f64,
+        lon: f64,
+        acc: Option<f32>,
+        live_for: Option<u64>,
+    ) -> Result<GroupMessage> {
+        let ts = now();
+        let loc = rondine_core::envelope::LocationMsg {
+            v: 1,
+            id: random_id(),
+            ts,
+            lat,
+            lon,
+            acc,
+            live_until: live_for.map(|s| ts.saturating_add(s)),
+        };
+        if !loc.valid() || live_for == Some(0) {
+            return Err(Error::Invalid("posizione o durata non valida".into()));
+        }
+        let message = GroupMessage {
+            id: loc.id.clone(),
+            group: gid.to_string(),
+            sender: self.identity.public(),
+            outgoing: true,
+            body: String::new(),
+            ts,
+            read: true,
+            attachment: None,
+            location: Some(crate::Location {
+                lat,
+                lon,
+                acc,
+                live_until: loc.live_until,
+                updated_at: ts,
+            }),
+        };
+        self.group_send(gid, &AppMessage::Location(loc), crate::Kind::Normal)
+            .await?;
+        self.state.group_messages.push(message.clone());
+        self.save()?;
+        Ok(message)
     }
 
     // ---------- ricezione ----------
@@ -617,9 +736,90 @@ impl Client {
                     body,
                     ts,
                     read: false,
+                    attachment: None,
+                    location: None,
                 };
                 self.state.group_messages.push(m.clone());
                 self.batch.groups.push(GroupEvent::Message(m));
+            }
+            AppMessage::File(f) => {
+                if self.state.group_messages.iter().any(|m| m.id == f.id) {
+                    return Ok(());
+                }
+                let attachment = self.received_attachment(&f)?;
+                let m = GroupMessage {
+                    id: f.id,
+                    group: gid.to_string(),
+                    sender,
+                    outgoing: false,
+                    body: f.caption.unwrap_or_default(),
+                    ts: f.ts,
+                    read: false,
+                    attachment: Some(attachment),
+                    location: None,
+                };
+                self.state.group_messages.push(m.clone());
+                self.batch.groups.push(GroupEvent::Message(m));
+            }
+            AppMessage::Location(l) => {
+                if !l.valid() {
+                    return Err(Error::Invalid("posizione non valida".into()));
+                }
+                if self.state.group_messages.iter().any(|m| m.id == l.id) {
+                    return Ok(());
+                }
+                let m = GroupMessage {
+                    id: l.id,
+                    group: gid.to_string(),
+                    sender,
+                    outgoing: false,
+                    body: String::new(),
+                    ts: l.ts,
+                    read: false,
+                    attachment: None,
+                    location: Some(crate::Location {
+                        lat: l.lat,
+                        lon: l.lon,
+                        acc: l.acc,
+                        live_until: l.live_until,
+                        updated_at: l.ts,
+                    }),
+                };
+                self.state.group_messages.push(m.clone());
+                self.batch.groups.push(GroupEvent::Message(m));
+            }
+            AppMessage::LocationUpdate(l) => {
+                // Stesse regole della chat 1:1 (SPEC §7.6): stesso mittente, non più vecchia,
+                // condivisione non finita, la fine può solo anticipare.
+                if !l.valid() {
+                    return Err(Error::Invalid("posizione non valida".into()));
+                }
+                let Some(loc) = self
+                    .state
+                    .group_messages
+                    .iter_mut()
+                    .find(|m| m.id == l.id && m.group == gid && m.sender == sender && !m.outgoing)
+                    .and_then(|m| m.location.as_mut())
+                else {
+                    return Ok(());
+                };
+                let Some(until) = loc.live_until else {
+                    return Ok(());
+                };
+                if l.ts < loc.updated_at || l.ts > until {
+                    return Ok(());
+                }
+                *loc = crate::Location {
+                    lat: l.lat,
+                    lon: l.lon,
+                    acc: l.acc,
+                    live_until: Some(l.live_until.map_or(until, |u| u.min(until))),
+                    updated_at: l.ts,
+                };
+                self.batch.groups.push(GroupEvent::LocationUpdate {
+                    group: gid.to_string(),
+                    id: l.id,
+                });
             }
             AppMessage::Hello { card, .. } => {
                 if verify_card(&card)?.identity != sender {

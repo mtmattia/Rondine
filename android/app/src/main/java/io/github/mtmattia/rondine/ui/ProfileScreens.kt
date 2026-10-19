@@ -1,5 +1,6 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -277,6 +278,85 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
     }
 
     var photoMenu by remember { mutableStateOf(false) }
+    // Backup (SPEC §7.8): prima il file, salvato dove vuole la persona, poi il codice da annotare.
+    var backupAsk by remember { mutableStateOf(false) }
+    var pendingBackup by remember { mutableStateOf<uniffi.rondine_ffi.BackupFile?>(null) }
+    var showCode by remember { mutableStateOf<String?>(null) }
+    var lastBackup by remember { mutableStateOf(Repo.lastBackup) }
+    val saveBackup = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        val b = pendingBackup
+        pendingBackup = null
+        if (uri == null || b == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(b.data) }
+                        ?: throw java.io.IOException("file non scrivibile")
+                }
+                Repo.lastBackup = System.currentTimeMillis()
+                lastBackup = Repo.lastBackup
+                showCode = b.code
+            } catch (e: java.io.IOException) {
+                snackbar.showSnackbar("Backup non salvato: ${e.message}")
+            }
+        }
+    }
+    if (backupAsk) {
+        AlertDialog(
+            onDismissRequest = { backupAsk = false },
+            title = { Text("Backup") },
+            text = {
+                Text(
+                    "Una copia cifrata di identità, contatti, chat e gruppi, da salvare dove vuoi (per " +
+                        "esempio Drive o una chiavetta). Si apre solo con un codice di 30 cifre che ti " +
+                        "mostro alla fine. Foto e documenti delle chat non sono inclusi.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    backupAsk = false
+                    scope.launch {
+                        try {
+                            val b = Repo.client().exportBackup()
+                            pendingBackup = b
+                            val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.ROOT).format(java.util.Date())
+                            saveBackup.launch("rondine-backup-$day.rondine")
+                        } catch (e: RondineException) {
+                            snackbar.showSnackbar(e.userMessage)
+                        }
+                    }
+                }) { Text("Crea backup") }
+            },
+            dismissButton = { TextButton(onClick = { backupAsk = false }) { Text("Annulla") } },
+        )
+    }
+    showCode?.let { code ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Annota il codice") },
+            text = {
+                Column {
+                    Text(
+                        "Senza questo codice il backup non si apre, e non si può recuperare. Scrivilo su " +
+                            "carta o nel tuo gestore di password.",
+                        fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        code, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                    TextButton(onClick = {
+                        context.getSystemService(android.content.ClipboardManager::class.java)
+                            ?.setPrimaryClip(android.content.ClipData.newPlainText("Codice backup Rondine", code))
+                    }) { Text("Copia") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showCode = null }) { Text("L'ho annotato") } },
+        )
+    }
     val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -369,6 +449,13 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 },
             ) { dialog = if (p.phone != null && p.hasNode) SettingsDialog.PhoneMenu else SettingsDialog.Phone }
             SettingRow(Icons.Filled.QrCode2, "Link d'invito e QR", "Condividi o reimposta", onMyQr)
+            SettingRow(
+                Icons.Filled.Backup,
+                "Backup",
+                if (lastBackup == 0L) "Mai fatto: salva una copia cifrata di chat e contatti"
+                else "Ultimo: " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                    .format(java.util.Date(lastBackup)),
+            ) { backupAsk = true }
             SettingRow(Icons.Filled.Notifications, "Notifiche", "$push · tocca per scegliere il distributore UnifiedPush", onPickPush)
             SettingRow(
                 Icons.Filled.Dns,

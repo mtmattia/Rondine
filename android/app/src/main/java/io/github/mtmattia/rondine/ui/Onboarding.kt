@@ -82,6 +82,40 @@ fun Onboarding() {
     }
     var busy by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var backupBytes by remember { mutableStateOf<ByteArray?>(null) }
+    val openBackup = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            backupBytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            }
+        }
+    }
+    backupBytes?.let { bytes ->
+        TextDialog(
+            title = "Ripristina da un backup",
+            label = "Codice di 30 cifre",
+            placeholder = "12345 67890 …",
+            note = "È il codice che Rondine ti ha mostrato quando hai fatto il backup.",
+            onDismiss = { backupBytes = null },
+        ) { code ->
+            backupBytes = null
+            busy = true
+            error = null
+            scope.launch {
+                try {
+                    Repo.restore(bytes, code)
+                } catch (e: RondineException) {
+                    error = e.userMessage
+                } finally {
+                    busy = false
+                }
+            }
+        }
+    }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -103,6 +137,11 @@ fun Onboarding() {
                 )
                 Spacer(Modifier.height(24.dp))
                 Button(onClick = { started = true }, Modifier.fillMaxWidth()) { Text("Inizia") }
+                TextButton(onClick = { openBackup.launch(arrayOf("*/*")) }, enabled = !busy) {
+                    Text("Ripristina da un backup")
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
+                if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             } else {
                 Text("Come vuoi farti chiamare?", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(

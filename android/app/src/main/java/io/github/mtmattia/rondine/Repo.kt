@@ -109,6 +109,21 @@ object Repo {
         ready.value = true
     }
 
+    /** Profilo da un backup (SPEC §7.8): chat e gruppi si ricollegano alla prima sincronizzazione. */
+    suspend fun restore(backup: ByteArray, code: String) {
+        val r = uniffi.rondine_ffi.restoreProfile(profileDir, backup, code)
+        rondine = r
+        loaded.complete(Unit)
+        startLan()
+        refresh()
+        ready.value = true
+    }
+
+    /** Quando è stato fatto l'ultimo backup (millisecondi), 0 se mai. */
+    var lastBackup: Long
+        get() = prefs().getLong("ultimo_backup", 0)
+        set(v) { prefs().edit().putLong("ultimo_backup", v).apply() }
+
     /** Profilo senza nodo (SPEC §12.7): solo vie dirette e mesh. */
     suspend fun createLocal(name: String) {
         val r = createLocalProfile(profileDir, name)

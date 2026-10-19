@@ -225,3 +225,7 @@ Una riga per modifica: data, cosa è cambiato.
   profilo, non lo stato MLS. Al ripristino: key package nuovi al posto dei vecchi (`replace`),
   chat 1:1 riaperte con `hello` `reset`, richiesta `rejoin` agli amministratori dei gruppi, che
   tolgono e riaggiungono. CLI `rondine backup` / `rondine ripristina`, ponte UniFFI. 2 test.
+- 2026-10-19 — App: Impostazioni → Backup (file salvato col selettore di sistema, poi il codice
+  da annotare, con "Copia" e la data dell'ultimo backup) e "Ripristina da un backup" al primo
+  avvio. Provato sull'emulatore: backup in Download, dati dell'app cancellati, ripristino con il
+  codice; chat, gruppi e storico tornano, e con Bruno i messaggi ripartono nei due sensi.

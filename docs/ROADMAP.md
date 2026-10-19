@@ -34,7 +34,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Contatto, sondaggio, evento | ⬜ | voci del pannello allegati di WhatsApp non ancora fatte |
 | Conferme di lettura, "sta scrivendo" | ✅ | spunte ✓ / ✓✓ / ✓✓ verdi (SPEC §7.2), "sta scrivendo" effimero senza sveglia (§7.3) |
 | Più dispositivi per persona | ⬜ | ogni dispositivo membro MLS |
-| Backup e ripristino | 🟡 | SPEC §7.8: file cifrato con codice di 30 cifre; chat 1:1 riaperte da sole, gruppi riaggiunti dall'amministratore; client, CLI; senza foto e documenti delle chat |
+| Backup e ripristino | ✅ | SPEC §7.8: file cifrato con codice di 30 cifre (Impostazioni → Backup, salvato dove vuoi), ripristino al primo avvio; chat 1:1 riaperte da sole, gruppi riaggiunti dall'amministratore; senza foto e documenti delle chat |
 | Collegamento diretto P2P | 🟡 | se il nodo non risponde: rete locale (mDNS) e indirizzi da "sono collegato" (IPv6); niente NAT traversal IPv4 |
 | Mesh tra utenti | ✅ | i contatti fanno da postini, fino a 4 passaggi, invisibile (SPEC §12.5) |
 | Rete locale senza internet | ✅ | mDNS + consegna diretta, profili anche senza nodo (SPEC §12) |

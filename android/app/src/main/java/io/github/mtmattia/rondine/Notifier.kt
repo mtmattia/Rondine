@@ -12,6 +12,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import uniffi.rondine_ffi.ChatRow
+import uniffi.rondine_ffi.GroupMessageInfo
+import uniffi.rondine_ffi.GroupRow
 import uniffi.rondine_ffi.Message
 
 object Notifier {
@@ -66,6 +68,61 @@ object Notifier {
                 } catch (_: SecurityException) {
                 }
             }
+    }
+
+    /** Una notifica per gruppo: "Calcetto" con "Luca: ci sei?". */
+    fun showGroups(
+        context: Context,
+        messages: List<GroupMessageInfo>,
+        groups: List<GroupRow>,
+        openGroup: String?,
+        foreground: Boolean,
+    ) {
+        if (foreground && openGroup == null) return
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) return
+        val nm = NotificationManagerCompat.from(context)
+        messages.filter { !it.outgoing && it.groupId != openGroup }.groupBy { it.groupId }
+            .forEach { (groupId, msgs) ->
+                val name = groups.firstOrNull { it.group.id == groupId }?.group?.name ?: "Gruppo"
+                // Il nome del mittente lo sa la lista aggiornata, non sempre l'evento.
+                val fresh = groups.firstOrNull { it.group.id == groupId }
+                val lines = msgs.map { m ->
+                    val who = m.senderName.ifEmpty {
+                        fresh?.group?.members?.firstOrNull { it.id == m.senderId }?.name ?: "?"
+                    }
+                    "$who: ${m.body}"
+                }
+                val intent = Intent(context, MainActivity::class.java)
+                    .putExtra(MainActivity.EXTRA_GROUP, groupId)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                val pi = PendingIntent.getActivity(
+                    context, groupId.hashCode(), intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+                val style = NotificationCompat.InboxStyle()
+                lines.takeLast(5).forEach { style.addLine(it) }
+                val n = NotificationCompat.Builder(context, CHANNEL)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setColor(NOTIFICATION_COLOR)
+                    .setContentTitle(name)
+                    .setContentText(lines.last())
+                    .setStyle(style)
+                    .setNumber(msgs.size)
+                    .setAutoCancel(true)
+                    .setContentIntent(pi)
+                    .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                    .build()
+                try {
+                    nm.notify(groupId.hashCode(), n)
+                } catch (_: SecurityException) {
+                }
+            }
+    }
+
+    fun cancelGroup(context: Context, groupId: String) {
+        NotificationManagerCompat.from(context).cancel(groupId.hashCode())
     }
 
     fun cancel(context: Context, contactId: String) {

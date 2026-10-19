@@ -30,6 +30,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import io.github.mtmattia.rondine.ui.ChatScreen
+import io.github.mtmattia.rondine.ui.GroupChatScreen
+import io.github.mtmattia.rondine.ui.GroupInfoScreen
+import io.github.mtmattia.rondine.ui.NewGroupScreen
 import io.github.mtmattia.rondine.ui.HomeScreen
 import io.github.mtmattia.rondine.ui.MyQrScreen
 import io.github.mtmattia.rondine.ui.NewChatScreen
@@ -46,6 +49,7 @@ import uniffi.rondine_ffi.RondineException
 class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_CHAT = "chat"
+        const val EXTRA_GROUP = "gruppo"
         /** Intervallo di sincronizzazione con l'app aperta. */
         const val FOREGROUND_SYNC_MS = 4_000L
     }
@@ -105,7 +109,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        intent?.getStringExtra(EXTRA_CHAT)?.let { openChatRequest.value = it }
+        intent?.getStringExtra(EXTRA_CHAT)?.let { openChatRequest.value = "chat/$it" }
+        intent?.getStringExtra(EXTRA_GROUP)?.let { openChatRequest.value = "gruppo/$it" }
         val data = intent?.dataString
         // rondine:invito/… (link d'invito) o rondine:@nome@nodo (link al nome, dai QR).
         if (data != null && data.startsWith("rondine:")) Repo.pendingInvite.value = data
@@ -152,7 +157,7 @@ class MainActivity : ComponentActivity() {
 
         LaunchedEffect(chatRequest) {
             chatRequest?.let {
-                nav.navigate("chat/$it") { launchSingleTop = true }
+                nav.navigate(it) { launchSingleTop = true }
                 openChatRequest.value = null
             }
         }
@@ -161,6 +166,7 @@ class MainActivity : ComponentActivity() {
             composable("home") {
                 HomeScreen(
                     onOpenChat = { nav.navigate("chat/$it") },
+                    onOpenGroup = { nav.navigate("gruppo/$it") },
                     onNewChat = { nav.navigate("nuova") },
                     onSettings = { nav.navigate("impostazioni") },
                     onMyQr = { nav.navigate("qr") },
@@ -176,7 +182,22 @@ class MainActivity : ComponentActivity() {
                     onBack = { nav.popBackStack() },
                     onOpenChat = { id -> nav.navigate("chat/$id") { popUpTo("home") } },
                     onMyQr = { nav.navigate("qr") },
+                    onNewGroup = { nav.navigate("nuovo-gruppo") },
                 )
+            }
+            composable("nuovo-gruppo") {
+                NewGroupScreen(
+                    onBack = { nav.popBackStack() },
+                    onCreated = { id -> nav.navigate("gruppo/$id") { popUpTo("home") } },
+                )
+            }
+            composable("gruppo/{id}") { entry ->
+                val id = entry.arguments?.getString("id") ?: return@composable
+                GroupChatScreen(id, onBack = { nav.popBackStack() }, onInfo = { nav.navigate("gruppo/$id/info") })
+            }
+            composable("gruppo/{id}/info") { entry ->
+                val id = entry.arguments?.getString("id") ?: return@composable
+                GroupInfoScreen(id, onBack = { nav.popBackStack() }, onOpenChat = { nav.navigate("chat/$it") })
             }
             composable("qr") { MyQrScreen(onBack = { nav.popBackStack() }) }
             composable("impostazioni") {

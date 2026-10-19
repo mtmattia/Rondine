@@ -328,11 +328,25 @@ impl Device {
         let MlsMessageBodyIn::Welcome(welcome) = msg.extract() else {
             return Err(Error::Mls("non è un Welcome".into()));
         };
-        let group =
-            StagedWelcome::new_from_welcome(&self.provider, &Self::join_config(), welcome, None)
-                .map_err(mls)?
-                .into_group(&self.provider)
+        let builder =
+            StagedWelcome::build_from_welcome(&self.provider, &Self::join_config(), welcome)
                 .map_err(mls)?;
+        let gid = builder
+            .processed_welcome()
+            .unverified_group_info()
+            .group_id()
+            .clone();
+        // Riaggiunto a un gruppo da cui ero stato tolto: il vecchio stato, non più attivo, lascia
+        // il posto a quello nuovo. Un gruppo ancora attivo invece non si sostituisce mai.
+        let builder = match MlsGroup::load(self.provider.storage(), &gid).map_err(mls)? {
+            Some(old) if !old.is_active() => builder.replace_old_group(),
+            _ => builder,
+        };
+        let group = builder
+            .build()
+            .map_err(mls)?
+            .into_group(&self.provider)
+            .map_err(mls)?;
         let members = group
             .members()
             .map(|m| member_identity(&m))

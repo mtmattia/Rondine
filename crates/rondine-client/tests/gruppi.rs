@@ -236,3 +236,31 @@ async fn al_massimo_cento_membri() -> R {
     assert!(err.to_string().contains("100"), "{err}");
     Ok(())
 }
+
+/// Chi viene tolto e poi riaggiunto rientra: il vecchio gruppo MLS, ancora sul suo telefono, non
+/// deve bloccare l'invito nuovo (era "GroupAlreadyExists").
+#[tokio::test]
+async fn tolto_e_riaggiunto_rientra() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut anna = profile(&tmp, "Anna", &node).await?;
+    let mut bruno = profile(&tmp, "Bruno", &node).await?;
+    connect(&mut anna, &mut bruno).await?;
+    let g = anna.create_group("Calcetto", &[bruno.identity()]).await?;
+    sync_ok(&mut bruno).await?;
+    anna.remove_group_member(&g.id, &bruno.identity()).await?;
+    sync_ok(&mut bruno).await?;
+    assert!(!bruno.find_group("Calcetto")?.active);
+
+    anna.add_group_members(&g.id, &[bruno.identity()]).await?;
+    sync_ok(&mut bruno).await?;
+    assert!(
+        bruno.find_group("Calcetto")?.active,
+        "Bruno non è rientrato"
+    );
+    anna.send_group_text(&g.id, "bentornato").await?;
+    assert_eq!(group_texts(&mut bruno).await?, ["bentornato"]);
+    bruno.send_group_text(&g.id, "grazie").await?;
+    assert_eq!(group_texts(&mut anna).await?, ["grazie"]);
+    Ok(())
+}

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material3.AlertDialog
@@ -72,7 +73,7 @@ private enum class AddDialog { Username, Invite, Phone }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -> Unit) {
+fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -> Unit, onNewGroup: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -143,6 +144,9 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
         },
     ) { padding ->
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+            item {
+                ActionRow(Icons.Filled.Groups, "Nuovo gruppo", "Fino a 100 persone, cifrato end-to-end", onNewGroup)
+            }
             item {
                 ActionRow(Icons.Filled.QrCodeScanner, "Scansiona codice QR", "Inquadra il codice di chi vuoi aggiungere") {
                     scanner.launch(

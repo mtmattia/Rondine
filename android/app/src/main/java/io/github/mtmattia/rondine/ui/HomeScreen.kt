@@ -81,6 +81,7 @@ import io.github.mtmattia.rondine.PushState
 import io.github.mtmattia.rondine.Repo
 import kotlinx.coroutines.launch
 import uniffi.rondine_ffi.ChatRow
+import uniffi.rondine_ffi.GroupRow
 
 private data class Tab(val label: String, val selected: ImageVector, val unselected: ImageVector)
 
@@ -97,6 +98,7 @@ private enum class Filter(val label: String) { Tutte("Tutte"), NonLette("Non let
 @Composable
 fun HomeScreen(
     onOpenChat: (String) -> Unit,
+    onOpenGroup: (String) -> Unit,
     onNewChat: () -> Unit,
     onSettings: () -> Unit,
     onMyQr: () -> Unit,
@@ -105,7 +107,8 @@ fun HomeScreen(
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     val chats by Repo.chats.collectAsState()
-    val unreadChats = chats.count { it.unread > 0u }
+    val groups by Repo.groups.collectAsState()
+    val unreadChats = chats.count { it.unread > 0u } + groups.count { it.unread > 0u }
 
     Scaffold(
         topBar = {
@@ -171,7 +174,7 @@ fun HomeScreen(
     ) { padding ->
         val m = Modifier.padding(padding)
         when (tab) {
-            0 -> ChatList(chats, onOpenChat, onNewChat, onPickPush, m)
+            0 -> ChatList(chats, groups, onOpenChat, onOpenGroup, onNewChat, onPickPush, m)
             1 -> ComingSoon(
                 Icons.Outlined.Update, "Aggiornamenti in arrivo",
                 "Qui arriveranno gli stati dei tuoi contatti, cifrati come i messaggi.", m,
@@ -189,7 +192,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun CountBadge(n: Int, modifier: Modifier = Modifier) {
+internal fun CountBadge(n: Int, modifier: Modifier = Modifier) {
     Box(
         modifier
             .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
@@ -209,7 +212,9 @@ private fun CountBadge(n: Int, modifier: Modifier = Modifier) {
 @Composable
 private fun ChatList(
     chats: List<ChatRow>,
+    groups: List<GroupRow>,
     onOpenChat: (String) -> Unit,
+    onOpenGroup: (String) -> Unit,
     onNewChat: () -> Unit,
     onPickPush: () -> Unit,
     modifier: Modifier,
@@ -233,6 +238,21 @@ private fun ChatList(
             }
     }
 
+    val q = query.trim().lowercase()
+    val shownGroups = groups.filter { row ->
+        (q.isEmpty() || row.group.name.lowercase().contains(q) ||
+            row.last?.body?.lowercase()?.contains(q) == true) &&
+            when (filter) {
+                Filter.Tutte -> true
+                Filter.NonLette -> row.unread > 0u
+                Filter.Preferiti -> false
+            }
+    }
+    // Chat e gruppi insieme, dal più recente.
+    val entries: List<Pair<Long, Any>> =
+        (shown.map { it.lastTs.toLong() to (it as Any) } + shownGroups.map { it.lastTs.toLong() to (it as Any) })
+            .sortedByDescending { it.first }
+
     LazyColumn(modifier.fillMaxSize()) {
         if (hasNode && !pushHidden && push in setOf(PushState.NoDistributor, PushState.NotChosen, PushState.Failed)) {
             item {
@@ -249,7 +269,7 @@ private fun ChatList(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(Filter.entries) { f ->
-                    val unread = chats.count { it.unread > 0u }
+                    val unread = chats.count { it.unread > 0u } + groups.count { it.unread > 0u }
                     FilterChip(
                         selected = filter == f,
                         onClick = { filter = f },
@@ -265,7 +285,7 @@ private fun ChatList(
                 }
             }
         }
-        if (chats.isEmpty()) {
+        if (chats.isEmpty() && groups.isEmpty()) {
             item {
                 Column(
                     Modifier.fillMaxWidth().padding(32.dp),
@@ -281,7 +301,7 @@ private fun ChatList(
                     TextButton(onClick = onNewChat) { Text("Inizia una chat") }
                 }
             }
-        } else if (shown.isEmpty()) {
+        } else if (entries.isEmpty()) {
             item {
                 Text(
                     "Nessuna chat corrisponde.",
@@ -290,7 +310,9 @@ private fun ChatList(
                 )
             }
         }
-        items(shown, key = { it.contact.id }) { row -> ChatListItem(row, onOpenChat) }
+        items(entries, key = { (_, e) -> if (e is GroupRow) "g-${e.group.id}" else "c-${(e as ChatRow).contact.id}" }) { (_, e) ->
+            if (e is GroupRow) GroupListItem(e, onOpenGroup) else ChatListItem(e as ChatRow, onOpenChat)
+        }
         item { Spacer(Modifier.height(88.dp)) }
     }
 }

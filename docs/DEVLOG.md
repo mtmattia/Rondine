@@ -168,3 +168,9 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-18 — Pubblicata v0.1.1 (pre-release, versionCode 2). L'APK foss compilato da GitHub
   Actions è identico byte per byte a quello compilato sul PC (sha256 `10a62ec0…`): la build è
   riproducibile tra computer diversi, come serve a F-Droid.
+- 2026-10-19 — Gruppi nell'app: nella lista chat insieme alle 1:1, "Nuovo gruppo" con scelta dei
+  contatti, chat con il nome colorato di chi scrive, info gruppo (membri, amministratore, aggiungi,
+  togli, esci), notifiche "Gruppo · Nome: testo". Al massimo 100 membri (SPEC §7.4). Corretto: chi
+  era stato tolto e veniva riaggiunto non rientrava (`GroupAlreadyExists`): il gruppo MLS non più
+  attivo ora lascia il posto all'invito nuovo, uno attivo mai. 2 test; provato sull'emulatore con
+  due membri dalla CLI.

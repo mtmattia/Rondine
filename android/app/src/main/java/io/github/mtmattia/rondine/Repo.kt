@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import uniffi.rondine_ffi.ChatRow
+import uniffi.rondine_ffi.GroupRow
 import uniffi.rondine_ffi.Profile
 import uniffi.rondine_ffi.Rondine
 import uniffi.rondine_ffi.RondineException
@@ -55,6 +56,7 @@ object Repo {
     val ready = MutableStateFlow<Boolean?>(null)
     val profile = MutableStateFlow<Profile?>(null)
     val chats = MutableStateFlow<List<ChatRow>>(emptyList())
+    val groups = MutableStateFlow<List<GroupRow>>(emptyList())
     /** Cresce a ogni cambiamento: le schermate lo osservano per ricaricare. */
     val revision = MutableStateFlow(0L)
     val pushStatus = MutableStateFlow("Non configurate")
@@ -65,6 +67,8 @@ object Repo {
     val notice = MutableStateFlow<String?>(null)
     /** Chat aperta sullo schermo: niente notifiche per quella. */
     @Volatile var openChat: String? = null
+    /** Gruppo aperto sullo schermo: niente notifiche per quello. */
+    @Volatile var openGroup: String? = null
 
     val isDebug: Boolean
         get() = app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
@@ -143,6 +147,7 @@ object Repo {
         val r = rondine ?: return
         profile.value = r.profile()
         chats.value = r.chats()
+        groups.value = r.groups()
         revision.value = revision.value + 1
     }
 
@@ -160,7 +165,8 @@ object Repo {
             val res = r.sync()
             // Anche finché qualcuno "sta scrivendo": lo stato scade da solo e va ridisegnato.
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty() || res.receipts > 0u ||
-                res.typingChanged || res.locationsChanged || chats.value.any { it.typing }
+                res.typingChanged || res.locationsChanged || chats.value.any { it.typing } ||
+                res.groupMessages.isNotEmpty() || res.groupsChanged
             ) {
                 refresh()
             }
@@ -168,6 +174,11 @@ object Repo {
                 val foreground = ProcessLifecycleOwner.get().lifecycle.currentState
                     .isAtLeast(Lifecycle.State.STARTED)
                 Notifier.show(app, res.messages, chats.value, if (foreground) openChat else null, foreground)
+            }
+            if (res.groupMessages.isNotEmpty()) {
+                val foreground = ProcessLifecycleOwner.get().lifecycle.currentState
+                    .isAtLeast(Lifecycle.State.STARTED)
+                Notifier.showGroups(app, res.groupMessages, groups.value, if (foreground) openGroup else null, foreground)
             }
             Result.success(Unit)
         } catch (e: RondineException) {

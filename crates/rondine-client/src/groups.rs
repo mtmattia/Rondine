@@ -514,8 +514,14 @@ impl Client {
             return Err(Error::Invalid("invito da un contatto bloccato".into()));
         }
         let id = b64::encode(gid);
-        if self.state.group_chats.iter().any(|g| g.id == id) {
-            return Err(Error::Invalid("gruppo già presente".into()));
+        // Riaggiunto dopo essere stato tolto: il gruppo vecchio (non attivo) lascia il posto al
+        // nuovo, i messaggi restano. Uno attivo non si sostituisce.
+        let mut created_at = now();
+        if let Some(i) = self.state.group_chats.iter().position(|g| g.id == id) {
+            if self.state.group_chats[i].active {
+                return Err(Error::Invalid("gruppo già presente".into()));
+            }
+            created_at = self.state.group_chats.remove(i).created_at;
         }
         let mut g = GroupChat {
             id: id.clone(),
@@ -524,7 +530,7 @@ impl Client {
             members: Vec::new(),
             active: true,
             my_permit: None,
-            created_at: now(),
+            created_at,
         };
         for card in cards {
             merge_card(&mut g, card, members, &me, false);

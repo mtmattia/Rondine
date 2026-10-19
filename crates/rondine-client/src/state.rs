@@ -238,6 +238,22 @@ pub struct State {
     /// `foto/<chiave>.jpg` nella cartella del profilo.
     #[serde(default)]
     pub photos: Vec<PhotoEntry>,
+    /// Segreti già calcolati dei numeri della rubrica (SPEC §9, §13.1): l'Argon2 non si rifà.
+    #[serde(default)]
+    pub discovery_cache: Vec<DiscoverySecret>,
+}
+
+/// Segreti di un numero della rubrica: hash per i numeri verificati e, se avevo un numero, luogo
+/// e chiave della coppia (b64), con l'ultima pubblicazione del mio biglietto lì.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DiscoverySecret {
+    pub number: String,
+    pub mine: Option<String>,
+    pub loc: Option<String>,
+    pub key: Option<String>,
+    pub phone_hash: String,
+    #[serde(default)]
+    pub published_at: u64,
 }
 
 /// La foto più recente ricevuta da qualcuno (`has` falso: l'ha tolta).

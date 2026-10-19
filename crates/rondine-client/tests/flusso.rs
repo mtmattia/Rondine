@@ -1524,3 +1524,57 @@ async fn sveglia_fcm_sul_nido_che_fa_da_ripetitore() -> R {
     assert_eq!(tokens, [serde_json::json!("token-di-mattia")]);
     Ok(())
 }
+
+/// Rubrica (SPEC §9, §13.3): una sola ricerca trova sia chi mi ha in rubrica a sua volta sia chi
+/// ha verificato il numero, dice a quale numero corrisponde ciascuno, e la seconda volta è
+/// immediata (segreti già calcolati).
+#[tokio::test]
+async fn rubrica_coppie_e_numeri_verificati_in_una_ricerca() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let mut luca = profile(&tmp, "Luca", &node).await?;
+    mattia.set_phone("3401112233")?;
+    silvia.set_phone("3402223344")?;
+
+    // Silvia ha Mattia in rubrica e la pubblica (coppia).
+    silvia.scan_address_book(&["340 111 2233".into()]).await?;
+    // Luca ha verificato il suo numero (Mattia lo trova anche se Luca non ha lui in rubrica).
+    luca.request_phone("3403334455").await?;
+    luca.confirm_phone(&sms_code(&state, "+393403334455")?)
+        .await?;
+
+    // La rubrica di Mattia: Silvia, Luca e qualcuno che non usa Rondine.
+    let rubrica: Vec<String> = vec![
+        "+39 340 222 3344".into(),
+        "340-333-4455".into(),
+        "3409998877".into(),
+    ];
+    let t0 = std::time::Instant::now();
+    let found = mattia.scan_address_book(&rubrica).await?;
+    let first = t0.elapsed();
+    let by_input = |input: &str| {
+        found
+            .iter()
+            .find(|m| m.input == input)
+            .map(|m| m.contact.display_name.clone())
+    };
+    assert_eq!(by_input("+39 340 222 3344").as_deref(), Some("Silvia"));
+    assert_eq!(by_input("340-333-4455").as_deref(), Some("Luca"));
+    assert_eq!(by_input("3409998877"), None);
+    assert_eq!(found.len(), 2);
+
+    // Di nuovo: niente Argon2 da rifare, molto più veloce.
+    let t1 = std::time::Instant::now();
+    let again = mattia.scan_address_book(&rubrica).await?;
+    assert_eq!(again.len(), 2);
+    assert!(t1.elapsed() < first, "{:?} contro {first:?}", t1.elapsed());
+
+    // Senza il mio numero si trovano comunque i numeri verificati.
+    let mut anna = profile(&tmp, "Anna", &node).await?;
+    let found = anna.scan_address_book(&["3403334455".into()]).await?;
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].contact.display_name, "Luca");
+    Ok(())
+}

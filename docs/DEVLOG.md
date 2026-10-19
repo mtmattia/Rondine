@@ -194,3 +194,9 @@ Una riga per modifica: data, cosa è cambiato.
   gruppi. Provato sull'emulatore nei due sensi con la CLI. Messaggi di un tipo sconosciuto (da
   versioni più nuove) ora si ignorano invece di dare errore (SPEC §7), così i tipi nuovi non
   disturbano chi non ha aggiornato.
+- 2026-10-19 — Rubrica più veloce e più completa: una sola ricerca (`scan_address_book`) unisce la
+  scoperta a coppie (SPEC §9) e i numeri verificati (§13.3), dice a quale numero della rubrica
+  corrisponde ciascuno, e funziona anche senza il proprio numero (solo verificati). Segreti Argon2
+  calcolati in parallelo fuori dal thread della rete e tenuti nello stato; richieste a lotti
+  (`POST /v1/board/batch`, `/v1/board/lookup`, `/v1/phone/lookup`); ripubblicazione solo a metà
+  della durata. I contatti trovati col numero verificato si aggiungono senza mandare niente. 1 test.

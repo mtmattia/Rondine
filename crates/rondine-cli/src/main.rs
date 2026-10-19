@@ -685,12 +685,12 @@ async fn main() -> anyhow::Result<()> {
             println!("Pubblicato per {n} numeri.");
         }
         Cmd::Rubrica(RubricaCmd::Cerca { numeri, file }) => {
-            let found = c.discover(&numbers(numeri, file)?).await?;
+            let found = c.scan_address_book(&numbers(numeri, file)?).await?;
             if found.is_empty() {
                 println!("Nessuno trovato.");
             }
             for f in &found {
-                println!("Trovato: {}", describe(f));
+                println!("Trovato: {} → {}", f.input, describe(&f.contact));
             }
         }
         Cmd::Contatti => {

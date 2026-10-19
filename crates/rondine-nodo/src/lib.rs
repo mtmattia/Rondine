@@ -157,7 +157,10 @@ pub fn router(state: AppState) -> Router {
             "/v1/names/{name}",
             put(put_name).get(get_name).delete(delete_name),
         )
+        .route("/v1/board/batch", post(put_board_batch))
+        .route("/v1/board/lookup", post(lookup_board))
         .route("/v1/board/{loc}", put(put_board).get(get_board))
+        .route("/v1/phone/lookup", post(phone::lookup_batch))
         .route(
             "/v1/inboxes/{inbox}/phone",
             post(phone::request).delete(phone::remove),
@@ -805,7 +808,87 @@ async fn put_board(
     Path(loc_s): Path<String>,
     Json(entry): Json<BoardEntry>,
 ) -> ApiResult<StatusCode> {
-    let loc = parse_loc(&loc_s)?;
+    store_board_entry(&s, &loc_s, entry)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Al massimo tanti elementi per richiesta a lotti (SPEC §9, §13.3).
+pub const MAX_BATCH: usize = 1000;
+
+#[derive(Deserialize)]
+struct BoardBatch {
+    put: Vec<BoardPut>,
+}
+
+#[derive(Deserialize)]
+struct BoardPut {
+    loc: String,
+    entry: BoardEntry,
+}
+
+/// `POST /v1/board/batch`: tante voci in una richiesta; quelle non valide si saltano.
+async fn put_board_batch(
+    State(s): State<AppState>,
+    Json(req): Json<BoardBatch>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if req.put.len() > MAX_BATCH {
+        return Err(ApiError::bad("troppe voci in una richiesta (massimo 1000)"));
+    }
+    let stored = req
+        .put
+        .into_iter()
+        .filter(|p| store_board_entry(&s, &p.loc, p.entry.clone()).is_ok())
+        .count();
+    Ok(Json(json!({ "stored": stored })))
+}
+
+#[derive(Deserialize)]
+struct BoardLookup {
+    locs: Vec<String>,
+}
+
+/// `POST /v1/board/lookup`: le voci di tanti luoghi; solo quelli che ne hanno.
+async fn lookup_board(
+    State(s): State<AppState>,
+    Json(req): Json<BoardLookup>,
+) -> ApiResult<Json<HashMap<String, Vec<BoardEntry>>>> {
+    if req.locs.len() > MAX_BATCH {
+        return Err(ApiError::bad(
+            "troppi luoghi in una richiesta (massimo 1000)",
+        ));
+    }
+    let mut out = HashMap::new();
+    for loc in req.locs {
+        if parse_loc(&loc).is_err() {
+            continue;
+        }
+        let entries = board_entries(&s, &loc)?;
+        if !entries.is_empty() {
+            out.insert(loc, entries);
+        }
+    }
+    Ok(Json(out))
+}
+
+fn board_entries(s: &AppState, loc_s: &str) -> ApiResult<Vec<BoardEntry>> {
+    let entries = s.db()?.board(loc_s, now())?;
+    Ok(entries
+        .into_iter()
+        .filter_map(|e| {
+            Some(BoardEntry {
+                owner: PublicKey::from_b64(&e.owner).ok()?,
+                blob: e.blob,
+                expires_at: e.expires_at,
+                sig: e.sig,
+            })
+        })
+        .collect())
+}
+
+/// Controlla e salva una voce di bacheca (SPEC §9).
+fn store_board_entry(s: &AppState, loc_s: &str, entry: BoardEntry) -> ApiResult<()> {
+    let loc = parse_loc(loc_s)?;
+    let loc_s = loc_s.to_string();
     s.rate_limit(&format!("board:{loc_s}"))?;
     let blob = entry.verify(&loc)?;
     let t = now();
@@ -833,7 +916,7 @@ async fn put_board(
             sig: entry.sig,
         },
     )?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
 async fn get_board(
@@ -842,17 +925,5 @@ async fn get_board(
 ) -> ApiResult<Json<Vec<BoardEntry>>> {
     parse_loc(&loc_s)?;
     s.rate_limit(&format!("board:{loc_s}"))?;
-    let entries = s.db()?.board(&loc_s, now())?;
-    let out = entries
-        .into_iter()
-        .filter_map(|e| {
-            Some(BoardEntry {
-                owner: PublicKey::from_b64(&e.owner).ok()?,
-                blob: e.blob,
-                expires_at: e.expires_at,
-                sig: e.sig,
-            })
-        })
-        .collect();
-    Ok(Json(out))
+    Ok(Json(board_entries(&s, &loc_s)?))
 }

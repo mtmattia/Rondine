@@ -4,6 +4,7 @@ mod error;
 mod groups;
 mod lan;
 mod net;
+mod rubrica;
 mod state;
 
 use std::collections::HashMap;
@@ -11,7 +12,6 @@ use std::path::{Path, PathBuf};
 
 use reqwest::Method;
 use rondine_core::card::{INVITE_PREFIX, invite_link, parse_invite, verify_card};
-use rondine_core::discovery::{self, BoardEntry, DiscoveryRecord};
 use rondine_core::envelope::{
     AppMessage, Envelope, FileMsg, LocationMsg, MAX_PHOTO_BYTES, MIN_LOCATION_UPDATE_SECS,
     ReceiptStatus, is_jpeg,
@@ -26,6 +26,7 @@ use serde_json::json;
 
 pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
+pub use rubrica::AddressBookMatch;
 pub use state::{
     Attachment, ChatMessage, Contact, Delivery, GroupChat, GroupMember, GroupMessage, GroupRef,
     Location, Outgoing, Source, State,
@@ -112,7 +113,7 @@ const KEYPACKAGE_BATCH: usize = 20;
 /// Key package offerti in rete locale a chi avvia una chat (SPEC §12.2).
 const LAN_KEYPACKAGES: usize = 5;
 /// Durata delle voci in bacheca: si ripubblicano prima che scadano.
-const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
+pub(crate) const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 
 /// Dove mettere un file troppo grande per stare nel messaggio (SPEC §7.5).
 pub(crate) enum FileDest<'a> {
@@ -302,6 +303,7 @@ impl Client {
                 push_endpoint: None,
                 my_photo_ts: 0,
                 photos: Vec::new(),
+                discovery_cache: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -354,6 +356,7 @@ impl Client {
                 push_endpoint: None,
                 my_photo_ts: 0,
                 photos: Vec::new(),
+                discovery_cache: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -2947,122 +2950,44 @@ impl Client {
     }
 
     /// Pubblica il mio biglietto, cifrato, per ogni numero della rubrica (SPEC §9).
-    /// Restituisce quante voci sono state pubblicate.
+    /// Restituisce per quanti numeri è pubblicato.
     pub async fn publish_contacts(&mut self, numbers: &[String]) -> Result<usize> {
-        self.require_node()?;
         let mine = self.my_phone()?;
-        let permit = match &self.state.directory_permit {
-            Some(p) => p.clone(),
-            None => {
-                let p = self.new_permit("rubrica").await?;
-                self.state.directory_permit = Some(p.clone());
-                self.save()?;
-                p
-            }
-        };
-        let record = DiscoveryRecord {
-            v: 1,
-            phone: mine.clone(),
-            card: self.card_with(Some(&permit))?,
-        };
-        let expires_at = now() + BOARD_TTL_SECS;
-        let mut published = 0;
-        for other in self.normalize_numbers(numbers, &mine) {
-            let s = discovery::pair_secrets(&mine, &other)?;
-            let owner = discovery::board_owner(&self.identity, &s.loc);
-            let entry = BoardEntry::create(
-                &owner,
-                &s.loc,
-                &discovery::seal(&s.key, &record)?,
-                expires_at,
-            );
-            for board in &self.state.boards {
-                self.net
-                    .call(
-                        Method::PUT,
-                        board,
-                        &format!("/v1/board/{}", s.loc_b64()),
-                        &entry,
-                    )
-                    .await?;
-            }
-            published += 1;
-        }
-        Ok(published)
+        let n = self.normalize_numbers(numbers, &mine).len();
+        self.rubrica(
+            numbers,
+            rubrica::Mode {
+                publish: true,
+                pairs: false,
+                verified: false,
+            },
+        )
+        .await?;
+        Ok(n)
     }
 
     /// Cerca nelle bacheche chi, tra i numeri dati, mi ha a sua volta in rubrica.
     /// I contatti trovati sono aggiunti come non verificati. Avvia la chat solo chi ha la
     /// chiave più bassa, per non creare due gruppi.
     pub async fn discover(&mut self, numbers: &[String]) -> Result<Vec<Contact>> {
-        self.require_node()?;
-        let mine = self.my_phone()?;
-        let me = self.identity.public();
-        let mut found = Vec::new();
-        for other in self.normalize_numbers(numbers, &mine) {
-            let s = discovery::pair_secrets(&mine, &other)?;
-            let mut card = None;
-            for board in self.state.boards.clone() {
-                let Ok(entries) = self
-                    .net
-                    .get::<Vec<BoardEntry>>(&board, &format!("/v1/board/{}", s.loc_b64()))
-                    .await
-                else {
-                    continue;
-                };
-                card = entries.iter().find_map(|e| {
-                    let blob = e.verify(&s.loc).ok()?;
-                    let rec = discovery::open(&s.key, &blob).ok()?;
-                    let info = verify_card(&rec.card).ok()?;
-                    (rec.phone == other && info.identity != me).then_some(rec.card)
-                });
-                if card.is_some() {
-                    break;
-                }
-            }
-            let Some(card) = card else { continue };
-            let info = verify_card(&card)?;
-            let known = self.contact_mut(&info.identity).is_some();
-            if !known {
-                self.state.contacts.push(Contact {
-                    identity: info.identity,
-                    display_name: info.display_name.clone(),
-                    username: info.username.clone(),
-                    phone: Some(other.clone()),
-                    card: card.clone(),
+        self.my_phone()?;
+        let found = self
+            .rubrica(
+                numbers,
+                rubrica::Mode {
+                    publish: false,
+                    pairs: true,
                     verified: false,
-                    blocked: false,
-                    source: Source::Rubrica,
-                    groups: Vec::new(),
-                    my_permit_id: None,
-                    added_at: now(),
-                    favorite: false,
-                    addrs: Vec::new(),
-                    phone_verified_by: None,
-                });
-            } else if let Some(c) = self.contact_mut(&info.identity) {
-                c.phone = Some(other.clone());
-            }
-            let needs_chat = self
-                .state
-                .contacts
-                .iter()
-                .find(|c| c.identity == info.identity)
-                .is_some_and(|c| c.groups.is_empty());
-            if needs_chat && me < info.identity {
-                self.start_chat(&info.identity).await?;
-            }
-            if let Some(c) = self
-                .state
-                .contacts
-                .iter()
-                .find(|c| c.identity == info.identity)
-            {
-                found.push(c.clone());
+                },
+            )
+            .await?;
+        let mut out: Vec<Contact> = Vec::new();
+        for m in found {
+            if !out.iter().any(|c| c.identity == m.contact.identity) {
+                out.push(m.contact);
             }
         }
-        self.save()?;
-        Ok(found)
+        Ok(out)
     }
 }
 

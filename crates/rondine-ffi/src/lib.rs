@@ -70,6 +70,8 @@ pub struct Profile {
     pub has_node: bool,
     /// La mia foto del profilo (percorso), se l'ho messa.
     pub photo: Option<String>,
+    /// Il mio numero è verificato via SMS (SPEC §13).
+    pub phone_verified: bool,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -84,6 +86,8 @@ pub struct ContactInfo {
     pub favorite: bool,
     /// invito, nome, rubrica o messaggio.
     pub source: String,
+    /// Trovato col numero verificato: il nodo che l'ha verificato (SPEC §13).
+    pub phone_verified_by: Option<String>,
     /// Foto del profilo (percorso), se l'ha mandata.
     pub photo: Option<String>,
 }
@@ -145,6 +149,16 @@ impl From<Delivery> for MessageStatus {
             Delivery::Read => MessageStatus::Read,
         }
     }
+}
+
+/// Un numero della rubrica che corrisponde a qualcuno su Rondine.
+#[derive(uniffi::Record, Clone)]
+pub struct AddressBookMatchInfo {
+    /// Il numero com'era scritto nella rubrica.
+    pub input: String,
+    /// Normalizzato (E.164).
+    pub number: String,
+    pub contact: ContactInfo,
 }
 
 /// Un membro di un gruppo (io escluso).
@@ -322,6 +336,7 @@ fn contact_info(c: &Contact) -> ContactInfo {
         }
         .into(),
         photo: None,
+        phone_verified_by: c.phone_verified_by.clone(),
     }
 }
 
@@ -453,6 +468,7 @@ fn view_of(c: &Client) -> View {
             share_link: c.share_link()?,
             has_node: c.has_node(),
             photo: c.my_photo().map(|p| p.to_string_lossy().into_owned()),
+            phone_verified: s.phone_verified,
         })
     })()
     .ok();
@@ -1012,15 +1028,38 @@ impl Rondine {
     }
 
     /// Pubblica e cerca in un colpo solo: è ciò che fa l'app quando legge la rubrica.
-    pub async fn find_in_address_book(&self, numbers: Vec<String>) -> Result<Vec<ContactInfo>> {
+    /// Cerca nella rubrica chi usa Rondine (coppie e numeri verificati, SPEC §9 e §13.3): per
+    /// ogni numero trovato, com'era scritto nella rubrica e il contatto.
+    pub async fn find_in_address_book(
+        &self,
+        numbers: Vec<String>,
+    ) -> Result<Vec<AddressBookMatchInfo>> {
         self.run(move |c| {
             Box::pin(async move {
-                c.publish_contacts(&numbers).await?;
-                let found = c.discover(&numbers).await?;
-                Ok(found.iter().map(contact_info).collect())
+                let found = c.scan_address_book(&numbers).await?;
+                Ok(found
+                    .iter()
+                    .map(|m| AddressBookMatchInfo {
+                        input: m.input.clone(),
+                        number: m.number.clone(),
+                        contact: contact_info_with_photo(c, &m.contact),
+                    })
+                    .collect())
             })
         })
         .await
+    }
+
+    /// Chiede al mio nodo il codice per SMS per verificare il numero (SPEC §13.2).
+    pub async fn request_phone(&self, number: String) -> Result<String> {
+        self.run(move |c| Box::pin(async move { Ok(c.request_phone(&number).await?) }))
+            .await
+    }
+
+    /// Conferma il numero con il codice ricevuto per SMS.
+    pub async fn confirm_phone(&self, code: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.confirm_phone(&code).await?) }))
+            .await
     }
 
     pub async fn block(&self, contact_id: String) -> Result<()> {

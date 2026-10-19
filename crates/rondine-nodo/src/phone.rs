@@ -197,3 +197,30 @@ pub async fn lookup(
         .map(Json)
         .map_err(|_| ApiError::internal())
 }
+
+#[derive(Deserialize)]
+pub struct PhoneLookup {
+    hashes: Vec<String>,
+}
+
+/// `POST /v1/phone/lookup`: tanti numeri in una richiesta; solo quelli verificati (SPEC §13.3).
+pub async fn lookup_batch(
+    State(s): State<AppState>,
+    Json(req): Json<PhoneLookup>,
+) -> ApiResult<Json<std::collections::HashMap<String, PhoneEntry>>> {
+    if req.hashes.len() > crate::MAX_BATCH {
+        return Err(ApiError::bad(
+            "troppi numeri in una richiesta (massimo 1000)",
+        ));
+    }
+    let db = s.db()?;
+    let mut out = std::collections::HashMap::new();
+    for h in req.hashes {
+        if let Some(entry) = db.phone_dir(&h)?
+            && let Ok(e) = serde_json::from_str::<PhoneEntry>(&entry)
+        {
+            out.insert(h, e);
+        }
+    }
+    Ok(Json(out))
+}

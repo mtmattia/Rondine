@@ -398,6 +398,16 @@ Due persone che hanno l'una il numero dell'altra si trovano da sole.
 
 Limiti e scadenze: voce ≤ 4 KiB, al massimo 8 voci per luogo, durata massima 30 giorni.
 
+**A lotti.** Una rubrica ha centinaia di numeri: invece di una richiesta per luogo,
+- `POST /v1/board/batch` `{"put": [{"loc": "<b64>", "entry": {owner, blob, expires_at, sig}}, …]}`
+  → `{"stored": n}` (le voci non valide si saltano);
+- `POST /v1/board/lookup` `{"locs": ["<b64>", …]}` → `{"<loc>": [voci], …}` (solo i luoghi con
+  voci);
+
+al massimo 1000 elementi per richiesta, con gli stessi controlli delle richieste singole. Il
+client tiene i segreti calcolati (`loc`, `key`) per non ripetere l'Argon2 a ogni ricerca, e
+ripubblica una voce solo quando è passata metà della sua durata.
+
 Limite noto: chi conosce *entrambi* i numeri può calcolare il luogo, vedere che due persone si
 conoscono e pubblicare un record falso. Per questo il primo contatto resta non verificato
 finché non passa da SMS, QR o numero di sicurezza.
@@ -434,6 +444,9 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `DELETE /v1/names/{nome}` | proprietario | libera il nome (auth con la chiave dell'identità) |
 | `PUT /v1/board/{loc}` | firma nella voce | `{owner, blob, expires_at, sig}` |
 | `GET /v1/board/{loc}` | — | `[{owner, blob, expires_at}]` |
+| `POST /v1/board/batch` | firma in ogni voce | `{put: [{loc, entry}]}` → `{stored}` (§9) |
+| `POST /v1/board/lookup` | — | `{locs}` → `{loc: [voci]}` (§9) |
+| `POST /v1/phone/lookup` | — | `{hashes}` → `{hash: {card, claim}}` (§13.3) |
 | `POST /v1/inboxes/{inbox}/phone` | proprietario | `{phone}`: manda il codice per SMS (§13.2) |
 | `POST /v1/inboxes/{inbox}/phone/confirm` | proprietario | `{code, card}` → `Signed<PhoneClaim>` |
 | `DELETE /v1/inboxes/{inbox}/phone` | proprietario | toglie il numero dall'elenco |
@@ -578,7 +591,9 @@ Signed<PhoneClaim>, firmato dal nodo:
 3. `DELETE /v1/inboxes/{inbox}/phone` (proprietario): toglie il numero dall'elenco.
 
 ### 13.3 Ricerca
-`GET /v1/phone/{phone_hash}` → `{card, claim}` oppure 404. Il client chiede al proprio nodo e
+`GET /v1/phone/{phone_hash}` → `{card, claim}` oppure 404; a lotti `POST /v1/phone/lookup`
+`{"hashes": [...]}` (al massimo 1000) → `{"<phone_hash>": {card, claim}, …}` solo per i numeri
+verificati. Il client chiede al proprio nodo e
 alle bacheche del suo elenco (§9). Controlla le firme, che `claim.identity` sia chi firma il
 biglietto, che `claim` sia firmata con la `node_key` di `GET /v1/info` del nodo interrogato e che
 `claim.node` sia quel nodo, e che `claim.phone_hash` sia l'hash del numero cercato; mostra "numero verificato da

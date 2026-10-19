@@ -1,5 +1,6 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.compose.material3.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -85,11 +86,10 @@ import uniffi.rondine_ffi.GroupRow
 
 private data class Tab(val label: String, val selected: ImageVector, val unselected: ImageVector)
 
+/** Le schede si mostrano solo quando c'è qualcosa dietro: per ora solo le chat (le chiamate
+ *  torneranno con le chiamate vere). */
 private val tabs = listOf(
     Tab("Chat", Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat),
-    Tab("Aggiornamenti", Icons.Filled.Update, Icons.Outlined.Update),
-    Tab("Community", Icons.Filled.Groups, Icons.Outlined.Groups),
-    Tab("Chiamate", Icons.Filled.Call, Icons.Outlined.Call),
 )
 
 private enum class Filter(val label: String) { Tutte("Tutte"), NonLette("Non lette"), Preferiti("Preferiti") }
@@ -136,7 +136,7 @@ fun HomeScreen(
             )
         },
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+            if (tabs.size > 1) NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                 tabs.forEachIndexed { i, t ->
                     NavigationBarItem(
                         selected = tab == i,
@@ -173,21 +173,7 @@ fun HomeScreen(
         },
     ) { padding ->
         val m = Modifier.padding(padding)
-        when (tab) {
-            0 -> ChatList(chats, groups, onOpenChat, onOpenGroup, onNewChat, onPickPush, m)
-            1 -> ComingSoon(
-                Icons.Outlined.Update, "Aggiornamenti in arrivo",
-                "Qui arriveranno gli stati dei tuoi contatti, cifrati come i messaggi.", m,
-            )
-            2 -> ComingSoon(
-                Icons.Outlined.Groups, "Community in arrivo",
-                "I gruppi sono già previsti dal protocollo MLS: arriveranno in una prossima versione.", m,
-            )
-            else -> ComingSoon(
-                Icons.Outlined.Call, "Chiamate in arrivo",
-                "Le chiamate vocali e video, dirette tra telefoni, arriveranno dopo le chat.", m,
-            )
-        }
+        ChatList(chats, groups, onOpenChat, onOpenGroup, onNewChat, onPickPush, m)
     }
 }
 
@@ -430,6 +416,13 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (row.contact.muted) {
+                        Icon(
+                            Icons.Filled.NotificationsOff, "Silenziata", Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
                     if (row.contact.favorite) {
                         Icon(
                             Icons.Filled.Star, "Preferito", Modifier.size(14.dp),
@@ -473,6 +466,7 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            ChatMenuItems(row.contact.id, row.contact.muted) { menu = false }
             DropdownMenuItem(
                 text = { Text(if (row.contact.favorite) "Rimuovi dai preferiti" else "Aggiungi ai preferiti") },
                 onClick = {
@@ -487,3 +481,38 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
     }
 }
 
+/** Voci comuni del menu di una chat o di un gruppo nella lista: silenzia e svuota. */
+@Composable
+internal fun ChatMenuItems(id: String, muted: Boolean, close: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var confirm by remember { mutableStateOf(false) }
+    DropdownMenuItem(
+        text = { Text(if (muted) "Riattiva le notifiche" else "Silenzia le notifiche") },
+        onClick = {
+            close()
+            scope.launch {
+                Repo.client().setMuted(id, !muted)
+                Repo.refresh()
+            }
+        },
+    )
+    DropdownMenuItem(text = { Text("Svuota chat") }, onClick = { confirm = true })
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false; close() },
+            title = { Text("Svuotare la chat?") },
+            text = { Text("I messaggi spariscono da questo telefono; gli altri li tengono.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm = false
+                    close()
+                    scope.launch {
+                        Repo.client().clearChat(id)
+                        Repo.refresh()
+                    }
+                }) { Text("Svuota", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false; close() }) { Text("Annulla") } },
+        )
+    }
+}

@@ -214,3 +214,9 @@ Una riga per modifica: data, cosa è cambiato.
   `delete` per cancellare per tutti i propri messaggi (chi riceve toglie solo quelli di chi
   chiede), in chat 1:1 e gruppi; "svuota chat" e "silenzia" solo sul telefono. Client, CLI
   (`rondine rispondi`, `rondine elimina --per-tutti`, id in `leggi`) e ponte. 2 test.
+- 2026-10-19 — App: tieni premuto un messaggio per selezionarlo (anche più d'uno) e Rispondi (con
+  citazione nella bolla, che riporta al messaggio), Copia, Inoltra (a una chat o un gruppo: testi,
+  file, posizioni), Elimina per me o per tutti. Nella lista: Silenzia (niente notifiche, icona) e
+  Svuota chat, anche per i gruppi. Tolte le schede vuote (Aggiornamenti, Community, Chiamate) e il
+  tasto Chiama "in arrivo". Le chat corte stanno in basso, vicino alla barra. Provato
+  sull'emulatore con la CLI.

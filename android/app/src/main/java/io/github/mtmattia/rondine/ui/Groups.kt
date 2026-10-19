@@ -1,5 +1,7 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -99,10 +101,18 @@ val GroupMessageInfo.preview: String get() = if (outgoing) "Tu: $body" else "$se
 
 /** Riga di un gruppo nella lista chat. */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun GroupListItem(row: GroupRow, onOpen: (String) -> Unit) {
     val unread = row.unread > 0u
+    var menu by remember { mutableStateOf(false) }
+    Box {
+    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        ChatMenuItems(row.group.id, row.group.muted) { menu = false }
+    }
     Row(
-        Modifier.fillMaxWidth().clickable { onOpen(row.group.id) }.padding(horizontal = 16.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth()
+            .combinedClickable(onClick = { onOpen(row.group.id) }, onLongClick = { menu = true })
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         GroupAvatar(row.group.id)
@@ -113,6 +123,13 @@ fun GroupListItem(row: GroupRow, onOpen: (String) -> Unit) {
                     row.group.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
+                if (row.group.muted) {
+                    Icon(
+                        Icons.Filled.NotificationsOff, "Silenziato", Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
                 Text(
                     listTime(row.lastTs), fontSize = 12.sp,
                     color = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -136,6 +153,7 @@ fun GroupListItem(row: GroupRow, onOpen: (String) -> Unit) {
                 }
             }
         }
+    }
     }
 }
 

@@ -21,10 +21,12 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Numero di sicurezza | ✅ | SPEC §10 |
 | Notifiche push (UnifiedPush) | ✅ | provate sull'emulatore con ntfy e un server ntfy locale, anche ad app chiusa |
 | Notifiche iPhone (APNs) | ⬜ | dopo Android |
-| Notifiche via Google (FCM), versione Play | ⬜ | facoltativo: distributore FCM incorporato di UnifiedPush + gateway; serve un progetto Firebase; la versione F-Droid resta senza Google |
+| Notifiche via Google (FCM), versione Play | ✅ | versione `play` con ripetitore FCM nel nido (SPEC §8.1), solo se manca un distributore UnifiedPush; la versione `foss` resta senza Google |
 | Gruppi | 🟡 | SPEC §7.4: client, CLI e app con la stessa chat delle 1:1 (foto, documenti, vocali, posizione anche in tempo reale, emoji, nomi colorati), info, aggiungi/togli, esci; max 100 membri; mancano spunte e "sta scrivendo" nei gruppi, passaggio del ruolo di amministratore |
-| Foto e documenti | 🟡 | SPEC §7.5: cifrati sul telefono, nella casella del destinatario fino a 64 MiB, dentro il messaggio se piccoli; client, nodo, CLI e app (foto ridotte a 1600 px con anteprima, documenti aperti con le app del telefono); niente coda se il nodo non risponde; nei gruppi non ancora |
+| Foto e documenti | ✅ | SPEC §7.5: cifrati sul telefono, fino a 64 MiB; nelle chat 1:1 nella casella di chi riceve, nei gruppi una copia sola sul nido di chi manda; client, nodo, CLI e app; manca la coda se il nodo non risponde |
 | Messaggi vocali | ✅ | nell'app: un tocco sul microfono apre la registrazione con pausa, cestino e invio; viaggiano come file `audio/mp4` (SPEC §7.5) |
+| Rispondere, copiare, inoltrare, eliminare | ✅ | SPEC §7.1b: tieni premuto un messaggio; elimina per tutti solo i propri; anche nei gruppi |
+| Silenziare e svuotare le chat | ✅ | dalla lista chat, solo sul telefono |
 | Emoji | ✅ | pannello nell'app |
 | Foto del profilo | ✅ | SPEC §7.7: la vedono contatti e membri dei gruppi in comune, dentro MLS; in Impostazioni si sceglie dalla galleria o si toglie |
 | Posizione e posizione in tempo reale | ✅ | SPEC §7.6: fino a 8 ore, aggiornamenti silenziosi (senza sveglia) ogni 15 s anche ad app chiusa; mappa su due livelli (tessere OpenStreetMap del quadrato di ~2 km, punto esatto disegnato dal telefono), si può spegnere; client, CLI e app |

@@ -1,5 +1,11 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.automirrored.filled.Forward
+import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Close
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -137,11 +143,14 @@ data class UiMessage(
     val senderId: String,
     /** Nome di chi scrive: solo nei gruppi. */
     val senderName: String?,
+    /** Id del messaggio citato. */
+    val replyTo: String? = null,
 )
 
-private fun Message.ui() = UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null)
+private fun Message.ui() =
+    UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null, replyTo)
 private fun GroupMessageInfo.ui() =
-    UiMessage(id, outgoing, body, ts, read, null, attachment, location, if (outgoing) "io" else senderId, senderName)
+    UiMessage(id, outgoing, body, ts, read, null, attachment, location, if (outgoing) "io" else senderId, senderName, replyTo)
 
 /** Elementi della conversazione, dal più recente (la lista è rovesciata). */
 private sealed interface ChatItem {
@@ -422,6 +431,83 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
         )
     }
 
+    // ---------- selezione e azioni sui messaggi ----------
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var replyTo by remember { mutableStateOf<UiMessage?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var forwarding by remember { mutableStateOf(false) }
+    BackHandler(enabled = selected.isNotEmpty()) { selected = emptySet() }
+    fun toggle(m: UiMessage) {
+        selected = if (m.id in selected) selected - m.id else selected + m.id
+    }
+    fun chosen() = messages.filter { it.id in selected }
+    /** Chi ha scritto un messaggio, per citazioni e inoltri. */
+    fun authorOf(m: UiMessage) = when {
+        m.outgoing -> "Tu"
+        isGroup -> m.senderName ?: ""
+        else -> contact?.name ?: ""
+    }
+
+    if (confirmDelete) {
+        val sel = chosen()
+        val allMine = sel.isNotEmpty() && sel.all { it.outgoing }
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(if (sel.size == 1) "Eliminare il messaggio?" else "Eliminare ${sel.size} messaggi?") },
+            text = {
+                Column {
+                    if (allMine) {
+                        TextButton(onClick = {
+                            confirmDelete = false
+                            val ids = sel.map { it.id }
+                            selected = emptySet()
+                            scope.launch {
+                                try {
+                                    if (isGroup) Repo.client().deleteGroupMessages(contactId, ids, true)
+                                    else Repo.client().deleteMessages(contactId, ids, true)
+                                    Repo.refresh()
+                                } catch (e: RondineException) {
+                                    snackbar.showSnackbar(e.userMessage)
+                                }
+                            }
+                        }) { Text("Elimina per tutti", color = MaterialTheme.colorScheme.error) }
+                    }
+                    TextButton(onClick = {
+                        confirmDelete = false
+                        val ids = sel.map { it.id }
+                        selected = emptySet()
+                        scope.launch {
+                            try {
+                                if (isGroup) Repo.client().deleteGroupMessages(contactId, ids, false)
+                                else Repo.client().deleteMessages(contactId, ids, false)
+                                Repo.refresh()
+                            } catch (e: RondineException) {
+                                snackbar.showSnackbar(e.userMessage)
+                            }
+                        }
+                    }) { Text("Elimina per me") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annulla") } },
+        )
+    }
+    if (forwarding) {
+        ForwardDialog(onDismiss = { forwarding = false }) { target ->
+            forwarding = false
+            val sel = chosen().sortedBy { it.ts }
+            selected = emptySet()
+            scope.launch {
+                try {
+                    forward(sel, target)
+                    Repo.refresh()
+                    snackbar.showSnackbar(if (sel.size == 1) "Inoltrato" else "Inoltrati ${sel.size} messaggi")
+                } catch (e: Exception) {
+                    snackbar.showSnackbar("Non inoltrato: ${e.message}")
+                }
+            }
+        }
+    }
+
     fun comingSoon(what: String) {
         scope.launch { snackbar.showSnackbar("$what arriveranno in una prossima versione") }
     }
@@ -430,6 +516,39 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
+            if (selected.isNotEmpty()) {
+                val sel = chosen()
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Filled.Close, "Annulla selezione") }
+                    },
+                    title = { Text("${sel.size}") },
+                    actions = {
+                        if (sel.size == 1 && !(isGroup && group?.active == false)) {
+                            IconButton(onClick = {
+                                replyTo = sel.first()
+                                selected = emptySet()
+                            }) { Icon(Icons.AutoMirrored.Filled.Reply, "Rispondi") }
+                        }
+                        if (sel.any { it.body.isNotBlank() }) {
+                            IconButton(onClick = {
+                                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                                cm?.setPrimaryClip(
+                                    android.content.ClipData.newPlainText(
+                                        "Rondine",
+                                        sel.sortedBy { it.ts }.filter { it.body.isNotBlank() }.joinToString("\n") { it.body },
+                                    ),
+                                )
+                                selected = emptySet()
+                                scope.launch { snackbar.showSnackbar("Copiato") }
+                            }) { Icon(Icons.Filled.ContentCopy, "Copia") }
+                        }
+                        IconButton(onClick = { forwarding = true }) { Icon(Icons.AutoMirrored.Filled.Forward, "Inoltra") }
+                        IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "Elimina") }
+                    },
+                )
+                return@Scaffold
+            }
             TopAppBar(
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") }
@@ -501,7 +620,6 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                         }
                         return@TopAppBar
                     }
-                    IconButton(onClick = { comingSoon("Le chiamate") }) { Icon(Icons.Filled.Call, "Chiama") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Altro") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -575,7 +693,8 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                     state = listState,
                     reverseLayout = true,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    // Le chat corte stanno in basso, vicino alla barra di scrittura.
+                    verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.Bottom),
                 ) {
                     items(buildItems(messages), key = {
                         when (it) {
@@ -587,6 +706,15 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                         when (item) {
                             is ChatItem.Msg -> Bubble(
                                 item.m, item.firstOfRun, isGroup,
+                                selected = item.m.id in selected,
+                                quote = item.m.replyTo?.let { r -> messages.firstOrNull { it.id == r } },
+                                quoteAuthor = { authorOf(it) },
+                                onSelect = { toggle(item.m) },
+                                selecting = selected.isNotEmpty(),
+                                onQuote = { q ->
+                                    val idx = buildItems(messages).indexOfFirst { it is ChatItem.Msg && it.m.id == q.id }
+                                    if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
+                                },
                                 downloading = item.m.id in downloading,
                                 onOpen = { a ->
                                     openAttachment(context, a)?.let { scope.launch { snackbar.showSnackbar(it) } }
@@ -628,6 +756,11 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
+                replyTo?.let { q ->
+                    if (!(voiceLocked && recordingMs != null)) {
+                        QuotePreview(authorOf(q), q, onClose = { replyTo = null })
+                    }
+                }
                 if (!(voiceLocked && recordingMs != null)) InputBar(
                     text = text,
                     onText = {
@@ -672,9 +805,11 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                         sending = true
                         scope.launch {
                             try {
-                                if (isGroup) Repo.client().sendGroupText(contactId, body)
-                                else Repo.client().sendText(contactId, body)
+                                val r = replyTo?.id
+                                if (isGroup) Repo.client().sendGroupReply(contactId, body, r)
+                                else Repo.client().sendReply(contactId, body, r)
                                 text = ""
+                                replyTo = null
                                 Repo.refresh()
                             } catch (e: RondineException) {
                                 snackbar.showSnackbar("Non inviato: ${e.userMessage}")
@@ -804,6 +939,12 @@ private fun Bubble(
     m: UiMessage,
     firstOfRun: Boolean,
     isGroup: Boolean,
+    selected: Boolean,
+    quote: UiMessage?,
+    quoteAuthor: (UiMessage) -> String,
+    onSelect: () -> Unit,
+    selecting: Boolean,
+    onQuote: (UiMessage) -> Unit,
     downloading: Boolean,
     onOpen: (uniffi.rondine_ffi.AttachmentInfo) -> Unit,
     onDownload: () -> Unit,
@@ -819,7 +960,14 @@ private fun Bubble(
         RoundedCornerShape(if (firstOfRun) small else big, big, big, big)
     }
     Row(
-        Modifier.fillMaxWidth().padding(top = if (firstOfRun) 6.dp else 0.dp),
+        Modifier
+            .fillMaxWidth()
+            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent)
+            .combinedClickable(
+                onClick = { if (selecting) onSelect() },
+                onLongClick = onSelect,
+            )
+            .padding(top = if (firstOfRun) 6.dp else 0.dp),
         horizontalArrangement = if (m.outgoing) Arrangement.End else Arrangement.Start,
     ) {
         Surface(
@@ -836,6 +984,13 @@ private fun Bubble(
                     Text(
                         m.senderName, color = senderColor(m.senderId), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(start = pad * 1.5f, top = pad, bottom = 2.dp),
+                    )
+                }
+                if (quote != null) {
+                    QuoteBox(
+                        quoteAuthor(quote), quote,
+                        Modifier.padding(start = pad * 1.5f, end = pad, top = pad, bottom = 4.dp)
+                            .clickable { if (selecting) onSelect() else onQuote(quote) },
                     )
                 }
                 if (loc != null) {
@@ -1007,3 +1162,112 @@ private fun SendFileDialog(
     )
 }
 
+/** Testo breve di un messaggio, per citazioni e anteprime. */
+private fun UiMessage.snippet(): String = when {
+    attachment != null -> {
+        val a = attachment
+        val what = when {
+            a.isVoice -> "🎤 Messaggio vocale"
+            a.isImage -> "📷 Foto"
+            else -> "📄 ${a.name}"
+        }
+        if (body.isBlank()) what else "$what · $body"
+    }
+    location != null -> "📍 Posizione"
+    else -> body
+}
+
+/** La citazione dentro la bolla: chi e cosa, con la striscia colorata. */
+@Composable
+private fun QuoteBox(author: String, q: UiMessage, modifier: Modifier) {
+    val color = if (q.outgoing) MaterialTheme.colorScheme.primary else senderColor(q.senderId)
+    Row(
+        modifier.clip(RoundedCornerShape(6.dp)).background(Color(0x14000000)).widthIn(min = 120.dp),
+    ) {
+        Box(Modifier.width(4.dp).heightIn(min = 40.dp).background(color))
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(author, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(
+                q.snippet(), fontSize = 13.sp, color = LocalChatColors.current.bubbleMeta,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Sopra la barra di scrittura: a che cosa sto rispondendo. */
+@Composable
+private fun QuotePreview(author: String, q: UiMessage, onClose: () -> Unit) {
+    Surface(
+        Modifier.fillMaxWidth().padding(start = 8.dp, end = 70.dp, top = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            QuoteBox(author, q, Modifier.weight(1f).padding(6.dp))
+            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Annulla risposta") }
+        }
+    }
+}
+
+/** Dove inoltrare: una chat o un gruppo. */
+@Composable
+private fun ForwardDialog(onDismiss: () -> Unit, onPick: (ChatTarget) -> Unit) {
+    val chats by Repo.chats.collectAsState()
+    val groups by Repo.groups.collectAsState()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Inoltra a…") },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(groups.filter { it.group.active }, key = { "g" + it.group.id }) { g ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onPick(ChatTarget.Group(g.group.id)) }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        GroupAvatar(g.group.id, 40.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(g.group.name, fontSize = 16.sp)
+                    }
+                }
+                items(chats.filter { !it.contact.blocked }, key = { "c" + it.contact.id }) { r ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onPick(ChatTarget.Person(r.contact.id)) }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Avatar(r.contact.name, r.contact.id, 40.dp, r.contact.photo)
+                        Spacer(Modifier.width(12.dp))
+                        Text(r.contact.name, fontSize = 16.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
+    )
+}
+
+/** Inoltra messaggi: testi, file (dal telefono) e posizioni ripartono verso un'altra chat. */
+private suspend fun forward(messages: List<UiMessage>, target: ChatTarget) {
+    val r = Repo.client()
+    val group = target is ChatTarget.Group
+    for (m in messages) {
+        val a = m.attachment
+        val l = m.location
+        when {
+            a != null -> {
+                val path = a.path ?: continue
+                val data = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { java.io.File(path).readBytes() }
+                val caption = m.body.ifBlank { null }
+                if (group) r.sendGroupFile(target.id, a.name, a.mime, data, caption, a.thumb, a.width, a.height)
+                else r.sendFile(target.id, a.name, a.mime, data, caption, a.thumb, a.width, a.height)
+            }
+            l != null -> {
+                if (group) r.sendGroupLocation(target.id, l.lat, l.lon, l.acc, null)
+                else r.sendLocation(target.id, l.lat, l.lon, l.acc, null)
+            }
+            m.body.isNotBlank() -> {
+                if (group) r.sendGroupText(target.id, m.body) else r.sendText(target.id, m.body)
+            }
+        }
+    }
+}

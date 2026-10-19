@@ -40,7 +40,9 @@ object Notifier {
             PackageManager.PERMISSION_GRANTED
         if (!granted) return
         val nm = NotificationManagerCompat.from(context)
-        messages.filter { !it.outgoing && it.contactId != openChat }.groupBy { it.contactId }
+        // Le chat silenziate non suonano.
+        val muted = chats.filter { it.contact.muted }.map { it.contact.id }.toSet()
+        messages.filter { !it.outgoing && it.contactId != openChat && it.contactId !in muted }.groupBy { it.contactId }
             .forEach { (contactId, msgs) ->
                 val name = chats.firstOrNull { it.contact.id == contactId }?.contact?.name ?: "Rondine"
                 val intent = Intent(context, MainActivity::class.java)
@@ -83,7 +85,8 @@ object Notifier {
             PackageManager.PERMISSION_GRANTED
         if (!granted) return
         val nm = NotificationManagerCompat.from(context)
-        messages.filter { !it.outgoing && it.groupId != openGroup }.groupBy { it.groupId }
+        val muted = groups.filter { it.group.muted }.map { it.group.id }.toSet()
+        messages.filter { !it.outgoing && it.groupId != openGroup && it.groupId !in muted }.groupBy { it.groupId }
             .forEach { (groupId, msgs) ->
                 val name = groups.firstOrNull { it.group.id == groupId }?.group?.name ?: "Gruppo"
                 // Il nome del mittente lo sa la lista aggiornata, non sempre l'evento.

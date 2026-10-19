@@ -61,6 +61,10 @@ object Repo {
     val revision = MutableStateFlow(0L)
     val pushStatus = MutableStateFlow("Non configurate")
     val pushState = MutableStateFlow(PushState.Unknown)
+    /** Rubrica: numero com'è scritto nel telefono → contatto Rondine (SPEC §9, §13.3). */
+    val addressBook = MutableStateFlow<Map<String, uniffi.rondine_ffi.ContactInfo>>(emptyMap())
+    /** Una ricerca nella rubrica è in corso. */
+    val scanningAddressBook = MutableStateFlow(false)
     /** Link d'invito arrivato da fuori (rondine:invito/…), in attesa di conferma. */
     val pendingInvite = MutableStateFlow<String?>(null)
     /** Messaggio da mostrare all'utente (errori fuori da una schermata precisa). */
@@ -205,6 +209,24 @@ object Repo {
     fun typing(contactId: String, active: Boolean) {
         scope.launch {
             try { client().setTyping(contactId, active) } catch (_: RondineException) {}
+        }
+    }
+
+    /** Cerca nella rubrica chi usa Rondine, in background (sopravvive all'uscita dalla
+     *  schermata). I numeri restano sul telefono: al nodo vanno solo voci cifrate e hash. */
+    fun scanAddressBook(numbers: List<String>) {
+        if (scanningAddressBook.value || numbers.isEmpty()) return
+        scanningAddressBook.value = true
+        scope.launch {
+            try {
+                val found = client().findInAddressBook(numbers)
+                addressBook.value = found.associate { it.input to it.contact }
+                refresh()
+            } catch (e: RondineException) {
+                notice.value = "Ricerca nella rubrica non riuscita: ${e.userMessage}"
+            } finally {
+                scanningAddressBook.value = false
+            }
         }
     }
 

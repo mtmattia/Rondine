@@ -200,3 +200,9 @@ Una riga per modifica: data, cosa è cambiato.
   calcolati in parallelo fuori dal thread della rete e tenuti nello stato; richieste a lotti
   (`POST /v1/board/batch`, `/v1/board/lookup`, `/v1/phone/lookup`); ripubblicazione solo a metà
   della durata. I contatti trovati col numero verificato si aggiungono senza mandare niente. 1 test.
+- 2026-10-19 — App: rubrica come WhatsApp in "Nuova chat" (contatti del telefono, chi usa Rondine in
+  alto con il nome della rubrica, gli altri con "Invita" via SMS, ricerca, scansione automatica in
+  background). Verifica del numero in Impostazioni (SMS → codice). Provato sull'emulatore con una
+  rubrica finta: Luca trovato col numero verificato anche senza il proprio numero, Silvia con la
+  scoperta a coppie dopo averlo messo, Zia da invitare; verifica del numero dall'app e controprova
+  dalla CLI.

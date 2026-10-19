@@ -15,8 +15,8 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Casella postale sul nodo (messaggi offline) | ✅ | 30 giorni o fino alla conferma |
 | Permessi di consegna revocabili (blocco contatto) | ✅ | |
 | Nome utente univoco `nome@nodo` | ✅ | |
-| Scoperta dalla rubrica a coppie | ✅ | bacheche comuni tra nodi diversi |
-| Numero verificato via SMS | 🟡 | SPEC §13: client, nodo e CLI; SMS solo "in prova" (nel log del nodo); manca nell'app e il canale SMS vero |
+| Scoperta dalla rubrica | ✅ | a coppie (SPEC §9) e con i numeri verificati (§13), a lotti e con i segreti in cache; nell'app la rubrica del telefono come WhatsApp: chi usa Rondine in alto, gli altri con "Invita" |
+| Numero verificato via SMS | 🟡 | SPEC §13: client, nodo, CLI e app (Impostazioni → Numero → Verifica con un SMS); manca il canale SMS vero: il nodo scrive il codice nel log |
 | Invito via SMS | 🟡 | l'SMS parte; il link `rondine:` non è cliccabile negli SMS: serve una pagina https di rimando |
 | Numero di sicurezza | ✅ | SPEC §10 |
 | Notifiche push (UnifiedPush) | ✅ | provate sull'emulatore con ntfy e un server ntfy locale, anche ad app chiusa |

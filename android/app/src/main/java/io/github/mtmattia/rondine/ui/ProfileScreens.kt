@@ -251,7 +251,7 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
     }
 }
 
-private enum class SettingsDialog { Username, Phone, Node }
+private enum class SettingsDialog { Username, Phone, Node, PhoneMenu, Code }
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Unit) {
@@ -358,7 +358,16 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             SettingRow(Icons.Filled.AlternateEmail, "Nome utente", p.username?.let { "@$it" } ?: "Scegline uno per farti trovare") {
                 dialog = SettingsDialog.Username
             }
-            SettingRow(Icons.Filled.Phone, "Numero di telefono", p.phone ?: "Non impostato") { dialog = SettingsDialog.Phone }
+            SettingRow(
+                Icons.Filled.Phone,
+                "Numero di telefono",
+                when {
+                    p.phone == null -> "Non impostato"
+                    p.phoneVerified -> "${p.phone} · verificato ✓"
+                    p.hasNode -> "${p.phone} · tocca per verificarlo con un SMS"
+                    else -> p.phone!!
+                },
+            ) { dialog = if (p.phone != null && p.hasNode) SettingsDialog.PhoneMenu else SettingsDialog.Phone }
             SettingRow(Icons.Filled.QrCode2, "Link d'invito e QR", "Condividi o reimposta", onMyQr)
             SettingRow(Icons.Filled.Notifications, "Notifiche", "$push · tocca per scegliere il distributore UnifiedPush", onPickPush)
             SettingRow(
@@ -436,6 +445,51 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 val n = Repo.client().setPhone(value)
                 Repo.refresh()
                 "Numero salvato: $n"
+            }
+        }
+        SettingsDialog.PhoneMenu -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("Numero di telefono") },
+            text = {
+                Column {
+                    Text(
+                        if (p.phoneVerified) {
+                            "${p.phone} è verificato: chi ha il tuo numero ti trova su Rondine, anche se tu non hai il suo."
+                        } else {
+                            "Verificalo con un SMS: chi ha il tuo numero ti troverà su Rondine anche se tu non hai il " +
+                                "suo. Il tuo nodo vede il numero solo per mandare l'SMS, poi ne tiene solo un hash."
+                        },
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (!p.phoneVerified) {
+                        TextButton(onClick = {
+                            dialog = null
+                            run {
+                                val n = Repo.client().requestPhone(p.phone!!)
+                                dialog = SettingsDialog.Code
+                                "Codice mandato per SMS a $n"
+                            }
+                        }) { Text("Verifica con un SMS") }
+                    }
+                    TextButton(onClick = { dialog = SettingsDialog.Phone }) { Text("Cambia numero") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { dialog = null }) { Text("Chiudi") } },
+        )
+        SettingsDialog.Code -> TextDialog(
+            title = "Codice di verifica",
+            label = "Codice di 6 cifre",
+            placeholder = "123456",
+            note = "L'hai ricevuto per SMS. Vale 10 minuti.",
+            onDismiss = { dialog = null },
+        ) { value ->
+            dialog = null
+            run {
+                Repo.client().confirmPhone(value.trim())
+                Repo.refresh()
+                "Numero verificato: chi ce l'ha ti trova su Rondine"
             }
         }
         SettingsDialog.Node -> TextDialog(

@@ -88,6 +88,8 @@ pub struct ContactInfo {
     pub source: String,
     /// Trovato col numero verificato: il nodo che l'ha verificato (SPEC §13).
     pub phone_verified_by: Option<String>,
+    /// Notifiche silenziate.
+    pub muted: bool,
     /// Foto del profilo (percorso), se l'ha mandata.
     pub photo: Option<String>,
 }
@@ -106,6 +108,8 @@ pub struct Message {
     pub attachment: Option<AttachmentInfo>,
     /// Posizione, fissa o in tempo reale (SPEC §7.6).
     pub location: Option<LocationInfo>,
+    /// Id del messaggio a cui risponde (SPEC §7.1b).
+    pub reply_to: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -183,6 +187,8 @@ pub struct GroupInfo {
     /// Gli altri membri, io escluso.
     pub members: Vec<GroupMemberInfo>,
     pub created_at: u64,
+    /// Notifiche silenziate.
+    pub muted: bool,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -198,6 +204,7 @@ pub struct GroupMessageInfo {
     pub read: bool,
     pub attachment: Option<AttachmentInfo>,
     pub location: Option<LocationInfo>,
+    pub reply_to: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -236,6 +243,7 @@ fn group_info(c: &Client, g: &GroupChat) -> GroupInfo {
             })
             .collect(),
         created_at: g.created_at,
+        muted: g.muted,
     }
 }
 
@@ -267,6 +275,7 @@ fn group_message(c: &Client, m: &GroupMessage) -> GroupMessageInfo {
         read: m.read,
         attachment: m.attachment.as_ref().map(attachment_info),
         location: m.location.as_ref().map(location_info),
+        reply_to: m.reply_to.clone(),
     }
 }
 
@@ -307,6 +316,8 @@ pub struct SyncResult {
     pub groups_changed: bool,
     /// Qualcuno ha cambiato o tolto la foto del profilo.
     pub photos_changed: bool,
+    /// Qualcuno ha cancellato per tutti dei messaggi.
+    pub messages_deleted: bool,
 }
 
 /// Come [`contact_info`], con la foto del profilo se il contatto l'ha mandata.
@@ -337,6 +348,7 @@ fn contact_info(c: &Contact) -> ContactInfo {
         .into(),
         photo: None,
         phone_verified_by: c.phone_verified_by.clone(),
+        muted: c.muted,
     }
 }
 
@@ -387,6 +399,7 @@ fn message(m: &ChatMessage) -> Message {
             live_until: l.live_until,
             updated_at: l.updated_at,
         }),
+        reply_to: m.reply_to.clone(),
     }
 }
 
@@ -898,6 +911,80 @@ impl Rondine {
             .await
     }
 
+    /// Un testo che risponde a un messaggio (SPEC §7.1b).
+    pub async fn send_reply(
+        &self,
+        contact_id: String,
+        body: String,
+        reply_to: Option<String>,
+    ) -> Result<Message> {
+        let k = key(&contact_id)?;
+        self.run(move |c| {
+            Box::pin(async move {
+                Ok(message(
+                    &c.send_reply(&k, &body, reply_to.as_deref()).await?,
+                ))
+            })
+        })
+        .await
+    }
+
+    pub async fn send_group_reply(
+        &self,
+        id: String,
+        body: String,
+        reply_to: Option<String>,
+    ) -> Result<GroupMessageInfo> {
+        self.run(move |c| {
+            Box::pin(async move {
+                let d = c.send_group_reply(&id, &body, reply_to.as_deref()).await?;
+                Ok(group_message(c, &d.message))
+            })
+        })
+        .await
+    }
+
+    /// Cancella messaggi: per me, o con `for_everyone` anche per il contatto (i miei).
+    pub async fn delete_messages(
+        &self,
+        contact_id: String,
+        ids: Vec<String>,
+        for_everyone: bool,
+    ) -> Result<()> {
+        let k = key(&contact_id)?;
+        self.run(move |c| {
+            Box::pin(async move { Ok(c.delete_messages(&k, &ids, for_everyone).await?) })
+        })
+        .await
+    }
+
+    pub async fn delete_group_messages(
+        &self,
+        id: String,
+        ids: Vec<String>,
+        for_everyone: bool,
+    ) -> Result<()> {
+        self.run(move |c| {
+            Box::pin(async move { Ok(c.delete_group_messages(&id, &ids, for_everyone).await?) })
+        })
+        .await
+    }
+
+    /// Svuota una chat (1:1 o gruppo) solo su questo telefono.
+    pub async fn clear_chat(&self, id: String) -> Result<()> {
+        Ok(self
+            .with(move |c| match PublicKey::from_b64(&id) {
+                Ok(k) if c.contacts().iter().any(|x| x.identity == k) => c.clear_chat(&k),
+                _ => c.clear_group_chat(&id),
+            })
+            .await?)
+    }
+
+    /// Silenzia o riattiva le notifiche di una chat (1:1 o gruppo).
+    pub async fn set_muted(&self, id: String, muted: bool) -> Result<()> {
+        Ok(self.with(move |c| c.set_muted(&id, muted)).await?)
+    }
+
     pub async fn mark_group_read(&self, id: String) -> Result<()> {
         Ok(self.with(|c| c.mark_group_read(&id)).await?)
     }
@@ -936,6 +1023,7 @@ impl Rondine {
             group_messages: Vec::new(),
             groups_changed: false,
             photos_changed: false,
+            messages_deleted: false,
         };
         for e in synced.groups {
             match e {
@@ -957,9 +1045,11 @@ impl Rondine {
                     read: m.read,
                     attachment: m.attachment.as_ref().map(attachment_info),
                     location: m.location.as_ref().map(location_info),
+                    reply_to: m.reply_to.clone(),
                 }),
                 GroupEvent::LocationUpdate { .. } => out.locations_changed = true,
                 GroupEvent::PhotoChanged { .. } => out.photos_changed = true,
+                GroupEvent::Deleted { .. } => out.messages_deleted = true,
                 GroupEvent::Joined { .. }
                 | GroupEvent::MembersChanged { .. }
                 | GroupEvent::Removed { .. } => out.groups_changed = true,
@@ -973,6 +1063,7 @@ impl Rondine {
                 Event::Typing { .. } => out.typing_changed = true,
                 Event::LocationUpdate { .. } => out.locations_changed = true,
                 Event::PhotoChanged { .. } => out.photos_changed = true,
+                Event::Deleted { .. } => out.messages_deleted = true,
                 Event::Receipt { ids, .. } => {
                     out.receipts = out
                         .receipts

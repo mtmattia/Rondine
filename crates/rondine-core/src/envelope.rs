@@ -31,6 +31,14 @@ pub enum AppMessage {
         id: String,
         ts: u64,
         body: String,
+        /// Id del messaggio a cui risponde (SPEC §7.1b).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reply: Option<String>,
+    },
+    /// Cancella per tutti messaggi già mandati da chi lo manda (SPEC §7.1b).
+    Delete {
+        v: u32,
+        ids: Vec<String>,
     },
     /// "Sta scrivendo" (SPEC §7.3): viaggia in un deposito effimero.
     Typing {
@@ -176,6 +184,7 @@ impl AppMessage {
             AppMessage::File(f) => f.v,
             AppMessage::Location(l) | AppMessage::LocationUpdate(l) => l.v,
             AppMessage::Profile { v, .. } => *v,
+            AppMessage::Delete { v, .. } => *v,
             AppMessage::Unknown => crate::PROTOCOL_VERSION,
         }
     }

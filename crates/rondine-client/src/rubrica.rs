@@ -200,6 +200,7 @@ impl Client {
                     favorite: false,
                     addrs: Vec::new(),
                     phone_verified_by: verified_by.clone(),
+                    muted: false,
                 });
             }
             // Coppia: ci siamo trovati in due, la chat la avvia la chiave più bassa (SPEC §9).

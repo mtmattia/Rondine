@@ -1656,3 +1656,71 @@ async fn sms_di_verifica_dal_gateway_android() -> R {
     assert!(mattia.state().phone_verified);
     Ok(())
 }
+
+/// Risposte e cancellazioni (SPEC §7.1b): la citazione arriva; "elimina per tutti" toglie il
+/// messaggio anche dall'altra parte; nessuno può cancellare i messaggi di un altro.
+#[tokio::test]
+async fn rispondere_e_cancellare_per_tutti() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &node).await?;
+    let q = silvia
+        .send_text(&mattia.identity(), "ci vediamo alle 8?")
+        .await?;
+    mattia.sync().await?;
+    let r = mattia
+        .send_reply(&silvia.identity(), "facciamo alle 9", Some(&q.id))
+        .await?;
+    assert_eq!(r.reply_to.as_deref(), Some(q.id.as_str()));
+    let ev = silvia.sync().await?;
+    let got = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::Message(m) => Some(m.clone()),
+            _ => None,
+        })
+        .ok_or("risposta non arrivata")?;
+    assert_eq!(got.reply_to.as_deref(), Some(q.id.as_str()));
+
+    // Mattia cancella per tutti la sua risposta: sparisce anche da Silvia.
+    mattia
+        .delete_messages(&silvia.identity(), std::slice::from_ref(&r.id), true)
+        .await?;
+    assert!(
+        mattia
+            .messages_with(&silvia.identity())
+            .iter()
+            .all(|m| m.id != r.id)
+    );
+    let ev = silvia.sync().await?;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::Deleted { ids, .. } if ids.contains(&r.id)))
+    );
+    assert!(
+        silvia
+            .messages_with(&mattia.identity())
+            .iter()
+            .all(|m| m.id != r.id)
+    );
+
+    // Mattia prova a cancellare per tutti un messaggio di Silvia: da lei resta.
+    mattia
+        .delete_messages(&silvia.identity(), std::slice::from_ref(&q.id), true)
+        .await?;
+    silvia.sync().await?;
+    assert!(
+        silvia
+            .messages_with(&mattia.identity())
+            .iter()
+            .any(|m| m.id == q.id)
+    );
+    // Da Mattia invece è sparito (per lui sì).
+    assert!(
+        mattia
+            .messages_with(&silvia.identity())
+            .iter()
+            .all(|m| m.id != q.id)
+    );
+    Ok(())
+}

@@ -106,6 +106,8 @@ const STATE_FILE: &str = "stato.json";
 const MLS_FILE: &str = "mls.bin";
 /// Cartella del profilo con foto e documenti (SPEC §7.5).
 const FILES_DIR: &str = "file";
+/// Id al massimo in un `delete` (SPEC §7.1b).
+const MAX_DELETE_IDS: usize = 100;
 /// Cartella del profilo con le foto: la mia (`io.jpg`) e quelle ricevute (SPEC §7.7).
 const PHOTOS_DIR: &str = "foto";
 /// Key package caricati sul nodo alla creazione (l'ultimo è di riserva).
@@ -171,6 +173,11 @@ pub enum Event {
     /// Un contatto o un membro di un gruppo ha cambiato o tolto la foto (SPEC §7.7).
     PhotoChanged {
         identity: PublicKey,
+    },
+    /// Il contatto ha cancellato per tutti questi suoi messaggi (SPEC §7.1b).
+    Deleted {
+        contact: PublicKey,
+        ids: Vec<String>,
     },
 }
 
@@ -1154,6 +1161,7 @@ impl Client {
                 favorite: false,
                 addrs: Vec::new(),
                 phone_verified_by: None,
+                muted: false,
             });
         }
         self.start_chat(&info.identity).await?;
@@ -1424,6 +1432,16 @@ impl Client {
     }
 
     pub async fn send_text(&mut self, to: &PublicKey, body: &str) -> Result<ChatMessage> {
+        self.send_reply(to, body, None).await
+    }
+
+    /// Un testo che risponde (con `reply_to`) a un messaggio della stessa chat (SPEC §7.1b).
+    pub async fn send_reply(
+        &mut self,
+        to: &PublicKey,
+        body: &str,
+        reply_to: Option<&str>,
+    ) -> Result<ChatMessage> {
         let body = body.trim();
         if body.is_empty() {
             return Err(Error::Invalid("messaggio vuoto".into()));
@@ -1439,12 +1457,14 @@ impl Client {
             status: Delivery::Sent,
             attachment: None,
             location: None,
+            reply_to: reply_to.map(str::to_string),
         };
         let app = AppMessage::Text {
             v: 1,
             id: msg.id.clone(),
             ts: msg.ts,
             body: msg.body.clone(),
+            reply: msg.reply_to.clone(),
         };
         let mut msg = msg;
         if self
@@ -1508,6 +1528,7 @@ impl Client {
             read: true,
             status: Delivery::Sent,
             location: None,
+            reply_to: None,
             attachment: Some(attachment),
         };
         if self
@@ -1781,6 +1802,7 @@ impl Client {
             read: false,
             status: Delivery::Sent,
             location: None,
+            reply_to: None,
             attachment: Some(attachment),
         };
         self.typing.remove(&sender);
@@ -1835,6 +1857,7 @@ impl Client {
                 live_until: loc.live_until,
                 updated_at: ts,
             }),
+            reply_to: None,
         };
         if self
             .send_app_with(
@@ -1984,6 +2007,7 @@ impl Client {
                 live_until: l.live_until,
                 updated_at: l.ts,
             }),
+            reply_to: None,
         };
         self.typing.remove(&sender);
         self.state.messages.push(m.clone());
@@ -2176,6 +2200,113 @@ impl Client {
             has,
         });
         Ok(vec![Event::PhotoChanged { identity: sender }])
+    }
+
+    // ---------- cancellare, svuotare, silenziare (SPEC §7.1b) ----------
+
+    /// Toglie un file salvato sul telefono (la cartella del messaggio).
+    pub(crate) fn remove_files(&self, message_id: &str) {
+        let dir = self
+            .dir
+            .join(FILES_DIR)
+            .join(rondine_core::file::safe_name(message_id));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Cancella messaggi di una chat 1:1. Per me sempre; con `for_everyone` chiede anche al
+    /// contatto di cancellare quelli che ho mandato io (gli altri restano a lui).
+    pub async fn delete_messages(
+        &mut self,
+        with: &PublicKey,
+        ids: &[String],
+        for_everyone: bool,
+    ) -> Result<()> {
+        let mine: Vec<String> = self
+            .state
+            .messages
+            .iter()
+            .filter(|m| &m.contact == with && m.outgoing && ids.contains(&m.id))
+            .map(|m| m.id.clone())
+            .collect();
+        self.state
+            .messages
+            .retain(|m| !(&m.contact == with && ids.contains(&m.id)));
+        for id in ids {
+            self.remove_files(id);
+        }
+        self.save()?;
+        if for_everyone && !mine.is_empty() {
+            let contact = self.chat_contact(with).await?;
+            for part in mine.chunks(MAX_DELETE_IDS) {
+                self.send_app(
+                    &contact,
+                    &AppMessage::Delete {
+                        v: 1,
+                        ids: part.to_vec(),
+                    },
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Un `delete` dal contatto: tolgo solo i suoi messaggi con quegli id.
+    fn received_delete(&mut self, sender: PublicKey, ids: Vec<String>) -> Vec<Event> {
+        let ids: Vec<String> = ids.into_iter().take(MAX_DELETE_IDS).collect();
+        let gone: Vec<String> = self
+            .state
+            .messages
+            .iter()
+            .filter(|m| m.contact == sender && !m.outgoing && ids.contains(&m.id))
+            .map(|m| m.id.clone())
+            .collect();
+        if gone.is_empty() {
+            return Vec::new();
+        }
+        self.state
+            .messages
+            .retain(|m| !(m.contact == sender && !m.outgoing && gone.contains(&m.id)));
+        for id in &gone {
+            self.remove_files(id);
+        }
+        vec![Event::Deleted {
+            contact: sender,
+            ids: gone,
+        }]
+    }
+
+    /// Svuota la chat con un contatto, solo su questo telefono.
+    pub fn clear_chat(&mut self, with: &PublicKey) -> Result<()> {
+        let ids: Vec<String> = self
+            .state
+            .messages
+            .iter()
+            .filter(|m| &m.contact == with)
+            .map(|m| m.id.clone())
+            .collect();
+        self.state.messages.retain(|m| &m.contact != with);
+        for id in &ids {
+            self.remove_files(id);
+        }
+        self.save()
+    }
+
+    /// Silenzia (o riattiva) le notifiche di un contatto o di un gruppo, per id in b64.
+    pub fn set_muted(&mut self, id: &str, muted: bool) -> Result<()> {
+        if let Some(c) = self
+            .state
+            .contacts
+            .iter_mut()
+            .find(|c| c.identity.to_b64() == id)
+        {
+            c.muted = muted;
+        } else if let Some(g) = self.state.group_chats.iter_mut().find(|g| g.id == id) {
+            g.muted = muted;
+        } else {
+            return Err(Error::NotFound("chat sconosciuta".into()));
+        }
+        self.save()
     }
 
     /// Cifra un messaggio applicativo nella chat con il contatto e lo deposita nella sua casella.
@@ -2566,6 +2697,7 @@ impl Client {
                     favorite: false,
                     addrs: Vec::new(),
                     phone_verified_by: None,
+                    muted: false,
                 });
             }
         }
@@ -2610,7 +2742,14 @@ impl Client {
         let app: AppMessage = serde_json::from_slice(&plaintext)?;
         check_version(app.version())?;
         match app {
-            AppMessage::Text { id, ts, body, .. } => {
+            AppMessage::Delete { ids, .. } => Ok(self.received_delete(sender, ids)),
+            AppMessage::Text {
+                id,
+                ts,
+                body,
+                reply,
+                ..
+            } => {
                 if self.state.messages.iter().any(|m| m.id == id) {
                     return Ok(Vec::new());
                 }
@@ -2624,6 +2763,7 @@ impl Client {
                     status: Delivery::Sent,
                     attachment: None,
                     location: None,
+                    reply_to: reply,
                 };
                 self.typing.remove(&sender);
                 self.state.messages.push(m.clone());

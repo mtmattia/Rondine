@@ -410,3 +410,41 @@ async fn foto_del_profilo_a_contatti_e_gruppi() -> R {
     );
     Ok(())
 }
+
+/// Risposte e cancellazioni nei gruppi (SPEC §7.1b): solo chi ha mandato un messaggio può
+/// cancellarlo per tutti.
+#[tokio::test]
+async fn rispondere_e_cancellare_nel_gruppo() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut anna = profile(&tmp, "Anna", &node).await?;
+    let mut bruno = profile(&tmp, "Bruno", &node).await?;
+    connect(&mut anna, &mut bruno).await?;
+    let g = anna.create_group("Gita", &[bruno.identity()]).await?;
+    sync_ok(&mut bruno).await?;
+    let q = anna
+        .send_group_text(&g.id, "partiamo alle 7")
+        .await?
+        .message;
+    sync_ok(&mut bruno).await?;
+    let r = bruno
+        .send_group_reply(&g.id, "presto!", Some(&q.id))
+        .await?
+        .message;
+    let m = group_messages(&mut anna).await?.pop().ok_or("risposta")?;
+    assert_eq!(m.reply_to.as_deref(), Some(q.id.as_str()));
+
+    // Bruno non può cancellare per tutti il messaggio di Anna; il suo sì.
+    bruno
+        .delete_group_messages(&g.id, &[q.id.clone(), r.id.clone()], true)
+        .await?;
+    sync_ok(&mut anna).await?;
+    let ids: Vec<String> = anna
+        .group_messages(&g.id)
+        .iter()
+        .map(|m| m.id.clone())
+        .collect();
+    assert!(ids.contains(&q.id), "il messaggio di Anna deve restare");
+    assert!(!ids.contains(&r.id), "quello di Bruno deve sparire");
+    Ok(())
+}

@@ -43,6 +43,9 @@ pub struct Contact {
     /// Trovato col numero verificato via SMS: il nodo che l'ha verificato (SPEC §13).
     #[serde(default)]
     pub phone_verified_by: Option<String>,
+    /// Notifiche silenziate per questa chat (solo sul telefono).
+    #[serde(default)]
+    pub muted: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -64,6 +67,9 @@ pub struct ChatMessage {
     /// Posizione (SPEC §7.6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
+    /// Id del messaggio a cui risponde (SPEC §7.1b).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
 }
 
 /// Posizione di un messaggio, fissa o in tempo reale (SPEC §7.6).
@@ -162,6 +168,9 @@ pub struct GroupChat {
     /// Permesso `gruppo` che il mio nodo ha emesso per questo gruppo.
     pub my_permit: Option<SignedPermit>,
     pub created_at: u64,
+    /// Notifiche silenziate per questo gruppo (solo sul telefono).
+    #[serde(default)]
+    pub muted: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -180,6 +189,9 @@ pub struct GroupMessage {
     /// Posizione (SPEC §7.6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
+    /// Id del messaggio a cui risponde (SPEC §7.1b).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

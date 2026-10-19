@@ -36,6 +36,11 @@ pub enum GroupEvent {
     PhotoChanged {
         identity: PublicKey,
     },
+    /// Un membro ha cancellato per tutti questi suoi messaggi (SPEC §7.1b).
+    Deleted {
+        group: String,
+        ids: Vec<String>,
+    },
 }
 
 /// Esito di [`Client::sync_all`].
@@ -328,6 +333,7 @@ impl Client {
             active: true,
             my_permit: permit,
             created_at: now(),
+            muted: false,
         };
         self.state.group_chats.push(group.clone());
         self.save()?;
@@ -470,6 +476,16 @@ impl Client {
     }
 
     pub async fn send_group_text(&mut self, gid: &str, body: &str) -> Result<GroupDelivery> {
+        self.send_group_reply(gid, body, None).await
+    }
+
+    /// Un testo nel gruppo che risponde a un altro messaggio del gruppo (SPEC §7.1b).
+    pub async fn send_group_reply(
+        &mut self,
+        gid: &str,
+        body: &str,
+        reply_to: Option<&str>,
+    ) -> Result<GroupDelivery> {
         let body = body.trim();
         if body.is_empty() {
             return Err(Error::Invalid("messaggio vuoto".into()));
@@ -488,6 +504,7 @@ impl Client {
             read: true,
             attachment: None,
             location: None,
+            reply_to: reply_to.map(str::to_string),
         };
         let envelope = self.group_encrypt(
             &gid_bytes(gid)?,
@@ -496,6 +513,7 @@ impl Client {
                 id: message.id.clone(),
                 ts: message.ts,
                 body: message.body.clone(),
+                reply: message.reply_to.clone(),
             },
         )?;
         let undelivered = self.fanout(&g.members, &envelope).await;
@@ -510,6 +528,60 @@ impl Client {
             message,
             undelivered,
         })
+    }
+
+    /// Cancella messaggi di un gruppo: per me sempre; con `for_everyone` chiede agli altri di
+    /// cancellare quelli che ho mandato io.
+    pub async fn delete_group_messages(
+        &mut self,
+        gid: &str,
+        ids: &[String],
+        for_everyone: bool,
+    ) -> Result<()> {
+        let mine: Vec<String> = self
+            .state
+            .group_messages
+            .iter()
+            .filter(|m| m.group == gid && m.outgoing && ids.contains(&m.id))
+            .map(|m| m.id.clone())
+            .collect();
+        self.state
+            .group_messages
+            .retain(|m| !(m.group == gid && ids.contains(&m.id)));
+        for id in ids {
+            self.remove_files(id);
+        }
+        self.save()?;
+        if for_everyone && !mine.is_empty() {
+            for part in mine.chunks(100) {
+                self.group_send(
+                    gid,
+                    &AppMessage::Delete {
+                        v: 1,
+                        ids: part.to_vec(),
+                    },
+                    crate::Kind::Normal,
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Svuota la chat di un gruppo, solo su questo telefono.
+    pub fn clear_group_chat(&mut self, gid: &str) -> Result<()> {
+        let ids: Vec<String> = self
+            .state
+            .group_messages
+            .iter()
+            .filter(|m| m.group == gid)
+            .map(|m| m.id.clone())
+            .collect();
+        self.state.group_messages.retain(|m| m.group != gid);
+        for id in &ids {
+            self.remove_files(id);
+        }
+        self.save()
     }
 
     /// Cifra un messaggio nel gruppo e lo consegna a tutti i membri.
@@ -555,6 +627,7 @@ impl Client {
             read: true,
             attachment: Some(attachment),
             location: None,
+            reply_to: None,
         };
         self.group_send(gid, &AppMessage::File(Box::new(f)), crate::Kind::Normal)
             .await?;
@@ -602,6 +675,7 @@ impl Client {
                 live_until: loc.live_until,
                 updated_at: ts,
             }),
+            reply_to: None,
         };
         self.group_send(gid, &AppMessage::Location(loc), crate::Kind::Normal)
             .await?;
@@ -654,6 +728,7 @@ impl Client {
             active: true,
             my_permit: None,
             created_at,
+            muted: false,
         };
         for card in cards {
             merge_card(&mut g, card, members, &me, false);
@@ -728,7 +803,13 @@ impl Client {
         check_version(app.version())?;
         let me = self.identity.public();
         match app {
-            AppMessage::Text { id, ts, body, .. } => {
+            AppMessage::Text {
+                id,
+                ts,
+                body,
+                reply,
+                ..
+            } => {
                 if self.state.group_messages.iter().any(|m| m.id == id) {
                     return Ok(());
                 }
@@ -742,6 +823,7 @@ impl Client {
                     read: false,
                     attachment: None,
                     location: None,
+                    reply_to: reply,
                 };
                 self.state.group_messages.push(m.clone());
                 self.batch.groups.push(GroupEvent::Message(m));
@@ -761,6 +843,7 @@ impl Client {
                     read: false,
                     attachment: Some(attachment),
                     location: None,
+                    reply_to: None,
                 };
                 self.state.group_messages.push(m.clone());
                 self.batch.groups.push(GroupEvent::Message(m));
@@ -788,9 +871,35 @@ impl Client {
                         live_until: l.live_until,
                         updated_at: l.ts,
                     }),
+                    reply_to: None,
                 };
                 self.state.group_messages.push(m.clone());
                 self.batch.groups.push(GroupEvent::Message(m));
+            }
+            AppMessage::Delete { ids, .. } => {
+                // Solo i messaggi di chi chiede (SPEC §7.1b).
+                let ids: Vec<String> = ids.into_iter().take(100).collect();
+                let gone: Vec<String> = self
+                    .state
+                    .group_messages
+                    .iter()
+                    .filter(|m| {
+                        m.group == gid && m.sender == sender && !m.outgoing && ids.contains(&m.id)
+                    })
+                    .map(|m| m.id.clone())
+                    .collect();
+                if !gone.is_empty() {
+                    self.state
+                        .group_messages
+                        .retain(|m| !(m.group == gid && gone.contains(&m.id)));
+                    for id in &gone {
+                        self.remove_files(id);
+                    }
+                    self.batch.groups.push(GroupEvent::Deleted {
+                        group: gid.to_string(),
+                        ids: gone,
+                    });
+                }
             }
             AppMessage::Profile { ts, photo, .. } => {
                 // Anche da chi non è un contatto: lo si vede nel gruppo (SPEC §7.7).
@@ -962,6 +1071,7 @@ mod tests {
             active: true,
             my_permit: None,
             created_at: 0,
+            muted: false,
         };
         let members = [me, carla.public()];
         merge_card(

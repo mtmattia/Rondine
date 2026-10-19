@@ -103,6 +103,21 @@ enum Cmd {
     Posizione(PosizioneCmd),
     /// Scarica di nuovo il file di un messaggio ricevuto (id mostrato da `leggi`).
     Scarica { id: String },
+    /// Risponde a un messaggio (id mostrato da `leggi`).
+    Rispondi {
+        contatto: String,
+        id: String,
+        #[arg(required = true, num_args = 1..)]
+        testo: Vec<String>,
+    },
+    /// Cancella messaggi (id mostrati da `leggi`); con --per-tutti anche al contatto (solo i miei).
+    Elimina {
+        contatto: String,
+        #[arg(required = true, num_args = 1..)]
+        id: Vec<String>,
+        #[arg(long)]
+        per_tutti: bool,
+    },
     /// Ritira e mostra i messaggi nuovi.
     Sincronizza,
     /// Mostra la conversazione con un contatto.
@@ -382,6 +397,10 @@ fn print_group_events(events: &[GroupEvent], client: &Client) {
                 let name = g.map(|g| g.name.as_str()).unwrap_or("?");
                 println!("[{name}] {}: {}", who(client, g, &m.sender), group_text(m));
             }
+            GroupEvent::Deleted { group: gid, ids } => {
+                let name = group(gid).map(|g| g.name.as_str()).unwrap_or("?");
+                println!("- [{name}] cancellati {} messaggi", ids.len());
+            }
             GroupEvent::PhotoChanged { identity } => {
                 if let Some(p) = client.photo_of(identity) {
                     println!("~ {} ha una foto nuova: {}", identity.short(), p.display());
@@ -411,6 +430,15 @@ fn print_events(events: &[Event], client: &Client) {
     for e in events {
         match e {
             Event::NewContact { name, .. } => println!("+ nuovo contatto: {name}"),
+            Event::Deleted { contact, ids } => {
+                let who = client
+                    .contacts()
+                    .iter()
+                    .find(|c| &c.identity == contact)
+                    .map(|c| c.display_name.clone())
+                    .unwrap_or_else(|| contact.short());
+                println!("- {who} ha cancellato {} messaggi", ids.len());
+            }
             Event::PhotoChanged { identity } => {
                 let who = client
                     .contacts()
@@ -753,6 +781,27 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Scarica { id } => {
             println!("Salvato in {}", c.download(&id).await?.display());
         }
+        Cmd::Rispondi {
+            contatto,
+            id,
+            testo,
+        } => {
+            let who = c.find_contact(&contatto)?.identity;
+            c.send_reply(&who, &testo.join(" "), Some(&id)).await?;
+            println!("Inviato.");
+        }
+        Cmd::Elimina {
+            contatto,
+            id,
+            per_tutti,
+        } => {
+            let who = c.find_contact(&contatto)?.identity;
+            c.delete_messages(&who, &id, per_tutti).await?;
+            println!(
+                "Cancellati{}.",
+                if per_tutti { " per tutti" } else { " per te" }
+            );
+        }
         Cmd::Scrivi { contatto, testo } => {
             let id = c.find_contact(&contatto)?.identity;
             c.send_text(&id, &testo.join(" ")).await?;
@@ -769,10 +818,16 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Leggi { contatto } => {
             let contact = c.find_contact(&contatto)?.clone();
             for m in c.messages_with(&contact.identity) {
+                let quote = m
+                    .reply_to
+                    .as_ref()
+                    .map(|r| format!("↪ {} ", r.chars().take(8).collect::<String>()))
+                    .unwrap_or_default();
+                let short: String = m.id.chars().take(8).collect();
                 if m.outgoing {
-                    println!("io: {}  {}", text(m), ticks(m.status));
+                    println!("io: {quote}{}  {}  ({short})", text(m), ticks(m.status));
                 } else {
-                    println!("{}: {}", contact.display_name, text(m));
+                    println!("{}: {quote}{}  ({short})", contact.display_name, text(m));
                 }
             }
             // Leggere la conversazione la segna come letta (e lo conferma al contatto).

@@ -188,7 +188,9 @@ Chi riceve controlla che le due coincidano.
 
 ```json
 { "v": 1, "type": "hello", "card": <Signed<Card>> }
-{ "v": 1, "type": "text", "id": "<b64 16 byte>", "ts": 1792240000, "body": "ciao" }
+{ "v": 1, "type": "text", "id": "<b64 16 byte>", "ts": 1792240000, "body": "ciao",
+  "reply": "<id del messaggio a cui risponde>" }
+{ "v": 1, "type": "delete", "ids": ["<id di un mio messaggio>", "…"] }
 { "v": 1, "type": "receipt", "status": "delivered", "ids": ["<id di un text>", "…"] }
 { "v": 1, "type": "typing", "active": true, "ts": 1792240000 }
 { "v": 1, "type": "group", ... }   // §7.4
@@ -201,6 +203,13 @@ Chi riceve controlla che le due coincidano.
 
 Un `type` sconosciuto (da una versione più nuova dell'app) si **ignora** senza errori: così i
 tipi nuovi non disturbano chi non ha ancora aggiornato.
+
+### 7.1b Risposte e cancellazioni
+- `reply` (facoltativo, in `text`) è l'id del messaggio citato, della stessa chat. Chi lo riceve
+  mostra la citazione se ha quel messaggio; altrimenti lo ignora.
+- `delete` cancella **per tutti** messaggi già mandati: chi lo riceve toglie, nella chat 1:1 o nel
+  gruppo da cui arriva, solo i messaggi con quegli id **mandati da chi chiede** (file compresi).
+  Al massimo 100 id per messaggio. Cancellare solo per sé non manda niente.
 
 ### 7.2 Conferme (spunte)
 Chi ritira dei `text` risponde con un `receipt` `delivered` per contatto; quando la persona apre

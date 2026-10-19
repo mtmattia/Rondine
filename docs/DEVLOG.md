@@ -210,3 +210,7 @@ Una riga per modifica: data, cosa è cambiato.
   `--sms-password` il nodo li spedisce da un telefono Android con "SMS Gateway for Android" in
   modalità server locale (POST /message, Basic); nel log solo esito e numero mascherato. Guida in
   `docs/NIDO.md`. 1 test con un finto gateway.
+- 2026-10-19 — Risposte e cancellazioni (SPEC §7.1b): `reply` nei `text` (citazione), messaggio
+  `delete` per cancellare per tutti i propri messaggi (chi riceve toglie solo quelli di chi
+  chiede), in chat 1:1 e gruppi; "svuota chat" e "silenzia" solo sul telefono. Client, CLI
+  (`rondine rispondi`, `rondine elimina --per-tutti`, id in `leggi`) e ponte. 2 test.

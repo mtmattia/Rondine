@@ -21,8 +21,8 @@ android {
         applicationId = "io.github.mtmattia.rondine"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
 
         // Nodo proposto al primo avvio sui telefoni veri (facoltativo, si può cancellare o cambiare
         // dopo in Impostazioni): il nido pubblico di Mattia. Un altro con `rondine.nodo` in

@@ -199,6 +199,9 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "profile", ... }           // §7.7
 ```
 
+Un `type` sconosciuto (da una versione più nuova dell'app) si **ignora** senza errori: così i
+tipi nuovi non disturbano chi non ha ancora aggiornato.
+
 ### 7.2 Conferme (spunte)
 Chi ritira dei `text` risponde con un `receipt` `delivered` per contatto; quando la persona apre
 la chat, un `receipt` `read` con gli id appena letti. Viaggiano dentro MLS come i messaggi, quindi

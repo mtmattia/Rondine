@@ -84,6 +84,9 @@ pub enum AppMessage {
         #[serde(default)]
         photo: Option<String>,
     },
+    /// Un tipo che questa versione non conosce, da una versione più nuova: si ignora (SPEC §7).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Foto del profilo: JPEG di al massimo 48 KiB (SPEC §7.7).
@@ -173,6 +176,7 @@ impl AppMessage {
             AppMessage::File(f) => f.v,
             AppMessage::Location(l) | AppMessage::LocationUpdate(l) => l.v,
             AppMessage::Profile { v, .. } => *v,
+            AppMessage::Unknown => crate::PROTOCOL_VERSION,
         }
     }
 }
@@ -215,6 +219,11 @@ mod tests {
         };
         assert_eq!(m.at.as_ref().and_then(|a| a.file.as_deref()), Some("f"));
         assert!(serde_json::to_string(&f)?.starts_with(r#"{"type":"file","v":1,"#));
+        // Un tipo che questa versione non conosce (da una versione più nuova): si riconosce e si
+        // ignora, invece di scartare il messaggio con un errore.
+        let futuro: AppMessage =
+            serde_json::from_str(r#"{"type":"sondaggio","v":1,"domanda":"giovedì?"}"#)?;
+        assert_eq!(futuro, AppMessage::Unknown);
         let u: AppMessage = serde_json::from_str(
             r#"{"type":"location_update","v":1,"id":"x","ts":5,"lat":45.5,"lon":9.2,"live_until":60}"#,
         )?;

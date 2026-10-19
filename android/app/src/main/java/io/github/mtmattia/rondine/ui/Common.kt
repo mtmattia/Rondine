@@ -1,5 +1,8 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,8 +37,26 @@ import java.util.Locale
 import uniffi.rondine_ffi.MessageStatus
 
 @Composable
-fun Avatar(name: String, id: String, size: Dp = 52.dp) {
+fun Avatar(name: String, id: String, size: Dp = 52.dp, photo: String? = null) {
     val color = AvatarColors[Math.floorMod(id.hashCode(), AvatarColors.size)]
+    // La foto si rilegge quando il file cambia (stesso percorso, contenuto nuovo).
+    val stamp = photo?.let { java.io.File(it).lastModified() } ?: 0L
+    val image by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, photo, stamp) {
+        value = photo?.let { p ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                android.graphics.BitmapFactory.decodeFile(p)?.let { it.asImageBitmap() }
+            }
+        }
+    }
+    val img = image
+    if (img != null) {
+        androidx.compose.foundation.Image(
+            img, name,
+            Modifier.size(size).clip(CircleShape),
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        )
+        return
+    }
     Box(
         Modifier.size(size).background(color, CircleShape),
         contentAlignment = Alignment.Center,

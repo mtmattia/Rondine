@@ -326,3 +326,27 @@ fun AttachPanel(actions: List<AttachAction>) {
         }
     }
 }
+
+/** Foto del profilo (SPEC §7.7): ritaglio quadrato al centro, 256×256, JPEG sotto i 48 KiB. */
+suspend fun profilePhoto(context: Context, uri: Uri): ByteArray = withContext(Dispatchers.IO) {
+    val src = ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { d, info, _ ->
+        // Già ridotta in lettura: niente bitmap enormi in memoria.
+        val side = minOf(info.size.width, info.size.height)
+        if (side > 1024) {
+            val scale = 1024f / side
+            d.setTargetSize((info.size.width * scale).toInt(), (info.size.height * scale).toInt())
+        }
+        d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+    }
+    val side = minOf(src.width, src.height)
+    val square = Bitmap.createBitmap(src, (src.width - side) / 2, (src.height - side) / 2, side, side)
+    val small = Bitmap.createScaledBitmap(square, 256, 256, true)
+    var quality = 85
+    while (true) {
+        val out = ByteArrayOutputStream().also { small.compress(Bitmap.CompressFormat.JPEG, quality, it) }.toByteArray()
+        if (out.size <= 48 * 1024 || quality <= 30) return@withContext out
+        quality -= 10
+    }
+    @Suppress("UNREACHABLE_CODE")
+    ByteArray(0)
+}

@@ -453,7 +453,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                         Modifier.clickable(onClick = onHeader),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Avatar(c?.name ?: "", contactId, 38.dp)
+                        Avatar(c?.name ?: "", contactId, 38.dp, c?.photo)
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {

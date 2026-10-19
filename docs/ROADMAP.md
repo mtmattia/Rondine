@@ -26,6 +26,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Foto e documenti | 🟡 | SPEC §7.5: cifrati sul telefono, nella casella del destinatario fino a 64 MiB, dentro il messaggio se piccoli; client, nodo, CLI e app (foto ridotte a 1600 px con anteprima, documenti aperti con le app del telefono); niente coda se il nodo non risponde; nei gruppi non ancora |
 | Messaggi vocali | ✅ | nell'app: un tocco sul microfono apre la registrazione con pausa, cestino e invio; viaggiano come file `audio/mp4` (SPEC §7.5) |
 | Emoji | ✅ | pannello nell'app |
+| Foto del profilo | ✅ | SPEC §7.7: la vedono contatti e membri dei gruppi in comune, dentro MLS; in Impostazioni si sceglie dalla galleria o si toglie |
 | Posizione e posizione in tempo reale | ✅ | SPEC §7.6: fino a 8 ore, aggiornamenti silenziosi (senza sveglia) ogni 15 s anche ad app chiusa; mappa su due livelli (tessere OpenStreetMap del quadrato di ~2 km, punto esatto disegnato dal telefono), si può spegnere; client, CLI e app |
 | Cambiare nodo | ✅ | SPEC §12.7: contatti e gruppi ricevono il biglietto nuovo, la vecchia casella si ritira per 30 giorni; CLI `rondine nodo` e Impostazioni |
 | Contatto, sondaggio, evento | ⬜ | voci del pannello allegati di WhatsApp non ancora fatte |

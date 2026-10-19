@@ -204,7 +204,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
                     Modifier.fillMaxWidth().clickable { onOpenChat(c.id) }.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Avatar(c.name, c.id, 44.dp)
+                    Avatar(c.name, c.id, 44.dp, c.photo)
                     Spacer(Modifier.width(14.dp))
                     Column {
                         Text(c.name, fontSize = 16.sp, fontWeight = FontWeight.Medium)

@@ -189,3 +189,8 @@ Una riga per modifica: data, cosa è cambiato.
   contatti e ai gruppi attivi quando cambia, a un contatto nuovo appena collegato, a un gruppo
   entrando; vale la più recente; non sta nel biglietto. Client, CLI (`rondine foto`) e ponte. 1 test
   (anche un membro di gruppo che non è un contatto la vede).
+- 2026-10-19 — App: foto del profilo in Impostazioni (galleria → ritaglio quadrato 256×256, JPEG
+  ≤ 48 KiB, o "Togli foto") e al posto delle iniziali in lista chat, chat, contatti e membri dei
+  gruppi. Provato sull'emulatore nei due sensi con la CLI. Messaggi di un tipo sconosciuto (da
+  versioni più nuove) ora si ignorano invece di dare errore (SPEC §7), così i tipi nuovi non
+  disturbano chi non ha aggiornato.

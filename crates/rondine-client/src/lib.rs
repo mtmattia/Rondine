@@ -2630,6 +2630,8 @@ impl Client {
             AppMessage::Location(l) => self.received_location(sender, l),
             AppMessage::LocationUpdate(l) => self.received_location_update(sender, l),
             AppMessage::Profile { ts, photo, .. } => self.received_profile(sender, ts, photo),
+            // Da una versione più nuova: non si sa cosa sia, si lascia perdere senza errori.
+            AppMessage::Unknown => Ok(Vec::new()),
             AppMessage::Typing { active, ts, .. } => {
                 // Uno vecchio (ritirato tardi) non vale più.
                 let fresh = ts + TYPING_SHOW_SECS > now();

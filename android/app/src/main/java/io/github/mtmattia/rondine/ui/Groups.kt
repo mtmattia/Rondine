@@ -169,7 +169,7 @@ private fun ContactPicker(
                 Modifier.fillMaxWidth().clickable { onToggle(c.id) }.padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Avatar(c.name, c.id, 44.dp)
+                Avatar(c.name, c.id, 44.dp, c.photo)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(c.name, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -374,11 +374,11 @@ fun GroupInfoScreen(groupId: String, onBack: () -> Unit, onOpenChat: (String) ->
                 }
             }
             item {
-                MemberRow(name = "Tu", id = Repo.profile.value?.id ?: "", isAdmin = g.iAmAdmin, onClick = null, menu = null)
+                MemberRow(name = "Tu", id = Repo.profile.value?.id ?: "", photo = Repo.profile.value?.photo, isAdmin = g.iAmAdmin, onClick = null, menu = null)
             }
             items(g.members, key = { it.id }) { m ->
                 MemberRow(
-                    name = m.name, id = m.id, isAdmin = m.isAdmin,
+                    name = m.name, id = m.id, photo = m.photo, isAdmin = m.isAdmin,
                     onClick = if (m.isContact) ({ onOpenChat(m.id) }) else null,
                     menu = if (g.iAmAdmin && g.active) ({
                         DropdownMenuItem(
@@ -416,6 +416,7 @@ fun GroupInfoScreen(groupId: String, onBack: () -> Unit, onOpenChat: (String) ->
 private fun MemberRow(
     name: String,
     id: String,
+    photo: String? = null,
     isAdmin: Boolean,
     onClick: (() -> Unit)?,
     menu: (@Composable () -> Unit)?,
@@ -428,7 +429,7 @@ private fun MemberRow(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Avatar(name, id, 44.dp)
+            Avatar(name, id, 44.dp, photo)
             Spacer(Modifier.width(14.dp))
             Text(name, Modifier.weight(1f), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (isAdmin) {

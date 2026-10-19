@@ -1,5 +1,8 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.PhotoCamera
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -124,7 +127,7 @@ fun MyQrScreen(onBack: () -> Unit) {
         ) {
             Surface(shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp, color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Avatar(p.name, p.id, 64.dp)
+                    Avatar(p.name, p.id, 64.dp, p.photo)
                     Spacer(Modifier.height(8.dp))
                     Text(p.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     p.username?.let { Text("@$it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -211,7 +214,7 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Avatar(c.name, c.id, 72.dp)
+            Avatar(c.name, c.id, 72.dp, c.photo)
             Text(c.name, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
             c.username?.let { Text("@$it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -266,8 +269,60 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 snackbar.showSnackbar(block())
             } catch (e: RondineException) {
                 snackbar.showSnackbar(e.userMessage)
+            } catch (e: java.io.IOException) {
+                // Per esempio una foto che non si riesce a leggere.
+                snackbar.showSnackbar("Non riuscito: ${e.message}")
             }
         }
+    }
+
+    var photoMenu by remember { mutableStateOf(false) }
+    val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        run {
+            val jpeg = profilePhoto(context, uri)
+            Repo.client().setPhoto(jpeg)
+            Repo.refresh()
+            "Foto aggiornata: la vedono i tuoi contatti e i tuoi gruppi"
+        }
+    }
+    if (photoMenu) {
+        AlertDialog(
+            onDismissRequest = { photoMenu = false },
+            title = { Text("Foto del profilo") },
+            text = {
+                Column {
+                    Text(
+                        "La vedono solo i tuoi contatti e chi è nei tuoi gruppi: viaggia cifrata, " +
+                            "il nodo non la vede.",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = {
+                        photoMenu = false
+                        photoPicker.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                            ),
+                        )
+                    }) { Text("Scegli dalla galleria") }
+                    if (p.photo != null) {
+                        TextButton(onClick = {
+                            photoMenu = false
+                            run {
+                                Repo.client().setPhoto(null)
+                                Repo.refresh()
+                                "Foto tolta"
+                            }
+                        }) { Text("Togli foto", color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { photoMenu = false }) { Text("Chiudi") } },
+        )
     }
 
     BackScaffold("Impostazioni", onBack, snackbar) { m ->
@@ -276,7 +331,19 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 Modifier.fillMaxWidth().clickable(onClick = onMyQr).padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Avatar(p.name, p.id, 64.dp)
+                Box(Modifier.clickable { photoMenu = true }) {
+                    Avatar(p.name, p.id, 64.dp, p.photo)
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).size(22.dp)
+                            .background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.PhotoCamera, "Cambia foto", Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                }
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(p.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)

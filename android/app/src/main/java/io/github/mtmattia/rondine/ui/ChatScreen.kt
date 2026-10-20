@@ -1,9 +1,22 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.ReceiveContentListener
+import androidx.compose.foundation.content.TransferableContent
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Close
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -264,6 +277,49 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
         else Repo.client().sendFile(contactId, name, mime, data, caption, thumb, w, h)
     }
 
+    /** Revisione di sticker e GIF salvati: il pannello si ridisegna. */
+    var stickerRevision by remember { mutableStateOf(0) }
+
+    /** Manda uno sticker (SPEC §7.5): parte subito, senza didascalia. */
+    fun sendSticker(data: ByteArray, mime: String) {
+        scope.launch {
+            try {
+                if (isGroup) Repo.client().sendGroupSticker(contactId, mime, data)
+                else Repo.client().sendSticker(contactId, mime, data)
+                Repo.refresh()
+            } catch (e: RondineException) {
+                snackbar.showSnackbar("Non inviato: ${e.userMessage}")
+            }
+        }
+    }
+
+    /** Manda una GIF come file animato. */
+    fun sendGif(data: ByteArray) {
+        scope.launch {
+            try {
+                val (thumb, w, h) = imageMeta(data)
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())
+                sendFileHere("gif-$stamp.gif", "image/gif", data, null, thumb, w, h)
+                Repo.refresh()
+            } catch (e: RondineException) {
+                snackbar.showSnackbar("Non inviata: ${e.userMessage}")
+            }
+        }
+    }
+
+    /** GIF o sticker arrivati dalla tastiera (per esempio la ricerca GIF di Gboard). */
+    fun onKeyboardContent(data: ByteArray) {
+        scope.launch {
+            try {
+                val mime = StickerStore.mimeOf(data)
+                if (mime == "image/gif" && data.size > 60 * 1024) sendGif(data)
+                else StickerStore.fromImage(data, mime).let { s -> sendSticker(s, StickerStore.mimeOf(s)) }
+            } catch (e: Exception) {
+                snackbar.showSnackbar("Immagine non inviata: ${e.message}")
+            }
+        }
+    }
+
     fun onPicked(uri: android.net.Uri?, asPhoto: Boolean) {
         if (uri == null) return
         scope.launch {
@@ -277,6 +333,29 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
         }
     }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { onPicked(it, true) }
+    val gifPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                val data = readUri(context, uri)
+                if (StickerStore.mimeOf(data) == "image/gif") sendGif(data)
+                else snackbar.showSnackbar("Non è una GIF")
+            } catch (e: Exception) {
+                snackbar.showSnackbar("Non riesco a leggere la GIF: ${e.message}")
+            }
+        }
+    }
+    val stickerPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                val data = readUri(context, uri)
+                StickerStore.addFavorite(context, StickerStore.fromImage(data, StickerStore.mimeOf(data)))
+                stickerRevision++
+                snackbar.showSnackbar("Sticker creato: lo trovi tra i preferiti ⭐")
+            } catch (e: Exception) {
+                snackbar.showSnackbar("Sticker non creato: ${e.message}")
+            }
+        }
+    }
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { onPicked(it, false) }
 
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
@@ -545,6 +624,20 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                 scope.launch { snackbar.showSnackbar("Copiato") }
                             }) { Icon(Icons.Filled.ContentCopy, "Copia") }
                         }
+                        val saveable = sel.singleOrNull()?.attachment?.takeIf { (it.sticker || it.isGif) && it.path != null }
+                        if (saveable != null) {
+                            IconButton(onClick = {
+                                selected = emptySet()
+                                scope.launch {
+                                    val data = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        java.io.File(saveable.path!!).readBytes()
+                                    }
+                                    if (saveable.sticker) StickerStore.addFavorite(context, data) else StickerStore.addGif(context, data)
+                                    stickerRevision++
+                                    snackbar.showSnackbar(if (saveable.sticker) "Aggiunto agli sticker preferiti" else "Aggiunta alle GIF")
+                                }
+                            }) { Icon(Icons.Filled.Star, if (saveable.sticker) "Aggiungi agli sticker preferiti" else "Aggiungi alle GIF") }
+                        }
                         IconButton(onClick = { forwarding = true }) { Icon(Icons.AutoMirrored.Filled.Forward, "Inoltra") }
                         IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "Elimina") }
                     },
@@ -773,6 +866,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                         text = it
                         typingTo(it.isNotBlank())
                     },
+                    onContent = { onKeyboardContent(it) },
                     sending = sending,
                     emojiOpen = emojiOpen,
                     onEmoji = {
@@ -847,10 +941,30 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                         onSendCurrent = { sendLocation(null) },
                         onShareLive = { sendLocation(it) },
                     )
-                    emojiOpen -> EmojiPanel { e ->
-                        text += e
-                        typingTo(true)
-                    }
+                    emojiOpen -> ExpressionPanel(
+                        onEmoji = { e ->
+                            text += e
+                            typingTo(true)
+                        },
+                        onBackspace = { text = text.dropLastGrapheme() },
+                        onSticker = { s ->
+                            scope.launch {
+                                val (data, mime) = StickerStore.bytes(context, s)
+                                sendSticker(data, mime)
+                                stickerRevision++
+                            }
+                        },
+                        onGif = { f ->
+                            scope.launch {
+                                sendGif(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { f.readBytes() })
+                            }
+                        },
+                        onPickGif = { gifPicker.launch("image/gif") },
+                        onCreateSticker = {
+                            stickerPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        revision = stickerRevision,
+                    )
                     attachMenu -> AttachPanel(
                         listOf(
                             AttachAction("Galleria", Icons.Filled.PhotoLibrary, Color(0xFF3D7BE0)) {
@@ -879,6 +993,10 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                 }
                             },
                         ),
+                        onPhoto = { uri ->
+                            attachMenu = false
+                            onPicked(uri, true)
+                        },
                     )
                     else -> Spacer(Modifier.navigationBarsPadding())
                 }
@@ -976,6 +1094,29 @@ private fun Bubble(
             .padding(top = if (firstOfRun) 6.dp else 0.dp),
         horizontalArrangement = if (m.outgoing) Arrangement.End else Arrangement.Start,
     ) {
+        val sticker = m.attachment?.takeIf { it.sticker }
+        if (sticker != null) {
+            // Sticker: grande e senza bolla, con l'ora in una pastiglia sotto.
+            Column(horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start) {
+                if (isGroup && !m.outgoing && firstOfRun && m.senderName != null) {
+                    Text(m.senderName, color = senderColor(m.senderId), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                StickerMessage(sticker.path, onClick = { if (selecting) onSelect() }, onLongClick = onSelect)
+                Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).background(colors.bubbleIn.copy(alpha = 0.85f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
+                    val st = m.status
+                    if (m.outgoing && st != null) {
+                        Spacer(Modifier.width(3.dp))
+                        MessageTicks(st, colors.bubbleMeta, 15.dp)
+                    }
+                }
+            }
+            return@Row
+        }
         Surface(
             shape = shape,
             color = if (m.outgoing) colors.bubbleOut else colors.bubbleIn,
@@ -1003,7 +1144,12 @@ private fun Bubble(
                     LocationView(m.ts, loc, onOpen = { onOpenLocation(loc) }, onStop = if (m.outgoing) onStopLocation else null)
                 }
                 if (a != null) {
-                    AttachmentView(a, downloading, onOpen = { onOpen(a) }, onDownload = onDownload)
+                    AttachmentView(
+                        a, downloading,
+                        onOpen = { if (selecting) onSelect() else onOpen(a) },
+                        onDownload = { if (selecting) onSelect() else onDownload() },
+                        onLongClick = onSelect,
+                    )
                     if (m.body.isNotBlank()) Spacer(Modifier.size(4.dp))
                 }
                 if (m.body.isNotBlank() || (a == null && loc == null)) {
@@ -1027,10 +1173,12 @@ private fun Bubble(
 
 /** Barra di scrittura come su WhatsApp: emoji, testo, 📎 e fotocamera nel campo; a destra il
  *  microfono (un tocco apre la registrazione) o "Invia". */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun InputBar(
     text: String,
     onText: (String) -> Unit,
+    onContent: (ByteArray) -> Unit,
     sending: Boolean,
     emojiOpen: Boolean,
     onEmoji: () -> Unit,
@@ -1041,6 +1189,18 @@ private fun InputBar(
     onSend: () -> Unit,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val context = LocalContext.current
+    // Il campo lavora con TextFieldState (serve per ricevere GIF e sticker dalla tastiera), la
+    // chat con una stringa: si tengono allineati nei due sensi.
+    val field = rememberTextFieldState(text)
+    val currentText by rememberUpdatedState(text)
+    val currentOnText by rememberUpdatedState(onText)
+    LaunchedEffect(text) {
+        if (field.text.toString() != text) field.setTextAndPlaceCursorAtEnd(text)
+    }
+    LaunchedEffect(field) {
+        snapshotFlow { field.text.toString() }.collect { if (it != currentText) currentOnText(it) }
+    }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.Bottom,
@@ -1058,11 +1218,29 @@ private fun InputBar(
                         else Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = muted)
                     }
                     TextField(
-                        value = text,
-                        onValueChange = onText,
+                        state = field,
                         placeholder = { Text("Messaggio") },
-                        modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) onFieldTap() },
-                        maxLines = 6,
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { if (it.isFocused) onFieldTap() }
+                            .contentReceiver(object : ReceiveContentListener {
+                                // GIF e sticker dalla tastiera: i byte si leggono subito, finché
+                                // la tastiera ci dà il permesso di leggerli.
+                                override fun onReceive(transferableContent: TransferableContent): TransferableContent? {
+                                    if (!transferableContent.hasMediaType(MediaType.Image)) return transferableContent
+                                    return transferableContent.consume { item ->
+                                        val uri = item.uri ?: return@consume false
+                                        val data = try {
+                                            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                        } catch (_: Exception) {
+                                            null
+                                        }
+                                        if (data != null) onContent(data)
+                                        data != null
+                                    }
+                                }
+                            }),
+                        lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent,
@@ -1264,7 +1442,9 @@ private suspend fun forward(messages: List<UiMessage>, target: ChatTarget) {
                 val path = a.path ?: continue
                 val data = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { java.io.File(path).readBytes() }
                 val caption = m.body.ifBlank { null }
-                if (group) r.sendGroupFile(target.id, a.name, a.mime, data, caption, a.thumb, a.width, a.height)
+                if (a.sticker) {
+                    if (group) r.sendGroupSticker(target.id, a.mime, data) else r.sendSticker(target.id, a.mime, data)
+                } else if (group) r.sendGroupFile(target.id, a.name, a.mime, data, caption, a.thumb, a.width, a.height)
                 else r.sendFile(target.id, a.name, a.mime, data, caption, a.thumb, a.width, a.height)
             }
             l != null -> {

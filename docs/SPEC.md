@@ -305,6 +305,11 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
   telefono e lo cancella dal nodo. Le spunte (§7.2) valgono come per `text`: l'`id` è quello del
   messaggio `file`.
 - `name` è solo un suggerimento: chi riceve lo ripulisce (niente percorsi) prima di salvarlo.
+- **Sticker:** `"sticker": true` con un'immagine (WebP, PNG o GIF, di solito quadrata fino a
+  512 px) sempre in `data`, quindi al massimo 64 KiB. Si mostra senza bolla né didascalia; chi
+  riceve uno sticker con `at` lo tratta come una foto qualsiasi. Una versione che non conosce il
+  campo lo mostra come foto.
+- **GIF:** un `file` qualsiasi con `mime` `image/gif` (o WebP animato): si mostra animata.
 
 ### 7.6 Posizione
 

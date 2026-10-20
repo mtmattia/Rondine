@@ -112,6 +112,9 @@ pub struct Attachment {
     pub hash: String,
     #[serde(default)]
     pub at: Option<rondine_core::file::FileAt>,
+    /// Sticker (SPEC §7.5): si mostra senza bolla.
+    #[serde(default)]
+    pub sticker: bool,
 }
 
 /// Byte facoltativi salvati in base64url.

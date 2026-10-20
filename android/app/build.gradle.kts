@@ -21,8 +21,8 @@ android {
         applicationId = "io.github.mtmattia.rondine"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = "0.1.5"
         // Solo le architetture per cui c'è la libreria Rust: le altre librerie native (WebRTC,
         // JNA) non servirebbero a niente e allungherebbero l'APK.
         ndk { abiFilters += rustAbis }
@@ -194,6 +194,8 @@ dependencies {
     // Chiamate voce e video (SPEC §7.9): WebRTC compilato dai sorgenti dal progetto Conversations
     // (codice BSD-3, pacchetto Apache-2.0 o MIT), lo stesso usato da app su F-Droid.
     implementation(libs.webrtc)
+    // Tutte le emoji con categorie, recenti e tonalità della pelle (AndroidX, Apache-2.0).
+    implementation(libs.emoji.picker)
     // Solo versione Play: FCM tramite il ripetitore del nido (SPEC §8.1).
     "playImplementation"(libs.firebase.messaging)
     "playImplementation"(libs.androidx.fragment)

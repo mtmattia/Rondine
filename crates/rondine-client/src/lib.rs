@@ -47,6 +47,8 @@ pub struct NewFile {
     pub thumb: Option<Vec<u8>>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Sticker (SPEC §7.5): al massimo 64 KiB, viaggia dentro il messaggio.
+    pub sticker: bool,
 }
 
 impl NewFile {
@@ -1604,6 +1606,11 @@ impl Client {
             return Err(Error::Invalid("anteprima troppo grande".into()));
         }
         let sealed = rondine_core::file::seal(&file.data)?;
+        if file.sticker && sealed.ciphertext.len() > rondine_core::file::MAX_INLINE_BYTES {
+            return Err(Error::Invalid(
+                "sticker troppo grande (massimo 64 KiB)".into(),
+            ));
+        }
         let id = random_id();
         let (at, data) = if sealed.ciphertext.len() <= rondine_core::file::MAX_INLINE_BYTES {
             (None, Some(b64::encode(&sealed.ciphertext)))
@@ -1676,6 +1683,7 @@ impl Client {
             thumb: file.thumb.as_ref().map(b64::encode),
             width: file.width,
             height: file.height,
+            sticker: file.sticker,
         };
         let mine = Attachment {
             name,
@@ -1688,6 +1696,7 @@ impl Client {
             key: String::new(),
             hash: String::new(),
             at: None,
+            sticker: file.sticker,
         };
         Ok((msg, mine))
     }
@@ -1810,6 +1819,8 @@ impl Client {
             key: f.key.clone(),
             hash: f.hash.clone(),
             at: f.at.clone(),
+            // Uno sticker sta sempre dentro il messaggio; se no è una foto qualsiasi.
+            sticker: f.sticker && f.data.is_some(),
         };
         if let Some(data) = &f.data {
             let plain =

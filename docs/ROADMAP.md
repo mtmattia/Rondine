@@ -27,7 +27,10 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Messaggi vocali | ✅ | nell'app: un tocco sul microfono apre la registrazione con pausa, cestino e invio; viaggiano come file `audio/mp4` (SPEC §7.5) |
 | Rispondere, copiare, inoltrare, eliminare | ✅ | SPEC §7.1b: tieni premuto un messaggio; elimina per tutti solo i propri; anche nei gruppi |
 | Silenziare e svuotare le chat | ✅ | dalla lista chat, solo sul telefono |
-| Emoji | ✅ | pannello nell'app |
+| Emoji | ✅ | tutte, con categorie, recenti e tonalità della pelle (selettore AndroidX) |
+| Sticker | ✅ | SPEC §7.5: 4 raccolte incluse (Fluent Emoji 3D, MIT), preferiti, recenti, creati da una foto, salvati da quelli ricevuti, dalla tastiera (Emoji Kitchen di Gboard) |
+| GIF | ✅ | animate nella chat; dalla ricerca GIF della tastiera, dal telefono, GIF salvate; manca una ricerca dentro l'app (serve un fornitore: Giphy, Klipy…) |
+| Foto recenti negli allegati | ✅ | come su WhatsApp, con il permesso delle foto (anche "solo alcune") |
 | Foto del profilo | ✅ | SPEC §7.7: la vedono contatti e membri dei gruppi in comune, dentro MLS; in Impostazioni si sceglie dalla galleria o si toglie |
 | Posizione e posizione in tempo reale | ✅ | SPEC §7.6: fino a 8 ore, aggiornamenti silenziosi (senza sveglia) ogni 15 s anche ad app chiusa; mappa su due livelli (tessere OpenStreetMap del quadrato di ~2 km, punto esatto disegnato dal telefono), si può spegnere; client, CLI e app |
 | Cambiare nodo | ✅ | SPEC §12.7: contatti e gruppi ricevono il biglietto nuovo, la vecchia casella si ritira per 30 giorni; CLI `rondine nodo` e Impostazioni |

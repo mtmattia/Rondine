@@ -57,7 +57,9 @@ nomi utente.
   Rondine non usa la posizione in background per altri scopi.
 - **Notifiche:** per avvisarti dei messaggi.
 
-Foto e documenti si scelgono con il selettore di sistema: l'app non ha accesso alla galleria.
+- **Foto (facoltativo):** per mostrare le foto recenti nel pannello degli allegati. Si possono
+  concedere tutte, solo alcune, o nessuna: senza, foto e documenti si scelgono con il selettore
+  di sistema. Le foto non lasciano il telefono finché non le mandi tu.
 
 ## Chiamate
 

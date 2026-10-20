@@ -80,6 +80,9 @@ release non firmate da due cartelle diverse devono avere lo stesso `sha256sum` (
      avviate o accettate dall'utente, con la notifica della chiamata in corso e "Riaggancia";
    - notifiche a tutto schermo (`USE_FULL_SCREEN_INTENT`): l'app fa chiamate, lo squillo deve
      comparire anche a schermo bloccato (dichiarazione "funzionalità principale: chiamate");
+   - foto (`READ_MEDIA_IMAGES`): foto recenti nel pannello degli allegati, come nelle altre app
+     di messaggi; se Google la rifiutasse ("usa il selettore di foto"), nella versione `play` si
+     toglie il permesso dal manifest e il pannello mostra solo i pulsanti;
    - permessi sensibili: contatti (scoperta dalla rubrica senza inviare numeri), microfono
      (vocali e chiamate), fotocamera (QR, foto e videochiamate).
 

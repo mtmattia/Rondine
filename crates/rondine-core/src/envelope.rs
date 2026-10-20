@@ -187,6 +187,9 @@ pub struct FileMsg {
     pub width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
+    /// Sticker: immagine da mostrare senza bolla, sempre dentro il messaggio (`data`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sticker: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Foto recenti nel pannello degli allegati (solo per mostrarle; da Android 14 si possono
+         concedere solo alcune foto). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <!-- Messaggi vocali; la fotocamera la dichiara già il lettore di QR. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Posizione (SPEC §7.6): GPS o rete, senza servizi Google; in tempo reale con un servizio in
@@ -87,6 +95,18 @@
             android:stateNotNeeded="true"
             android:theme="@style/zxing_CaptureTheme"
             android:windowSoftInputMode="stateAlwaysHidden" />
+
+        <!-- Niente EmojiCompat automatico: chiederebbe il font delle emoji ai servizi Google.
+             Il selettore mostra le emoji che il telefono sa disegnare. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+        </provider>
 
         <!-- Foto e documenti ricevuti, da aprire con le altre app (SPEC §7.5). -->
         <provider

@@ -133,6 +133,8 @@ pub struct AttachmentInfo {
     pub thumb: Option<Vec<u8>>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Sticker: si mostra senza bolla.
+    pub sticker: bool,
 }
 
 #[derive(uniffi::Enum, Clone, Copy, PartialEq, Eq)]
@@ -404,6 +406,7 @@ fn attachment_info(a: &rondine_client::Attachment) -> AttachmentInfo {
         thumb: a.thumb.clone(),
         width: a.width,
         height: a.height,
+        sticker: a.sticker,
     }
 }
 
@@ -426,15 +429,7 @@ fn message(m: &ChatMessage) -> Message {
         ts: m.ts,
         read: m.read,
         status: m.status.into(),
-        attachment: m.attachment.as_ref().map(|a| AttachmentInfo {
-            name: a.name.clone(),
-            mime: a.mime.clone(),
-            size: a.size,
-            path: a.path.clone(),
-            thumb: a.thumb.clone(),
-            width: a.width,
-            height: a.height,
-        }),
+        attachment: m.attachment.as_ref().map(attachment_info),
         location: m.location.as_ref().map(|l| LocationInfo {
             lat: l.lat,
             lon: l.lon,
@@ -444,6 +439,17 @@ fn message(m: &ChatMessage) -> Message {
         }),
         reply_to: m.reply_to.clone(),
     }
+}
+
+fn sticker_file(mime: String, data: Vec<u8>) -> NewFile {
+    let ext = match mime.as_str() {
+        "image/png" => "png",
+        "image/gif" => "gif",
+        _ => "webp",
+    };
+    let mut f = NewFile::new(&format!("sticker.{ext}"), &mime, data);
+    f.sticker = true;
+    f
 }
 
 fn call_op_name(op: CallOp) -> &'static str {
@@ -834,9 +840,39 @@ impl Rondine {
             thumb,
             width,
             height,
+            sticker: false,
         };
         self.run(move |c| Box::pin(async move { Ok(message(&c.send_file(&k, file).await?)) }))
             .await
+    }
+
+    /// Manda uno sticker (WebP o PNG fino a 64 KiB, oppure una GIF piccola), senza bolla.
+    pub async fn send_sticker(
+        &self,
+        contact_id: String,
+        mime: String,
+        data: Vec<u8>,
+    ) -> Result<Message> {
+        let k = key(&contact_id)?;
+        let file = sticker_file(mime, data);
+        self.run(move |c| Box::pin(async move { Ok(message(&c.send_file(&k, file).await?)) }))
+            .await
+    }
+
+    pub async fn send_group_sticker(
+        &self,
+        id: String,
+        mime: String,
+        data: Vec<u8>,
+    ) -> Result<GroupMessageInfo> {
+        let file = sticker_file(mime, data);
+        self.run(move |c| {
+            Box::pin(async move {
+                let m = c.send_group_file(&id, file).await?;
+                Ok(group_message(c, &m))
+            })
+        })
+        .await
     }
 
     /// Manda la mia posizione; con `live_for` (secondi, al massimo 8 ore) in tempo reale.
@@ -965,6 +1001,7 @@ impl Rondine {
             thumb,
             width,
             height,
+            sticker: false,
         };
         self.run(move |c| {
             Box::pin(async move {

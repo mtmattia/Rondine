@@ -241,3 +241,12 @@ Una riga per modifica: data, cosa è cambiato.
   ntfy e risposta dalla notifica, riaggancio dalla notifica, rifiuto, chiamata persa.
   Correzione trovata così: WebRTC appena creato dice "candidati raccolti" prima di vedere le reti
   del telefono; ora si aspettano i candidati veri (al massimo 3 s).
+- 2026-10-20 — Emoji, sticker e GIF. Pannello al posto della tastiera con Emoji (tutte, dal
+  selettore AndroidX, senza EmojiCompat che chiederebbe il font a Google), GIF e Sticker, e il
+  tasto cancella (anche emoji composte). Sticker (SPEC §7.5, `"sticker": true`, sempre dentro il
+  messaggio): 277 sticker in 4 raccolte da Fluent Emoji 3D (MIT, 1,4 MB), preferiti, recenti,
+  creati da una foto, salvati tenendo premuto uno ricevuto; si mostrano senza bolla. GIF animate
+  nella chat, salvabili, dal telefono. GIF e sticker dalla tastiera (contentReceiver): provato
+  con Gboard sull'emulatore, Emoji Kitchen arriva come sticker e la ricerca GIF come GIF.
+  Foto recenti sotto i pulsanti degli allegati (permesso foto, anche parziale). Corretto: il
+  tocco lungo su foto e documenti apriva il file invece di selezionare il messaggio.

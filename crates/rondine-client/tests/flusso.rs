@@ -1089,6 +1089,7 @@ async fn foto_grande_passa_dal_nodo_cifrata() -> R {
                 thumb: Some(vec![0xff, 0xd8, 0xff]),
                 width: Some(1280),
                 height: Some(960),
+                sticker: false,
             },
         )
         .await?;
@@ -1858,5 +1859,33 @@ async fn credenziali_turn_dal_nodo() -> R {
     let expected = base64::engine::general_purpose::STANDARD
         .encode(ring::hmac::sign(&key, user.as_bytes()).as_ref());
     assert_eq!(t.credential.as_deref(), Some(expected.as_str()));
+    Ok(())
+}
+
+/// Sticker (SPEC §7.5): un'immagine piccola dentro il messaggio, segnata come sticker, che chi
+/// la riceve mostra senza bolla. Uno sticker troppo grande non parte.
+#[tokio::test]
+async fn sticker_dentro_il_messaggio() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &node).await?;
+    let webp = fake_file(6 * 1024);
+    let mut s = NewFile::new("sticker.webp", "image/webp", webp.clone());
+    s.sticker = true;
+    mattia.send_file(&silvia.identity(), s).await?;
+    let ev = silvia.sync().await?;
+    let a = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::Message(m) => m.attachment.clone(),
+            _ => None,
+        })
+        .ok_or("niente sticker")?;
+    assert!(a.sticker);
+    assert_eq!(std::fs::read(a.path.ok_or("non salvato")?)?, webp);
+
+    let mut big = NewFile::new("sticker.webp", "image/webp", fake_file(100 * 1024));
+    big.sticker = true;
+    assert!(mattia.send_file(&silvia.identity(), big).await.is_err());
     Ok(())
 }

@@ -97,7 +97,20 @@ private val SenderColors = listOf(
 
 internal fun senderColor(id: String) = SenderColors[Math.floorMod(id.hashCode(), SenderColors.size)]
 
-val GroupMessageInfo.preview: String get() = if (outgoing) "Tu: $body" else "$senderName: $body"
+val GroupMessageInfo.preview: String
+    get() {
+        val a = attachment
+        val what = when {
+            location != null -> location!!.previewText
+            a == null -> body
+            a.sticker -> "Sticker"
+            a.isGif -> "GIF"
+            a.isVoice -> "🎤 Messaggio vocale"
+            a.isImage -> if (body.isBlank()) "📷 Foto" else "📷 $body"
+            else -> "📄 ${a.name}"
+        }
+        return if (outgoing) "Tu: $what" else "$senderName: $what"
+    }
 
 /** Riga di un gruppo nella lista chat. */
 @Composable

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package io.github.mtmattia.rondine.ui
 
 import android.content.ActivityNotFoundException
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,6 +82,15 @@ class PickedFile(
 class FileTooBig : Exception("Il file supera i 64 MB")
 
 val AttachmentInfo.isImage get() = mime.startsWith("image/")
+val AttachmentInfo.isGif get() = mime == "image/gif"
+
+/** Anteprima, larghezza e altezza di un'immagine (per mandare una GIF). */
+suspend fun imageMeta(data: ByteArray): Triple<ByteArray?, UInt?, UInt?> = withContext(Dispatchers.Default) {
+    val b = decodeSampled(data, 320) ?: return@withContext Triple(null, null, null)
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+    Triple(thumbnail(b), bounds.outWidth.toUInt(), bounds.outHeight.toUInt())
+}
 
 /** Testo breve per la lista chat e le notifiche. */
 val Message.preview: String
@@ -86,6 +98,8 @@ val Message.preview: String
         location?.let { return it.previewText }
         val a = attachment ?: return body
         val what = when {
+            a.sticker -> "Sticker"
+            a.isGif -> "GIF"
             a.isVoice -> "🎤 Messaggio vocale"
             a.isImage -> "📷 Foto"
             else -> "📄 ${a.name}"
@@ -213,7 +227,9 @@ fun AttachmentView(
     downloading: Boolean,
     onOpen: () -> Unit,
     onDownload: () -> Unit,
+    onLongClick: () -> Unit = {},
 ) {
+    val tap = { if (a.path != null) onOpen() else onDownload() }
     val colors = LocalChatColors.current
     if (a.isVoice) {
         VoiceView(a, downloading, onDownload)
@@ -236,11 +252,19 @@ fun AttachmentView(
                 .heightIn(max = 360.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color(0x22000000))
-                .clickable { if (a.path != null) onOpen() else onDownload() },
+                .combinedClickable(onClick = tap, onLongClick = onLongClick),
             contentAlignment = Alignment.Center,
         ) {
             val shown = full ?: thumb
-            if (shown != null) {
+            val path = a.path
+            if (a.isGif && path != null) {
+                AnimatedImage(path, "GIF", Modifier.matchParentSize(), onClick = tap, onLongClick = onLongClick)
+                Text(
+                    "GIF", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(6.dp)
+                        .clip(RoundedCornerShape(4.dp)).background(Color(0x88000000)).padding(horizontal = 4.dp),
+                )
+            } else if (shown != null) {
                 Image(shown, "Foto", Modifier.matchParentSize(), contentScale = ContentScale.Crop)
             }
             if (a.path == null) {
@@ -259,7 +283,7 @@ fun AttachmentView(
                 .width(260.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color(0x14000000))
-                .clickable { if (a.path != null) onOpen() else onDownload() }
+                .combinedClickable(onClick = tap, onLongClick = onLongClick)
                 .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -290,7 +314,7 @@ class AttachAction(val label: String, val icon: ImageVector, val tint: Color, va
 
 /** Pannello degli allegati sotto la barra, al posto della tastiera (come su WhatsApp). */
 @Composable
-fun AttachPanel(actions: List<AttachAction>) {
+fun AttachPanel(actions: List<AttachAction>, onPhoto: ((Uri) -> Unit)? = null) {
     Surface(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -323,6 +347,7 @@ fun AttachPanel(actions: List<AttachAction>) {
                     repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
+            if (onPhoto != null) RecentPhotos(onPhoto)
         }
     }
 }

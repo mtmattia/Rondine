@@ -217,7 +217,7 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Avatar(c.name, c.id, 72.dp, c.photo)
+            ZoomableAvatar(c.name, c.id, 120.dp, c.photo)
             Text(c.name, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
             c.username?.let { Text("@$it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {

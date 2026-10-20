@@ -134,7 +134,7 @@ fun CallList(modifier: Modifier) {
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Avatar(name, call.contactId, 48.dp, contact?.photo)
+                ZoomableAvatar(name, call.contactId, 48.dp, contact?.photo)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(

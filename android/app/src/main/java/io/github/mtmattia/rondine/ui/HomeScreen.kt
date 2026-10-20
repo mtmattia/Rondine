@@ -417,7 +417,7 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Avatar(row.contact.name, row.contact.id, photo = row.contact.photo)
+            ZoomableAvatar(row.contact.name, row.contact.id, 52.dp, row.contact.photo) { onOpenChat(row.contact.id) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

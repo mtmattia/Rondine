@@ -460,7 +460,7 @@ private fun MemberRow(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Avatar(name, id, 44.dp, photo)
+            ZoomableAvatar(name, id, 44.dp, photo)
             Spacer(Modifier.width(14.dp))
             Text(name, Modifier.weight(1f), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (isAdmin) {

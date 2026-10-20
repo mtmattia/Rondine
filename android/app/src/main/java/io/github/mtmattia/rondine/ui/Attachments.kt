@@ -352,7 +352,7 @@ fun AttachPanel(actions: List<AttachAction>, onPhoto: ((Uri) -> Unit)? = null) {
     }
 }
 
-/** Foto del profilo (SPEC §7.7): ritaglio quadrato al centro, 256×256, JPEG sotto i 48 KiB. */
+/** Foto del profilo (SPEC §7.7): ritaglio quadrato al centro, fino a 512×512, JPEG sotto i 48 KiB. */
 suspend fun profilePhoto(context: Context, uri: Uri): ByteArray = withContext(Dispatchers.IO) {
     val src = ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { d, info, _ ->
         // Già ridotta in lettura: niente bitmap enormi in memoria.
@@ -365,13 +365,15 @@ suspend fun profilePhoto(context: Context, uri: Uri): ByteArray = withContext(Di
     }
     val side = minOf(src.width, src.height)
     val square = Bitmap.createBitmap(src, (src.width - side) / 2, (src.height - side) / 2, side, side)
-    val small = Bitmap.createScaledBitmap(square, 256, 256, true)
-    var quality = 85
-    while (true) {
-        val out = ByteArrayOutputStream().also { small.compress(Bitmap.CompressFormat.JPEG, quality, it) }.toByteArray()
-        if (out.size <= 48 * 1024 || quality <= 30) return@withContext out
-        quality -= 10
+    // Più grande possibile entro i 48 KiB, perché si può aprire a tutto schermo.
+    var last = ByteArray(0)
+    for (px in listOf(512, 384, 256)) {
+        val small = Bitmap.createScaledBitmap(square, minOf(px, side), minOf(px, side), true)
+        for (quality in listOf(85, 75, 65, 55)) {
+            last = ByteArrayOutputStream().also { small.compress(Bitmap.CompressFormat.JPEG, quality, it) }.toByteArray()
+            if (last.size <= 48 * 1024) return@withContext last
+        }
     }
-    @Suppress("UNREACHABLE_CODE")
-    ByteArray(0)
+    val tiny = Bitmap.createScaledBitmap(square, 256, 256, true)
+    ByteArrayOutputStream().also { tiny.compress(Bitmap.CompressFormat.JPEG, 30, it) }.toByteArray()
 }

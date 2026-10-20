@@ -277,3 +277,11 @@ Una riga per modifica: data, cosa è cambiato.
   file partono dopo una conferma, il testo va nel campo. Le 8 chat più recenti sono scorciatoie di
   condivisione (share-target), così compaiono direttamente nel menu Condividi come su WhatsApp.
   Provato sull'emulatore con `am start -a android.intent.action.SEND`.
+- 2026-10-20 — Messaggi programmati: stato `scheduled` nel client, partono in `sync_all` dopo
+  l'ora scelta (cifrati solo allora: il nodo non li vede prima), annullabili, anche nei gruppi; CLI
+  `rondine programma` e `rondine programmati`, FFI. App: tenendo premuto Invia si sceglie "fra 1
+  ora", "domani alle 9" o data e ora; barra con i programmati della chat; sveglia di Android
+  all'ora del prossimo (esatta se concesso "Sveglie e promemoria"), rimessa dopo un riavvio.
+  Provato: messaggio programmato a un minuto, app chiusa, partito alle 22:14:11 e arrivato.
+  Foto del profilo: si apre a tutto schermo con lo zoom dalla lista chat, dalle chiamate, dai
+  gruppi e dalla scheda del contatto; l'app ora la prepara fino a 512 px (sempre entro 48 KiB).

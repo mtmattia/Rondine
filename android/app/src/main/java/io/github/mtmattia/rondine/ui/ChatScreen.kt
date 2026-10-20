@@ -505,6 +505,31 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
         }
     }
 
+    // Messaggi programmati per questa chat (tenendo premuto Invia).
+    val allScheduled by Repo.scheduled.collectAsState()
+    val scheduledHere = allScheduled.filter { it.targetId == contactId && it.isGroup == isGroup }
+    var scheduling by remember { mutableStateOf(false) }
+    if (scheduling) {
+        ScheduleDialog(
+            text = text.trim(),
+            onDismiss = { scheduling = false },
+            onSchedule = { at ->
+                scheduling = false
+                val body = text.trim()
+                scope.launch {
+                    try {
+                        Repo.client().scheduleMessage(contactId, isGroup, body, at.toULong())
+                        field.clearText()
+                        Repo.refresh()
+                        snackbar.showSnackbar("Programmato per ${scheduledLabel(at)}")
+                    } catch (e: RondineException) {
+                        snackbar.showSnackbar("Non programmato: ${e.userMessage}")
+                    }
+                }
+            },
+        )
+    }
+
     // Arrivato da "Condividi" per questa chat: il testo nel campo, un file con l'anteprima, più
     // file dopo una conferma.
     val share by ShareInbox.pending.collectAsState()
@@ -930,9 +955,20 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                         QuotePreview(authorOf(q), q, onClose = { replyTo = null })
                     }
                 }
+                ScheduledBar(scheduledHere) { id ->
+                    scope.launch {
+                        try {
+                            Repo.client().cancelScheduled(id)
+                            Repo.refresh()
+                        } catch (e: RondineException) {
+                            snackbar.showSnackbar(e.userMessage)
+                        }
+                    }
+                }
                 if (!(voiceLocked && recordingMs != null)) InputBar(
                     field = field,
                     onContent = { onKeyboardContent(it) },
+                    onSchedule = { scheduling = true },
                     sending = sending,
                     emojiOpen = emojiOpen,
                     onEmoji = {
@@ -1325,6 +1361,7 @@ private fun InputBar(
     onCamera: () -> Unit,
     onMic: () -> Unit,
     onSend: () -> Unit,
+    onSchedule: () -> Unit,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val context = LocalContext.current
@@ -1393,13 +1430,18 @@ private fun InputBar(
             contentColor = MaterialTheme.colorScheme.onPrimary,
         )
         if (text.isNotBlank()) {
-            FilledIconButton(
-                onClick = onSend,
-                enabled = !sending,
-                modifier = Modifier.size(56.dp),
+            // Un tocco manda; tenuto premuto programma il messaggio per più tardi.
+            Surface(
+                Modifier.size(56.dp).clip(CircleShape).combinedClickable(
+                    enabled = !sending,
+                    onClick = onSend,
+                    onLongClick = onSchedule,
+                    onLongClickLabel = "Programma il messaggio",
+                ),
                 shape = CircleShape,
-                colors = buttonColors,
-            ) { Icon(Icons.AutoMirrored.Filled.Send, "Invia") }
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Filled.Send, "Invia") } }
         } else {
             FilledIconButton(
                 onClick = onMic,

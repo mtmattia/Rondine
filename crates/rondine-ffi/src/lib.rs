@@ -308,6 +308,17 @@ pub struct ChatRow {
     pub on_lan: bool,
 }
 
+/// Un messaggio programmato (parte all'ora `at`, secondi unix).
+#[derive(uniffi::Record, Clone)]
+pub struct ScheduledInfo {
+    pub id: String,
+    /// Chiave del contatto, o id del gruppo se `is_group`.
+    pub target_id: String,
+    pub is_group: bool,
+    pub body: String,
+    pub at: u64,
+}
+
 #[derive(uniffi::Record, Clone)]
 pub struct CallInfo {
     pub id: String,
@@ -1113,6 +1124,55 @@ impl Rondine {
             })
         })
         .await
+    }
+
+    /// Programma un testo per un contatto (o un gruppo, con `is_group`): l'id del programmato.
+    pub async fn schedule_message(
+        &self,
+        target_id: String,
+        is_group: bool,
+        body: String,
+        at: u64,
+    ) -> Result<String> {
+        let target = if is_group {
+            rondine_client::ScheduledTarget::Group(target_id)
+        } else {
+            rondine_client::ScheduledTarget::Contact(key(&target_id)?)
+        };
+        Ok(self
+            .with(move |c| c.schedule_message(target, &body, at))
+            .await?)
+    }
+
+    pub async fn scheduled_messages(&self) -> Vec<ScheduledInfo> {
+        self.with(|c| {
+            c.scheduled()
+                .iter()
+                .map(|m| {
+                    let (target_id, is_group) = match &m.target {
+                        rondine_client::ScheduledTarget::Contact(k) => (k.to_b64(), false),
+                        rondine_client::ScheduledTarget::Group(g) => (g.clone(), true),
+                    };
+                    ScheduledInfo {
+                        id: m.id.clone(),
+                        target_id,
+                        is_group,
+                        body: m.body.clone(),
+                        at: m.at,
+                    }
+                })
+                .collect()
+        })
+        .await
+    }
+
+    pub async fn cancel_scheduled(&self, id: String) -> Result<()> {
+        Ok(self.with(move |c| c.cancel_scheduled(&id)).await?)
+    }
+
+    /// Quando partirà il prossimo programmato: l'app ci mette una sveglia.
+    pub async fn next_scheduled_at(&self) -> Option<u64> {
+        self.with(|c| c.next_scheduled_at()).await
     }
 
     /// Registro delle chiamate, dalla più recente.

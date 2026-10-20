@@ -7,6 +7,7 @@ mod groups;
 mod lan;
 mod net;
 mod rubrica;
+mod scheduled;
 mod state;
 
 use std::collections::HashMap;
@@ -31,6 +32,7 @@ pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
 pub use rondine_core::envelope::CallOp;
 pub use rubrica::AddressBookMatch;
+pub use scheduled::{ScheduledMessage, ScheduledTarget};
 pub use state::{
     Attachment, CallRecord, CallStatus, ChatMessage, Contact, Delivery, GroupChat, GroupMember,
     GroupMessage, GroupRef, Location, Outgoing, Source, State,
@@ -330,6 +332,7 @@ impl Client {
                 pending_restore: false,
                 rejoin_groups: Vec::new(),
                 calls: Vec::new(),
+                scheduled: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -386,6 +389,7 @@ impl Client {
                 pending_restore: false,
                 rejoin_groups: Vec::new(),
                 calls: Vec::new(),
+                scheduled: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -2459,6 +2463,7 @@ impl Client {
         // Appena ripristinato da un backup: chat da riaprire e gruppi da cui rientrare (§7.8).
         self.finish_restore().await;
         self.expire_calls();
+        self.send_due_scheduled().await;
         let mut events = self.flush_outbox().await;
         let path = format!("/v1/inboxes/{}/messages", self.state.inbox);
         let mut ids = Vec::new();

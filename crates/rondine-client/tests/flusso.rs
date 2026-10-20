@@ -1889,3 +1889,48 @@ async fn sticker_dentro_il_messaggio() -> R {
     assert!(mattia.send_file(&silvia.identity(), big).await.is_err());
     Ok(())
 }
+
+/// Messaggi programmati: restano sul telefono e partono alla prima sincronizzazione dopo l'ora
+/// scelta; si possono annullare prima. Il destinatario li riceve come messaggi normali.
+#[tokio::test]
+async fn messaggio_programmato_parte_all_ora_giusta() -> R {
+    use rondine_client::ScheduledTarget;
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &node).await?;
+    let to = ScheduledTarget::Contact(silvia.identity());
+    let t = rondine_core::now();
+    let later = mattia.schedule_message(to.clone(), "buongiorno!", t + 2)?;
+    let never = mattia.schedule_message(to.clone(), "annullato", t + 2)?;
+    assert_eq!(mattia.scheduled().len(), 2);
+    assert_eq!(mattia.next_scheduled_at(), Some(t + 2));
+    mattia.cancel_scheduled(&never)?;
+    // Un testo vuoto non si programma.
+    assert!(mattia.schedule_message(to.clone(), "  ", t + 60).is_err());
+
+    mattia.sync().await?;
+    let none = silvia.sync().await?;
+    assert!(!none.iter().any(|e| matches!(e, Event::Message(_))));
+
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    mattia.sync().await?;
+    assert!(mattia.scheduled().is_empty());
+    assert_eq!(mattia.next_scheduled_at(), None);
+    let ev = silvia.sync().await?;
+    let bodies: Vec<String> = ev
+        .iter()
+        .filter_map(|e| match e {
+            Event::Message(m) => Some(m.body.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bodies, vec!["buongiorno!".to_string()]);
+    assert!(
+        mattia
+            .messages_with(&silvia.identity())
+            .iter()
+            .any(|m| m.body == "buongiorno!" && m.outgoing)
+    );
+    let _ = later;
+    Ok(())
+}

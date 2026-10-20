@@ -1,0 +1,1 @@
+Scheduled messages (long-press Send); share photos, files and text from other apps to a contact; tap a profile photo to see it full screen.

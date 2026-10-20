@@ -346,7 +346,7 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
 { "v": 1, "type": "profile", "ts": 1792240100, "photo": null }
 ```
 
-- La foto è un JPEG quadrato di al massimo **48 KiB** (l'app lo prepara a 256×256). `photo: null`
+- La foto è un JPEG quadrato di al massimo **48 KiB** (l'app lo prepara fino a 512×512). `photo: null`
   la toglie.
 - Non sta nel biglietto (che finisce in link, QR e bacheche): la vedono solo i **contatti** e i
   **membri dei gruppi** in comune, a cui si manda dentro MLS

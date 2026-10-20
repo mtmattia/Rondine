@@ -56,6 +56,9 @@ nomi utente.
   in tempo reale dura al massimo 8 ore, mostra una notifica fissa e si interrompe quando vuoi.
   Rondine non usa la posizione in background per altri scopi.
 - **Notifiche:** per avvisarti dei messaggi.
+- **Sveglie e promemoria (facoltativo):** per mandare un messaggio programmato all'ora esatta;
+  senza, parte comunque, con qualche minuto di margine. I messaggi programmati restano sul
+  telefono fino all'ora scelta.
 
 - **Foto (facoltativo):** per mostrare le foto recenti nel pannello degli allegati. Si possono
   concedere tutte, solo alcune, o nessuna: senza, foto e documenti si scelgono con il selettore

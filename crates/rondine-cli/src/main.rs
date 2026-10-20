@@ -111,6 +111,26 @@ enum Cmd {
     /// Posizione: fissa, in tempo reale, aggiornamenti.
     #[command(subcommand)]
     Posizione(PosizioneCmd),
+    /// Programma un messaggio: parte alla prima sincronizzazione dopo l'ora scelta.
+    Programma {
+        /// Contatto, oppure gruppo con --gruppo.
+        chi: String,
+        #[arg(long)]
+        gruppo: bool,
+        /// Fra quanti minuti.
+        #[arg(long, conflicts_with = "alle")]
+        tra: Option<u64>,
+        /// A che ora, in secondi unix.
+        #[arg(long)]
+        alle: Option<u64>,
+        #[arg(required = true, num_args = 1..)]
+        testo: Vec<String>,
+    },
+    /// Elenca i messaggi programmati; con --annulla ne toglie uno.
+    Programmati {
+        #[arg(long)]
+        annulla: Option<String>,
+    },
     /// Ritaglia il soggetto di una foto per farne uno sticker (PNG con lo sfondo trasparente),
     /// con il modello U²-Net piccolo che porta l'app.
     Ritaglia {
@@ -1000,6 +1020,61 @@ async fn main() -> anyhow::Result<()> {
                 "Cancellati{}.",
                 if per_tutti { " per tutti" } else { " per te" }
             );
+        }
+        Cmd::Programma {
+            chi,
+            gruppo,
+            tra,
+            alle,
+            testo,
+        } => {
+            let at = match (tra, alle) {
+                (Some(m), _) => rondine_core::now() + m * 60,
+                (None, Some(t)) => t,
+                (None, None) => anyhow::bail!("indica --tra <minuti> o --alle <secondi unix>"),
+            };
+            let target = if gruppo {
+                rondine_client::ScheduledTarget::Group(c.find_group(&chi)?.id.clone())
+            } else {
+                rondine_client::ScheduledTarget::Contact(c.find_contact(&chi)?.identity)
+            };
+            let id = c.schedule_message(target, &testo.join(" "), at)?;
+            println!(
+                "Programmato ({id}): parte fra {} s.",
+                at.saturating_sub(rondine_core::now())
+            );
+        }
+        Cmd::Programmati { annulla } => {
+            if let Some(id) = annulla {
+                c.cancel_scheduled(&id)?;
+                println!("Annullato.");
+            } else if c.scheduled().is_empty() {
+                println!("Nessun messaggio programmato.");
+            } else {
+                let t = rondine_core::now();
+                for m in c.scheduled() {
+                    let to = match &m.target {
+                        rondine_client::ScheduledTarget::Contact(k) => c
+                            .contacts()
+                            .iter()
+                            .find(|x| &x.identity == k)
+                            .map(|x| x.display_name.clone())
+                            .unwrap_or_else(|| k.short()),
+                        rondine_client::ScheduledTarget::Group(g) => c
+                            .groups()
+                            .iter()
+                            .find(|x| &x.id == g)
+                            .map(|x| format!("[{}]", x.name))
+                            .unwrap_or_else(|| g.clone()),
+                    };
+                    println!(
+                        "{}  → {to} fra {} s: {}",
+                        m.id,
+                        m.at.saturating_sub(t),
+                        m.body
+                    );
+                }
+            }
         }
         Cmd::Scrivi { contatto, testo } => {
             let id = c.find_contact(&contatto)?.identity;

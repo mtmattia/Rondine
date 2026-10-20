@@ -24,8 +24,8 @@ android {
         applicationId = "io.github.mtmattia.rondine"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.1.10"
         // Solo le architetture per cui c'è la libreria Rust: le altre librerie native (WebRTC,
         // JNA) non servirebbero a niente e allungherebbero l'APK.
         ndk { abiFilters += rustAbis }

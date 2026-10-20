@@ -57,6 +57,16 @@ object Repo {
     val profile = MutableStateFlow<Profile?>(null)
     val chats = MutableStateFlow<List<ChatRow>>(emptyList())
     val groups = MutableStateFlow<List<GroupRow>>(emptyList())
+    /** Messaggi programmati, dal primo che partirà. */
+    val scheduled = MutableStateFlow<List<uniffi.rondine_ffi.ScheduledInfo>>(emptyList())
+
+    /** Mette la sveglia per il prossimo messaggio programmato. */
+    suspend fun armScheduled() {
+        loaded.await()
+        val r = rondine ?: return
+        io.github.mtmattia.rondine.schedule.ScheduleAlarm.arm(app, r.nextScheduledAt()?.toLong())
+    }
+
     /** Registro delle chiamate, dalla più recente. */
     val calls = MutableStateFlow<List<uniffi.rondine_ffi.CallInfo>>(emptyList())
     /** Cresce a ogni cambiamento: le schermate lo osservano per ricaricare. */
@@ -177,6 +187,11 @@ object Repo {
         chats.value = r.chats()
         groups.value = r.groups()
         calls.value = r.calls()
+        val s = r.scheduledMessages()
+        if (s != scheduled.value) {
+            scheduled.value = s
+            io.github.mtmattia.rondine.schedule.ScheduleAlarm.arm(app, r.nextScheduledAt()?.toLong())
+        }
         io.github.mtmattia.rondine.ui.ShareInbox.publishShortcuts(app, chats.value, groups.value)
         revision.value = revision.value + 1
     }
@@ -197,7 +212,7 @@ object Repo {
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty() || res.receipts > 0u ||
                 res.typingChanged || res.locationsChanged || chats.value.any { it.typing } ||
                 res.groupMessages.isNotEmpty() || res.groupsChanged || res.photosChanged ||
-                res.messagesDeleted || res.calls.isNotEmpty()
+                res.messagesDeleted || res.calls.isNotEmpty() || scheduled.value.isNotEmpty()
             ) {
                 refresh()
             }

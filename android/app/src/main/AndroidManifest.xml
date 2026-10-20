@@ -26,6 +26,9 @@
     <!-- Chiamate (SPEC §7.9): audio verso capsula o altoparlante, squillo a tutto schermo e un
          servizio in primo piano finché la chiamata è aperta. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Messaggi programmati: la sveglia all'ora scelta, anche dopo un riavvio. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
@@ -100,6 +103,17 @@
         <receiver
             android:name=".call.CallActionReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".schedule.ScheduledReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".schedule.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Esito dell'installazione di un aggiornamento da GitHub. -->
         <receiver

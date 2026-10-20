@@ -265,6 +265,9 @@ pub struct State {
     /// Registro delle chiamate (SPEC §7.9).
     #[serde(default)]
     pub calls: Vec<CallRecord>,
+    /// Messaggi programmati, dal primo che partirà (solo sul telefono).
+    #[serde(default)]
+    pub scheduled: Vec<crate::ScheduledMessage>,
 }
 
 /// Una chiamata nel registro (SPEC §7.9).

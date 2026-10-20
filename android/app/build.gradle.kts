@@ -21,8 +21,11 @@ android {
         applicationId = "io.github.mtmattia.rondine"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
+        // Solo le architetture per cui c'è la libreria Rust: le altre librerie native (WebRTC,
+        // JNA) non servirebbero a niente e allungherebbero l'APK.
+        ndk { abiFilters += rustAbis }
 
         // Nodo proposto al primo avvio sui telefoni veri (facoltativo, si può cancellare o cambiare
         // dopo in Impostazioni): il nido pubblico di Mattia. Un altro con `rondine.nodo` in
@@ -188,6 +191,9 @@ dependencies {
     implementation(libs.zxing.core)
     // Lettore QR con la fotocamera (Apache-2.0, nessun servizio Google).
     implementation(libs.zxing.embedded)
+    // Chiamate voce e video (SPEC §7.9): WebRTC compilato dai sorgenti dal progetto Conversations
+    // (codice BSD-3, pacchetto Apache-2.0 o MIT), lo stesso usato da app su F-Droid.
+    implementation(libs.webrtc)
     // Solo versione Play: FCM tramite il ripetitore del nido (SPEC §8.1).
     "playImplementation"(libs.firebase.messaging)
     "playImplementation"(libs.androidx.fragment)

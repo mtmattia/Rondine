@@ -39,7 +39,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Mesh tra utenti | ✅ | i contatti fanno da postini, fino a 4 passaggi, invisibile (SPEC §12.5) |
 | Rete locale senza internet | ✅ | mDNS + consegna diretta, profili anche senza nodo (SPEC §12) |
 | Mesh Bluetooth | ⬜ | M3 |
-| Chiamate vocali e video | ⬜ | WebRTC + TURN, dopo |
+| Chiamate vocali e video | ✅ | 1:1, WebRTC diretto tra i telefoni, squillo dentro MLS, TURN dal proprio nodo (SPEC §7.9); di gruppo dopo |
 | App Android | 🟡 | chat, foto e documenti, nomi, rubrica, inviti, QR, impostazioni; provata su emulatore |
 
 ## Traguardi
@@ -113,5 +113,5 @@ Domande aperte da decidere prima del codice (vanno in `docs/SPEC.md`):
 - **Fiducia.** Un nido di chiunque entra nella maglia: limiti contro abusi e spam tra nidi.
 
 ### Dopo
-iPhone (APNs con push relay e Notification Service Extension), chiamate (WebRTC, TURN federato),
-media, più dispositivi, sigillo per destinatario nei gruppi (SPEC §7.4, limite noto).
+iPhone (APNs con push relay e Notification Service Extension), chiamate di gruppo, cambio di rete
+durante una chiamata (riavvio ICE), media, più dispositivi, sigillo per destinatario nei gruppi (SPEC §7.4, limite noto).

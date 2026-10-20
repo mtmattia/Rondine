@@ -86,10 +86,9 @@ import uniffi.rondine_ffi.GroupRow
 
 private data class Tab(val label: String, val selected: ImageVector, val unselected: ImageVector)
 
-/** Le schede si mostrano solo quando c'è qualcosa dietro: per ora solo le chat (le chiamate
- *  torneranno con le chiamate vere). */
 private val tabs = listOf(
     Tab("Chat", Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat),
+    Tab("Chiamate", Icons.Filled.Call, Icons.Outlined.Call),
 )
 
 private enum class Filter(val label: String) { Tutte("Tutte"), NonLette("Non lette"), Preferiti("Preferiti") }
@@ -109,6 +108,16 @@ fun HomeScreen(
     val chats by Repo.chats.collectAsState()
     val groups by Repo.groups.collectAsState()
     val unreadChats = chats.count { it.unread > 0u } + groups.count { it.unread > 0u }
+    val calls by Repo.calls.collectAsState()
+    var seenTick by remember { mutableIntStateOf(0) }
+    val missed = remember(calls, seenTick) { unseenMissed(calls) }
+    // Aprendo la scheda le chiamate perse risultano viste.
+    androidx.compose.runtime.LaunchedEffect(tab, calls) {
+        if (tab == 1) {
+            Repo.callsSeen = System.currentTimeMillis() / 1000
+            seenTick++
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -147,6 +156,9 @@ fun HomeScreen(
                                 if (i == 0 && unreadChats > 0) {
                                     CountBadge(unreadChats, Modifier.align(Alignment.TopEnd).padding(start = 14.dp))
                                 }
+                                if (i == 1 && missed > 0) {
+                                    CountBadge(missed, Modifier.align(Alignment.TopEnd).padding(start = 14.dp))
+                                }
                             }
                         },
                         label = { Text(t.label, fontWeight = if (tab == i) FontWeight.SemiBold else FontWeight.Normal) },
@@ -173,7 +185,7 @@ fun HomeScreen(
         },
     ) { padding ->
         val m = Modifier.padding(padding)
-        ChatList(chats, groups, onOpenChat, onOpenGroup, onNewChat, onPickPush, m)
+        if (tab == 1) CallList(m) else ChatList(chats, groups, onOpenChat, onOpenGroup, onNewChat, onPickPush, m)
     }
 }
 

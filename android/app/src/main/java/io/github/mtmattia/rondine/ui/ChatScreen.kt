@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -197,6 +198,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    val startCall = rememberCallStarter()
     var attachMenu by remember { mutableStateOf(false) }
     /** File scelto, in attesa della didascalia e di "Invia". */
     var picked by remember { mutableStateOf<PickedFile?>(null) }
@@ -619,6 +621,10 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                             }
                         }
                         return@TopAppBar
+                    }
+                    if (c != null && !c.blocked) {
+                        IconButton(onClick = { startCall(contactId, true) }) { Icon(Icons.Filled.Videocam, "Videochiamata") }
+                        IconButton(onClick = { startCall(contactId, false) }) { Icon(Icons.Filled.Call, "Chiamata") }
                     }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Altro") }

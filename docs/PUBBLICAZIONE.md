@@ -76,8 +76,12 @@ release non firmate da due cartelle diverse devono avere lo stesso `sha256sum` (
    - servizio in primo piano di tipo `location`: condivisione della posizione in tempo reale,
      avviata dall'utente, al massimo 8 ore, notifica fissa con "Interrompi"; l'app non chiede
      `ACCESS_BACKGROUND_LOCATION`;
+   - servizio in primo piano di tipo `phoneCall`, `microphone` e `camera`: chiamate voce e video
+     avviate o accettate dall'utente, con la notifica della chiamata in corso e "Riaggancia";
+   - notifiche a tutto schermo (`USE_FULL_SCREEN_INTENT`): l'app fa chiamate, lo squillo deve
+     comparire anche a schermo bloccato (dichiarazione "funzionalità principale: chiamate");
    - permessi sensibili: contatti (scoperta dalla rubrica senza inviare numeri), microfono
-     (vocali), fotocamera (QR e foto).
+     (vocali e chiamate), fotocamera (QR, foto e videochiamate).
 
 ## F-Droid
 

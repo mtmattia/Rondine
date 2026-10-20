@@ -1068,6 +1068,12 @@ impl Rondine {
             .await
     }
 
+    /// All'avvio dell'app: chiude nel registro le chiamate rimaste aperte.
+    pub async fn close_open_calls(&self) -> Result<()> {
+        self.run(|c| Box::pin(async move { Ok(c.close_open_calls()?) }))
+            .await
+    }
+
     pub async fn delete_calls(&self, ids: Vec<String>) -> Result<()> {
         self.run(move |c| Box::pin(async move { Ok(c.delete_calls(&ids)?) }))
             .await

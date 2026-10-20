@@ -229,3 +229,15 @@ Una riga per modifica: data, cosa è cambiato.
   da annotare, con "Copia" e la data dell'ultimo backup) e "Ripristina da un backup" al primo
   avvio. Provato sull'emulatore: backup in Download, dati dell'app cancellati, ripristino con il
   codice; chat, gruppi e storico tornano, e con Bruno i messaggi ripartono nei due sensi.
+- 2026-10-20 — Chiamate voce e video 1:1 (SPEC §7.9). Lo squillo (offerta, risposta, riaggancio,
+  rifiuto, occupato) viaggia dentro MLS con l'SDP completa, audio e video direttamente tra i
+  telefoni con WebRTC (libreria compilata da Conversations). Il nodo dà credenziali TURN
+  temporanee (`GET /v1/inboxes/{inbox}/turn`, coturn `use-auth-secret`); registro delle chiamate
+  nel client, `rondine chiamata …` nella CLI. App: pulsanti chiamata e video in chat, scheda
+  "Chiamate" con le perse in rosso, schermata di chiamata (anche a schermo bloccato), squillo con
+  notifica a tutto schermo, servizio in primo piano, altoparlante, microfono muto, fotocamera
+  on/off e girata. Provato tra due emulatori con coturn in docker: chiamata vocale e
+  videochiamata collegate (audio e video nei due sensi), squillo con l'app chiusa svegliata da
+  ntfy e risposta dalla notifica, riaggancio dalla notifica, rifiuto, chiamata persa.
+  Correzione trovata così: WebRTC appena creato dice "candidati raccolti" prima di vedere le reti
+  del telefono; ora si aspettano i candidati veri (al massimo 3 s).

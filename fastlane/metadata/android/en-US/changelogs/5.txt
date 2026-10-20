@@ -1,0 +1,1 @@
+Voice and video calls directly between phones, encrypted: buttons in the chat, Calls tab with missed calls, ringing on the lock screen, speaker, mute, camera switch.

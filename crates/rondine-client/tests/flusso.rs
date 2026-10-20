@@ -1805,6 +1805,19 @@ async fn squillo_risposta_e_registro_chiamate() -> R {
         .cloned()
         .ok_or("registro")?;
     assert_eq!(s2.status, CallStatus::Missed);
+
+    // L'app chiusa a metà chiamata: al riavvio la chiamata risulta chiusa, non "in corso".
+    let c3 = mattia.start_call(&to, false, "v=0").await?;
+    silvia.sync().await?;
+    silvia.answer_call(&mattia.identity(), &c3, "v=0").await?;
+    silvia.close_open_calls()?;
+    let s3 = silvia
+        .calls()
+        .iter()
+        .find(|c| c.id == c3)
+        .cloned()
+        .ok_or("registro")?;
+    assert!(s3.status == CallStatus::Answered && s3.ended_at.is_some());
     Ok(())
 }
 

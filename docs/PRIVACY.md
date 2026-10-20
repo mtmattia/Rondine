@@ -50,14 +50,23 @@ nomi utente.
 
 ## Altri permessi
 
-- **Fotocamera:** per i codici QR e per scattare foto da mandare.
-- **Microfono:** solo mentre registri un messaggio vocale.
+- **Fotocamera:** per i codici QR, per scattare foto da mandare e nelle videochiamate.
+- **Microfono:** mentre registri un messaggio vocale e durante le chiamate.
 - **Posizione:** solo quando mandi una posizione o la condividi in tempo reale. La condivisione
   in tempo reale dura al massimo 8 ore, mostra una notifica fissa e si interrompe quando vuoi.
   Rondine non usa la posizione in background per altri scopi.
 - **Notifiche:** per avvisarti dei messaggi.
 
 Foto e documenti si scelgono con il selettore di sistema: l'app non ha accesso alla galleria.
+
+## Chiamate
+
+Voce e video vanno **direttamente tra i due telefoni**, cifrati (DTLS-SRTP); la chiave della
+chiamata è autenticata dentro la chat cifrata, quindi nessun nodo può ascoltare. Per collegarsi i
+due telefoni si scambiano i propri indirizzi IP: chi chiami vede il tuo indirizzo IP, come in ogni
+chiamata diretta. Quando un collegamento diretto non è possibile, i pacchetti (sempre cifrati)
+passano dal server TURN del tuo nodo, che vede gli indirizzi IP, l'ora e la quantità di dati, non
+il contenuto. Il registro delle chiamate resta solo sul telefono.
 
 ## Servizi esterni
 

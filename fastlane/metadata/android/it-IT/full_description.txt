@@ -5,6 +5,13 @@
 <li><b>Rubrica</b>: ti trovano solo le persone che hanno il tuo numero e che tu hai in rubrica. Il numero non lascia mai il telefono in chiaro.</li>
 <li><b>Link d'invito e codice QR</b>, revocabili in qualsiasi momento.</li>
 </ul>
+<p><b>Cosa si fa</b></p>
+<ul>
+<li>Chat e <b>gruppi</b>, risposte, inoltro, messaggi cancellati per tutti.</li>
+<li>Foto, documenti, <b>messaggi vocali</b>, posizione anche in tempo reale.</li>
+<li><b>Chiamate e videochiamate</b> dirette tra i telefoni, cifrate.</li>
+<li>Backup cifrato del profilo, da ripristinare su un altro telefono.</li>
+</ul>
 <p><b>Senza centralino</b></p>
 <ul>
 <li>I messaggi passano da piccoli <i>nodi</i> che chiunque può ospitare e che vedono solo dati cifrati.</li>
@@ -12,4 +19,4 @@
 <li>Notifiche con UnifiedPush (per esempio ntfy), senza servizi Google.</li>
 <li>Numero di sicurezza per verificare i contatti, blocco con revoca del permesso di consegna.</li>
 </ul>
-<p>Stato: <b>alpha</b>. Il protocollo può ancora cambiare. Gruppi, foto, chiamate e collegamento diretto tra telefoni sono in arrivo.</p>
+<p>Stato: <b>alpha</b>. Il protocollo può ancora cambiare.</p>

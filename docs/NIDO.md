@@ -35,6 +35,41 @@ Poi `systemctl --user daemon-reload && systemctl --user restart rondine-nodo`.
 Il file JSON del service account Firebase (SPEC §8.1), segreto, leggibile solo dall'utente del
 nido: `RONDINE_FCM_CREDENZIALI=…/fcm.json`.
 
+## Chiamate: STUN e TURN (SPEC §7.9)
+
+Le chiamate vanno direttamente tra i telefoni. Per trovarsi dietro i router servono uno STUN e,
+quando il collegamento diretto non riesce (reti mobili, Wi-Fi aziendali), un TURN che inoltra i
+pacchetti cifrati. Il nido dà ai propri telefoni gli indirizzi e credenziali che durano un giorno.
+
+1. Un server **coturn** raggiungibile da internet in UDP (porta 3478 e un intervallo di porte per
+   l'inoltro, per esempio 49160–49200): su una VPS, o a casa con le porte aperte sul router.
+   Configurazione minima (`/etc/turnserver.conf`):
+
+   ```ini
+   listening-port=3478
+   min-port=49160
+   max-port=49200
+   use-auth-secret
+   static-auth-secret=SEGRETO-LUNGO-A-CASO
+   realm=rondine
+   no-tls
+   fingerprint
+   ```
+
+2. Configura il nido con lo stesso segreto, in un file a parte leggibile solo da te
+   (`~/.config/rondine/turn.env` con `RONDINE_TURN_SEGRETO=…`, permessi 600):
+
+   ```ini
+   Environment=RONDINE_TURN=stun:turn.esempio.it:3478,turn:turn.esempio.it:3478
+   EnvironmentFile=%h/.config/rondine/turn.env
+   ```
+
+   e riavvia: nel log compare `STUN/TURN per le chiamate`. `rondine chiamata turn` mostra cosa
+   riceve un telefono.
+
+Senza TURN le chiamate funzionano lo stesso nella stessa rete e con molte reti di casa, non con
+tutte. Solo `RONDINE_TURN=stun:…` (senza segreto) dà solo lo STUN.
+
 ## SMS di verifica dal proprio telefono (SPEC §13.4)
 
 Un telefono Android con una SIM spedisce gli SMS con la sua tariffa. Il nido gli chiede di

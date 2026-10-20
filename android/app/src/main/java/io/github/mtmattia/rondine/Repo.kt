@@ -57,6 +57,8 @@ object Repo {
     val profile = MutableStateFlow<Profile?>(null)
     val chats = MutableStateFlow<List<ChatRow>>(emptyList())
     val groups = MutableStateFlow<List<GroupRow>>(emptyList())
+    /** Registro delle chiamate, dalla più recente. */
+    val calls = MutableStateFlow<List<uniffi.rondine_ffi.CallInfo>>(emptyList())
     /** Cresce a ogni cambiamento: le schermate lo osservano per ricaricare. */
     val revision = MutableStateFlow(0L)
     val pushStatus = MutableStateFlow("Non configurate")
@@ -85,6 +87,8 @@ object Repo {
         scope.launch {
             try {
                 rondine = openProfile(profileDir)
+                // Processo appena partito: nessuna chiamata può essere in corso.
+                try { rondine?.closeOpenCalls() } catch (_: RondineException) {}
                 // Prima la lista delle chat (dalla fotografia del client, subito), poi la rete.
                 if (rondine != null) refresh()
                 ready.value = rondine != null
@@ -118,6 +122,11 @@ object Repo {
         refresh()
         ready.value = true
     }
+
+    /** Fin dove ho già visto le chiamate perse (secondi): per il numerino sulla scheda. */
+    var callsSeen: Long
+        get() = prefs().getLong("chiamate_viste", 0)
+        set(v) { prefs().edit().putLong("chiamate_viste", v).apply() }
 
     /** Quando è stato fatto l'ultimo backup (millisecondi), 0 se mai. */
     var lastBackup: Long
@@ -167,6 +176,7 @@ object Repo {
         profile.value = r.profile()
         chats.value = r.chats()
         groups.value = r.groups()
+        calls.value = r.calls()
         revision.value = revision.value + 1
     }
 
@@ -186,10 +196,11 @@ object Repo {
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty() || res.receipts > 0u ||
                 res.typingChanged || res.locationsChanged || chats.value.any { it.typing } ||
                 res.groupMessages.isNotEmpty() || res.groupsChanged || res.photosChanged ||
-                res.messagesDeleted
+                res.messagesDeleted || res.calls.isNotEmpty()
             ) {
                 refresh()
             }
+            io.github.mtmattia.rondine.call.CallManager.onSignals(res.calls)
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty()) {
                 val foreground = ProcessLifecycleOwner.get().lifecycle.currentState
                     .isAtLeast(Lifecycle.State.STARTED)

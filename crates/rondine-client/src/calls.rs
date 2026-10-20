@@ -213,6 +213,27 @@ impl Client {
         }])
     }
 
+    /// Chiude nel registro le chiamate rimaste aperte: da chiamare all'avvio dell'app, quando
+    /// nessuna chiamata può essere in corso (per esempio dopo che il telefono l'ha chiusa a metà).
+    pub fn close_open_calls(&mut self) -> Result<()> {
+        let t = now();
+        let mut changed = false;
+        for c in self.state.calls.iter_mut().filter(|c| c.ended_at.is_none()) {
+            changed = true;
+            c.status = match c.status {
+                CallStatus::Ringing if c.outgoing => CallStatus::Unanswered,
+                CallStatus::Ringing => CallStatus::Missed,
+                s => s,
+            };
+            // La fine vera non si sa: la durata resta quella nota (nessuna).
+            c.ended_at = Some(c.answered_at.unwrap_or(c.started_at).min(t));
+        }
+        if changed {
+            self.save()?;
+        }
+        Ok(())
+    }
+
     /// Chiamate rimaste a squillare (app chiusa a metà, risposta mai arrivata): chiuse.
     pub(crate) fn expire_calls(&mut self) {
         let t = now();

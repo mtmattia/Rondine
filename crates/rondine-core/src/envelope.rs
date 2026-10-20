@@ -86,9 +86,57 @@ pub enum AppMessage {
     },
     /// Squillo, risposta o fine di una chiamata (SPEC §7.9).
     Call(CallMsg),
+    /// Aggiornamento (storia) per i contatti (SPEC §7.10).
+    Status(Box<StatusMsg>),
+    /// Toglie un aggiornamento prima della scadenza (SPEC §7.10).
+    #[serde(rename = "status_delete")]
+    StatusDelete { v: u32, id: String },
+    /// Chi l'ha guardato lo dice a chi l'ha pubblicato (SPEC §7.10).
+    #[serde(rename = "status_seen")]
+    StatusSeen { v: u32, id: String, ts: u64 },
     /// Un tipo che questa versione non conosce, da una versione più nuova: si ignora (SPEC §7).
     #[serde(other)]
     Unknown,
+}
+
+/// Aggiornamento (storia): testo su sfondo colorato o foto, per 24 ore (SPEC §7.10).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct StatusMsg {
+    pub v: u32,
+    pub id: String,
+    pub ts: u64,
+    pub expires: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Sfondo `#RRGGBB` degli aggiornamenti di solo testo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<Box<FileMsg>>,
+}
+
+/// Durata massima di un aggiornamento.
+pub const MAX_STATUS_SECS: u64 = 24 * 3600;
+/// Lunghezza massima del testo di un aggiornamento, in caratteri.
+pub const MAX_STATUS_TEXT: usize = 700;
+
+/// `#RRGGBB`?
+pub fn is_hex_color(s: &str) -> bool {
+    s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+impl StatusMsg {
+    /// Durata e testo entro i limiti, sfondo valido, e qualcosa da mostrare.
+    pub fn valid(&self) -> bool {
+        self.expires > self.ts
+            && self.expires <= self.ts.saturating_add(MAX_STATUS_SECS)
+            && self
+                .text
+                .as_ref()
+                .is_none_or(|t| t.chars().count() <= MAX_STATUS_TEXT)
+            && self.bg.as_deref().is_none_or(is_hex_color)
+            && (self.file.is_some() || self.text.as_ref().is_some_and(|t| !t.trim().is_empty()))
+    }
 }
 
 /// Messaggio di una chiamata (SPEC §7.9).
@@ -216,6 +264,8 @@ impl AppMessage {
             AppMessage::Delete { v, .. } => *v,
             AppMessage::Rejoin { v, .. } => *v,
             AppMessage::Call(c) => c.v,
+            AppMessage::Status(s) => s.v,
+            AppMessage::StatusDelete { v, .. } | AppMessage::StatusSeen { v, .. } => *v,
             AppMessage::Unknown => crate::PROTOCOL_VERSION,
         }
     }
@@ -272,6 +322,12 @@ mod tests {
             r#"{"type":"call","v":1,"call":"c","op":"offer","ts":5,"video":true,"sdp":"v=0"}"#,
         )?;
         assert!(matches!(c, AppMessage::Call(ref m) if m.op == CallOp::Offer && m.video));
+        let d: AppMessage = serde_json::from_str(r#"{"type":"status_delete","v":1,"id":"x"}"#)?;
+        assert!(matches!(d, AppMessage::StatusDelete { ref id, .. } if id == "x"));
+        let st: AppMessage = serde_json::from_str(
+            r##"{"type":"status","v":1,"id":"s","ts":10,"expires":86410,"text":"ciao","bg":"#0D4F3C"}"##,
+        )?;
+        assert!(matches!(st, AppMessage::Status(ref m) if m.valid()));
         assert_eq!(
             serde_json::to_string(&AppMessage::Call(CallMsg {
                 v: 1,

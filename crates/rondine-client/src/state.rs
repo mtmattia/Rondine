@@ -268,6 +268,12 @@ pub struct State {
     /// Messaggi programmati, dal primo che partirà (solo sul telefono).
     #[serde(default)]
     pub scheduled: Vec<crate::ScheduledMessage>,
+    /// I miei aggiornamenti ancora validi (SPEC §7.10).
+    #[serde(default)]
+    pub my_statuses: Vec<crate::StatusPost>,
+    /// Gli aggiornamenti dei contatti ancora validi.
+    #[serde(default)]
+    pub statuses: Vec<crate::StatusPost>,
 }
 
 /// Una chiamata nel registro (SPEC §7.9).

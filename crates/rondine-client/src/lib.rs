@@ -9,6 +9,7 @@ mod net;
 mod rubrica;
 mod scheduled;
 mod state;
+mod status;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -37,6 +38,7 @@ pub use state::{
     Attachment, CallRecord, CallStatus, ChatMessage, Contact, Delivery, GroupChat, GroupMember,
     GroupMessage, GroupRef, Location, Outgoing, Source, State,
 };
+pub use status::StatusPost;
 
 /// Foto o documento da mandare (SPEC §7.5).
 #[derive(Clone, Debug, Default)]
@@ -187,6 +189,11 @@ pub enum Event {
         contact: PublicKey,
         ids: Vec<String>,
     },
+    /// Un contatto ha pubblicato o tolto un aggiornamento, o qualcuno ha guardato uno dei miei
+    /// (`author` sono io) (SPEC §7.10).
+    Status {
+        author: PublicKey,
+    },
     /// Squillo, risposta o fine di una chiamata (SPEC §7.9). `ring`: un'offerta da far squillare
     /// adesso (le vecchie risultano solo perse nel registro).
     Call {
@@ -333,6 +340,8 @@ impl Client {
                 rejoin_groups: Vec::new(),
                 calls: Vec::new(),
                 scheduled: Vec::new(),
+                my_statuses: Vec::new(),
+                statuses: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -390,6 +399,8 @@ impl Client {
                 rejoin_groups: Vec::new(),
                 calls: Vec::new(),
                 scheduled: Vec::new(),
+                my_statuses: Vec::new(),
+                statuses: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -1719,17 +1730,27 @@ impl Client {
                     .find(|m| m.id == message_id)
                     .and_then(|m| m.attachment.clone())
             })
+            .or_else(|| self.status_attachment(message_id))
     }
 
     fn attachment_mut(&mut self, message_id: &str) -> Option<&mut Attachment> {
-        if let Some(m) = self.state.messages.iter_mut().find(|m| m.id == message_id) {
-            return m.attachment.as_mut();
+        if self.state.messages.iter().any(|m| m.id == message_id) {
+            return self
+                .state
+                .messages
+                .iter_mut()
+                .find(|m| m.id == message_id)
+                .and_then(|m| m.attachment.as_mut());
         }
-        self.state
-            .group_messages
-            .iter_mut()
-            .find(|m| m.id == message_id)
-            .and_then(|m| m.attachment.as_mut())
+        if self.state.group_messages.iter().any(|m| m.id == message_id) {
+            return self
+                .state
+                .group_messages
+                .iter_mut()
+                .find(|m| m.id == message_id)
+                .and_then(|m| m.attachment.as_mut());
+        }
+        self.status_attachment_mut(message_id)
     }
 
     /// Scarica il file di un messaggio ricevuto (dalla mia casella o, nei gruppi, dai file
@@ -2463,6 +2484,7 @@ impl Client {
         // Appena ripristinato da un backup: chat da riaprire e gruppi da cui rientrare (§7.8).
         self.finish_restore().await;
         self.expire_calls();
+        self.expire_statuses();
         self.send_due_scheduled().await;
         let mut events = self.flush_outbox().await;
         let path = format!("/v1/inboxes/{}/messages", self.state.inbox);
@@ -2838,6 +2860,9 @@ impl Client {
             AppMessage::LocationUpdate(l) => self.received_location_update(sender, l),
             AppMessage::Profile { ts, photo, .. } => self.received_profile(sender, ts, photo),
             AppMessage::Call(c) => self.received_call(sender, c),
+            AppMessage::Status(s) => self.received_status(sender, *s),
+            AppMessage::StatusDelete { id, .. } => Ok(self.received_status_delete(sender, &id)),
+            AppMessage::StatusSeen { id, ts, .. } => Ok(self.received_status_seen(sender, &id, ts)),
             // Da una versione più nuova: non si sa cosa sia, si lascia perdere senza errori.
             AppMessage::Unknown => Ok(Vec::new()),
             AppMessage::Typing { active, ts, .. } => {

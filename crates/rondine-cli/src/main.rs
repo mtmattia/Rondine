@@ -111,6 +111,9 @@ enum Cmd {
     /// Posizione: fissa, in tempo reale, aggiornamenti.
     #[command(subcommand)]
     Posizione(PosizioneCmd),
+    /// Aggiornamenti (storie) per i contatti, per 24 ore.
+    #[command(subcommand)]
+    Aggiornamento(AggiornamentoCmd),
     /// Programma un messaggio: parte alla prima sincronizzazione dopo l'ora scelta.
     Programma {
         /// Contatto, oppure gruppo con --gruppo.
@@ -253,6 +256,25 @@ enum PosizioneCmd {
     },
     /// Smette di condividere una posizione in tempo reale.
     Ferma { id: String },
+}
+
+#[derive(Subcommand)]
+enum AggiornamentoCmd {
+    /// Pubblica un testo (con --sfondo #RRGGBB) o una foto (con --foto, il testo è la didascalia).
+    Pubblica {
+        #[arg(long)]
+        testo: Option<String>,
+        #[arg(long)]
+        sfondo: Option<String>,
+        #[arg(long)]
+        foto: Option<PathBuf>,
+    },
+    /// Gli aggiornamenti dei contatti e i tuoi (con chi li ha visti).
+    Elenco,
+    /// Guarda un aggiornamento di un contatto: scarica la foto e glielo dice.
+    Guarda { contatto: String, id: String },
+    /// Toglie un tuo aggiornamento, anche ai contatti.
+    Togli { id: String },
 }
 
 #[derive(Subcommand)]
@@ -508,6 +530,19 @@ fn print_events(events: &[Event], client: &Client) {
     for e in events {
         match e {
             Event::NewContact { name, .. } => println!("+ nuovo contatto: {name}"),
+            Event::Status { author } => {
+                if *author == client.identity() {
+                    println!("✦ qualcuno ha guardato un tuo aggiornamento");
+                } else {
+                    let who = client
+                        .contacts()
+                        .iter()
+                        .find(|c| &c.identity == author)
+                        .map(|c| c.display_name.clone())
+                        .unwrap_or_else(|| author.short());
+                    println!("✦ aggiornamenti di {who} cambiati");
+                }
+            }
             Event::Call {
                 contact,
                 call,
@@ -1021,6 +1056,71 @@ async fn main() -> anyhow::Result<()> {
                 if per_tutti { " per tutti" } else { " per te" }
             );
         }
+        Cmd::Aggiornamento(cmd) => match cmd {
+            AggiornamentoCmd::Pubblica {
+                testo,
+                sfondo,
+                foto,
+            } => {
+                let file = foto.map(|p| NewFile::from_path(&p)).transpose()?;
+                let s = c
+                    .post_status(testo.as_deref(), sfondo.as_deref(), file)
+                    .await?;
+                println!(
+                    "Pubblicato ({}), visibile fino a {} s da ora.",
+                    s.id,
+                    s.expires - s.ts
+                );
+            }
+            AggiornamentoCmd::Elenco => {
+                let t = rondine_core::now();
+                for s in c.my_statuses() {
+                    let what = s.text.clone().unwrap_or_else(|| "foto".into());
+                    println!(
+                        "tuo {}  «{what}»  visto da {}  (scade fra {} min)",
+                        s.id,
+                        s.viewers.len(),
+                        s.expires.saturating_sub(t) / 60
+                    );
+                }
+                for s in c.statuses() {
+                    let who = c
+                        .contacts()
+                        .iter()
+                        .find(|x| x.identity == s.author)
+                        .map(|x| x.display_name.clone())
+                        .unwrap_or_else(|| s.author.short());
+                    let what = match (&s.text, &s.attachment) {
+                        (Some(t), None) => format!("«{t}»"),
+                        (t, Some(_)) => format!(
+                            "foto{}",
+                            t.as_ref().map(|t| format!(" «{t}»")).unwrap_or_default()
+                        ),
+                        (None, None) => String::new(),
+                    };
+                    let seen = if s.seen { "" } else { " (nuovo)" };
+                    println!("{who} {}  {what}{seen}", s.id);
+                }
+                if c.my_statuses().is_empty() && c.statuses().is_empty() {
+                    println!("Nessun aggiornamento.");
+                }
+            }
+            AggiornamentoCmd::Guarda { contatto, id } => {
+                let who = c.find_contact(&contatto)?.identity;
+                if c.statuses()
+                    .iter()
+                    .any(|s| s.id == id && s.attachment.is_some())
+                {
+                    println!("Foto in {}", c.download(&id).await?.display());
+                }
+                c.mark_status_seen(&who, &id).await?;
+                println!("Visto.");
+            }
+            AggiornamentoCmd::Togli { id } => {
+                c.delete_status(&id).await?;
+                println!("Tolto.");
+            }
+        },
         Cmd::Programma {
             chi,
             gruppo,

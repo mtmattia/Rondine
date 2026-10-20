@@ -32,6 +32,8 @@ import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -88,6 +90,7 @@ private data class Tab(val label: String, val selected: ImageVector, val unselec
 
 private val tabs = listOf(
     Tab("Chat", Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat),
+    Tab("Aggiornamenti", Icons.Filled.Update, Icons.Outlined.Update),
     Tab("Chiamate", Icons.Filled.Call, Icons.Outlined.Call),
 )
 
@@ -109,11 +112,16 @@ fun HomeScreen(
     val groups by Repo.groups.collectAsState()
     val unreadChats = chats.count { it.unread > 0u } + groups.count { it.unread > 0u }
     val calls by Repo.calls.collectAsState()
+    val statusList by Repo.statuses.collectAsState()
+    val newStatuses = hasUnseenStatuses(statusList)
+    var textStatus by remember { mutableStateOf(false) }
+    val photoStatus = rememberPhotoStatusPicker()
+    if (textStatus) TextStatusComposer { textStatus = false }
     var seenTick by remember { mutableIntStateOf(0) }
     val missed = remember(calls, seenTick) { unseenMissed(calls) }
     // Aprendo la scheda le chiamate perse risultano viste.
     androidx.compose.runtime.LaunchedEffect(tab, calls) {
-        if (tab == 1) {
+        if (tab == 2) {
             Repo.callsSeen = System.currentTimeMillis() / 1000
             seenTick++
         }
@@ -156,8 +164,14 @@ fun HomeScreen(
                                 if (i == 0 && unreadChats > 0) {
                                     CountBadge(unreadChats, Modifier.align(Alignment.TopEnd).padding(start = 14.dp))
                                 }
-                                if (i == 1 && missed > 0) {
+                                if (i == 2 && missed > 0) {
                                     CountBadge(missed, Modifier.align(Alignment.TopEnd).padding(start = 14.dp))
+                                }
+                                if (i == 1 && newStatuses) {
+                                    Box(
+                                        Modifier.align(Alignment.TopEnd).size(9.dp)
+                                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                                    )
                                 }
                             }
                         },
@@ -174,6 +188,20 @@ fun HomeScreen(
             }
         },
         floatingActionButton = {
+            if (tab == 1) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    androidx.compose.material3.SmallFloatingActionButton(
+                        onClick = { textStatus = true },
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ) { Icon(Icons.Filled.Edit, "Aggiornamento di testo") }
+                    FloatingActionButton(
+                        onClick = photoStatus,
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Icon(Icons.Filled.PhotoCamera, "Aggiornamento con foto") }
+                }
+            }
             if (tab == 0) {
                 FloatingActionButton(
                     onClick = onNewChat,
@@ -185,7 +213,11 @@ fun HomeScreen(
         },
     ) { padding ->
         val m = Modifier.padding(padding)
-        if (tab == 1) CallList(m) else ChatList(chats, groups, onOpenChat, onOpenGroup, onNewChat, onPickPush, m)
+        when (tab) {
+            1 -> StatusList(m, onNewText = { textStatus = true }, onNewPhoto = photoStatus)
+            2 -> CallList(m)
+            else -> ChatList(chats, groups, onOpenChat, onOpenGroup, onNewChat, onPickPush, m)
+        }
     }
 }
 

@@ -65,6 +65,12 @@ nomi utente.
   di sistema. Le foto non lasciano il telefono finché non le mandi tu. Anche il ritaglio del soggetto per gli
   sticker si fa sul telefono, senza servizi esterni.
 
+## Aggiornamenti
+
+Un aggiornamento (testo o foto) lo ricevono, cifrato, tutti i tuoi contatti; dura 24 ore, poi
+ogni telefono lo cancella. La foto resta cifrata sul tuo nodo finché scade. Quando un contatto
+guarda un tuo aggiornamento te lo dice (e tu lo dici a lui quando guardi i suoi).
+
 ## Chiamate
 
 Voce e video vanno **direttamente tra i due telefoni**, cifrati (DTLS-SRTP); la chiave della

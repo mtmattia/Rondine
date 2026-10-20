@@ -201,6 +201,7 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "profile", ... }           // §7.7
 { "v": 1, "type": "rejoin", "group": "<id>" } // §7.8
 { "v": 1, "type": "call", ... }              // §7.9
+{ "v": 1, "type": "status", ... }            // §7.10 (anche status_delete, status_seen)
 ```
 
 Un `type` sconosciuto (da una versione più nuova dell'app) si **ignora** senza errori: così i
@@ -409,6 +410,31 @@ Il server TURN inoltra solo pacchetti cifrati. Un nodo senza TURN dà solo gli `
 (o nessuno): allora la chiamata riesce in rete locale e con molte reti, non con tutte.
 
 Limite noto: chiamate solo 1:1 (di gruppo, dopo).
+
+### 7.10 Aggiornamenti (storie)
+
+Un testo su sfondo colorato o una foto, visibile ai contatti per al massimo 24 ore:
+
+```json
+{ "v": 1, "type": "status", "id": "<b64 16 byte>", "ts": 1792240000, "expires": 1792326400,
+  "text": "Al mare!", "bg": "#0D4F3C" }
+{ "v": 1, "type": "status", "id": "<id>", "ts": …, "expires": …, "text": "didascalia",
+  "file": { <come il messaggio file del §7.5, con lo stesso id> } }
+{ "v": 1, "type": "status_delete", "id": "<id>" }
+{ "v": 1, "type": "status_seen", "id": "<id>", "ts": 1792240100 }
+```
+
+- Si manda dentro MLS a **ogni contatto** con una chat (non ai bloccati), come deposito
+  **silenzioso** (§6): un aggiornamento non fa suonare il telefono.
+- `expires` è al massimo `ts` + 24 ore; dopo, chi lo ha lo cancella (file compreso). `text` è
+  lungo al massimo 700 caratteri; `bg` è un colore `#RRGGBB` per gli aggiornamenti di solo testo.
+- La foto si carica **una volta** come file condiviso sul proprio nodo (§6.2: `at` con
+  `shared`) e ognuno la scarica da lì; senza nodo va in `data`, quindi al massimo 64 KiB.
+- `status_delete` lo toglie prima della scadenza (lo manda solo chi l'ha pubblicato).
+- `status_seen`: chi lo guarda lo dice, una volta, a chi l'ha pubblicato (deposito silenzioso).
+- Una risposta è un normale `text` nella chat 1:1 con `reply` uguale all'`id` dell'aggiornamento
+  (§7.1b).
+- Una versione che non conosce questi tipi li ignora (§7).
 
 ## 8. Sveglia push
 

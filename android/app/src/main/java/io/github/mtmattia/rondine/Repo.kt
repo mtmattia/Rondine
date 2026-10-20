@@ -57,6 +57,10 @@ object Repo {
     val profile = MutableStateFlow<Profile?>(null)
     val chats = MutableStateFlow<List<ChatRow>>(emptyList())
     val groups = MutableStateFlow<List<GroupRow>>(emptyList())
+    /** Aggiornamenti (storie) dei contatti e miei. */
+    val statuses = MutableStateFlow<List<uniffi.rondine_ffi.StatusInfo>>(emptyList())
+    val myStatuses = MutableStateFlow<List<uniffi.rondine_ffi.StatusInfo>>(emptyList())
+
     /** Messaggi programmati, dal primo che partirà. */
     val scheduled = MutableStateFlow<List<uniffi.rondine_ffi.ScheduledInfo>>(emptyList())
 
@@ -187,6 +191,8 @@ object Repo {
         chats.value = r.chats()
         groups.value = r.groups()
         calls.value = r.calls()
+        statuses.value = r.statuses()
+        myStatuses.value = r.myStatuses()
         val s = r.scheduledMessages()
         if (s != scheduled.value) {
             scheduled.value = s
@@ -212,7 +218,8 @@ object Repo {
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty() || res.receipts > 0u ||
                 res.typingChanged || res.locationsChanged || chats.value.any { it.typing } ||
                 res.groupMessages.isNotEmpty() || res.groupsChanged || res.photosChanged ||
-                res.messagesDeleted || res.calls.isNotEmpty() || scheduled.value.isNotEmpty()
+                res.messagesDeleted || res.calls.isNotEmpty() || scheduled.value.isNotEmpty() ||
+                res.statusesChanged
             ) {
                 refresh()
             }

@@ -165,6 +165,14 @@ data class UiMessage(
     val replyTo: String? = null,
 )
 
+/** Risposta a un aggiornamento (SPEC §7.10): la citazione mostra l'aggiornamento, finché esiste. */
+private fun statusQuote(id: String): UiMessage? {
+    val mine = Repo.myStatuses.value.firstOrNull { it.id == id }
+    val s = mine ?: Repo.statuses.value.firstOrNull { it.id == id } ?: return null
+    val body = "Aggiornamento" + (s.text?.let { " · $it" } ?: if (s.attachment != null) " · 📷 Foto" else "")
+    return UiMessage(s.id, mine != null, body, s.ts, true, null, null, null, if (mine != null) "io" else s.authorId, null)
+}
+
 private fun Message.ui() =
     UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null, replyTo)
 private fun GroupMessageInfo.ui() =
@@ -901,7 +909,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                             is ChatItem.Msg -> Bubble(
                                 item.m, item.firstOfRun, isGroup,
                                 selected = item.m.id in selected,
-                                quote = item.m.replyTo?.let { r -> messages.firstOrNull { it.id == r } },
+                                quote = item.m.replyTo?.let { r -> messages.firstOrNull { it.id == r } ?: statusQuote(r) },
                                 quoteAuthor = { authorOf(it) },
                                 onSelect = { toggle(item.m) },
                                 selecting = selected.isNotEmpty(),

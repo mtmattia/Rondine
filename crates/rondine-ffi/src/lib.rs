@@ -308,6 +308,82 @@ pub struct ChatRow {
     pub on_lan: bool,
 }
 
+/// Un aggiornamento (storia), mio o di un contatto (SPEC §7.10).
+#[derive(uniffi::Record, Clone)]
+pub struct StatusInfo {
+    pub id: String,
+    pub author_id: String,
+    pub author_name: String,
+    pub author_photo: Option<String>,
+    pub ts: u64,
+    pub expires: u64,
+    pub text: Option<String>,
+    /// `#RRGGBB` per quelli di solo testo.
+    pub bg: Option<String>,
+    pub attachment: Option<AttachmentInfo>,
+    pub seen: bool,
+    /// Per i miei: chi l'ha guardato.
+    pub viewers: Vec<StatusViewer>,
+}
+
+#[derive(uniffi::Record, Clone)]
+pub struct StatusViewer {
+    pub id: String,
+    pub name: String,
+    pub ts: u64,
+}
+
+/// La foto di un aggiornamento da pubblicare.
+#[derive(uniffi::Record, Clone)]
+pub struct StatusPhoto {
+    pub name: String,
+    pub mime: String,
+    pub data: Vec<u8>,
+    pub thumb: Option<Vec<u8>>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+fn status_info(c: &Client, s: &rondine_client::StatusPost) -> StatusInfo {
+    let name_of = |k: &PublicKey| {
+        if *k == c.identity() {
+            c.state().display_name.clone()
+        } else {
+            c.contacts()
+                .iter()
+                .find(|x| &x.identity == k)
+                .map(|x| x.display_name.clone())
+                .unwrap_or_else(|| k.short())
+        }
+    };
+    StatusInfo {
+        id: s.id.clone(),
+        author_id: s.author.to_b64(),
+        author_name: name_of(&s.author),
+        author_photo: if s.author == c.identity() {
+            c.my_photo().map(|p| p.to_string_lossy().into_owned())
+        } else {
+            c.photo_of(&s.author)
+                .map(|p| p.to_string_lossy().into_owned())
+        },
+        ts: s.ts,
+        expires: s.expires,
+        text: s.text.clone(),
+        bg: s.bg.clone(),
+        attachment: s.attachment.as_ref().map(attachment_info),
+        seen: s.seen,
+        viewers: s
+            .viewers
+            .iter()
+            .map(|(k, ts)| StatusViewer {
+                id: k.to_b64(),
+                name: name_of(k),
+                ts: *ts,
+            })
+            .collect(),
+    }
+}
+
 /// Un messaggio programmato (parte all'ora `at`, secondi unix).
 #[derive(uniffi::Record, Clone)]
 pub struct ScheduledInfo {
@@ -372,6 +448,8 @@ pub struct SyncResult {
     pub photos_changed: bool,
     /// Qualcuno ha cancellato per tutti dei messaggi.
     pub messages_deleted: bool,
+    /// Aggiornamenti nuovi o tolti, o qualcuno ha guardato uno dei miei.
+    pub statuses_changed: bool,
     /// Squilli, risposte e fine delle chiamate, in ordine di arrivo.
     pub calls: Vec<CallSignal>,
 }
@@ -592,6 +670,9 @@ struct View {
     group_messages: std::collections::HashMap<String, Vec<GroupMessageInfo>>,
     /// Registro delle chiamate, dalla più recente.
     calls: Vec<CallInfo>,
+    /// Aggiornamenti dei contatti e miei, dal più vecchio.
+    statuses: Vec<StatusInfo>,
+    my_statuses: Vec<StatusInfo>,
 }
 
 fn view_of(c: &Client) -> View {
@@ -707,7 +788,11 @@ fn view_of(c: &Client) -> View {
             .into(),
         })
         .collect();
+    let statuses = c.statuses().iter().map(|s| status_info(c, s)).collect();
+    let my_statuses = c.my_statuses().iter().map(|s| status_info(c, s)).collect();
     View {
+        statuses,
+        my_statuses,
         calls,
         profile,
         chats,
@@ -1126,6 +1211,53 @@ impl Rondine {
         .await
     }
 
+    /// Gli aggiornamenti dei contatti, dal più vecchio.
+    pub async fn statuses(&self) -> Vec<StatusInfo> {
+        self.read(|v| v.statuses.clone())
+    }
+
+    pub async fn my_statuses(&self) -> Vec<StatusInfo> {
+        self.read(|v| v.my_statuses.clone())
+    }
+
+    /// Pubblica un aggiornamento: testo (con sfondo `#RRGGBB`) o foto (con didascalia).
+    pub async fn post_status(
+        &self,
+        text: Option<String>,
+        bg: Option<String>,
+        photo: Option<StatusPhoto>,
+    ) -> Result<StatusInfo> {
+        let file = photo.map(|p| NewFile {
+            name: p.name,
+            mime: p.mime,
+            data: p.data,
+            caption: None,
+            thumb: p.thumb,
+            width: p.width,
+            height: p.height,
+            sticker: false,
+        });
+        self.run(move |c| {
+            Box::pin(async move {
+                let s = c.post_status(text.as_deref(), bg.as_deref(), file).await?;
+                Ok(status_info(c, &s))
+            })
+        })
+        .await
+    }
+
+    pub async fn delete_status(&self, id: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.delete_status(&id).await?) }))
+            .await
+    }
+
+    /// L'ho guardato: lo dico a chi l'ha pubblicato.
+    pub async fn mark_status_seen(&self, author_id: String, id: String) -> Result<()> {
+        let k = key(&author_id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.mark_status_seen(&k, &id).await?) }))
+            .await
+    }
+
     /// Programma un testo per un contatto (o un gruppo, con `is_group`): l'id del programmato.
     pub async fn schedule_message(
         &self,
@@ -1324,6 +1456,7 @@ impl Rondine {
             photos_changed: false,
             messages_deleted: false,
             calls: Vec::new(),
+            statuses_changed: false,
         };
         for e in synced.groups {
             match e {
@@ -1361,6 +1494,7 @@ impl Rondine {
                 Event::Message(m) => out.messages.push(message(&m)),
                 Event::Rejected(why) => out.rejected.push(why),
                 Event::Typing { .. } => out.typing_changed = true,
+                Event::Status { .. } => out.statuses_changed = true,
                 Event::LocationUpdate { .. } => out.locations_changed = true,
                 Event::PhotoChanged { .. } => out.photos_changed = true,
                 Event::Deleted { .. } => out.messages_deleted = true,

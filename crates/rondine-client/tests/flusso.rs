@@ -1934,3 +1934,72 @@ async fn messaggio_programmato_parte_all_ora_giusta() -> R {
     let _ = later;
     Ok(())
 }
+
+/// Aggiornamenti (SPEC §7.10): testo e foto ai contatti, la foto scaricata dal nodo di chi
+/// pubblica, "visto" a chi pubblica, risposta come messaggio in chat, cancellazione per tutti.
+#[tokio::test]
+async fn aggiornamenti_ai_contatti() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &node).await?;
+    let me = mattia.identity();
+
+    let text = mattia
+        .post_status(Some("Al mare!"), Some("#0D4F3C"), None)
+        .await?;
+    let photo_data = fake_file(150 * 1024);
+    let mut photo = NewFile::new("spiaggia.jpg", "image/jpeg", photo_data.clone());
+    photo.width = Some(1080);
+    photo.height = Some(1920);
+    let pic = mattia
+        .post_status(Some("tramonto"), None, Some(photo))
+        .await?;
+    assert_eq!(mattia.my_statuses().len(), 2);
+    assert!(text.expires <= text.ts + 24 * 3600);
+
+    let ev = silvia.sync().await?;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::Status { author } if *author == me))
+    );
+    let got: Vec<_> = silvia.statuses().to_vec();
+    assert_eq!(got.len(), 2);
+    let t = got.iter().find(|s| s.id == text.id).ok_or("testo")?;
+    assert_eq!(t.text.as_deref(), Some("Al mare!"));
+    assert_eq!(t.bg.as_deref(), Some("#0D4F3C"));
+    assert!(!t.seen);
+    // La foto sta sul nodo di Mattia: Silvia la scarica quando la guarda.
+    let path = silvia.download(&pic.id).await?;
+    assert_eq!(std::fs::read(path)?, photo_data);
+
+    silvia.mark_status_seen(&me, &pic.id).await?;
+    assert!(silvia.statuses().iter().any(|s| s.id == pic.id && s.seen));
+    mattia.sync().await?;
+    let mine = mattia
+        .my_statuses()
+        .iter()
+        .find(|s| s.id == pic.id)
+        .cloned()
+        .ok_or("mio")?;
+    assert_eq!(
+        mine.viewers.iter().map(|v| v.0).collect::<Vec<_>>(),
+        vec![silvia.identity()]
+    );
+
+    // Risposta all'aggiornamento: un messaggio normale che lo cita.
+    silvia.send_reply(&me, "Che bello!", Some(&pic.id)).await?;
+    let ev = mattia.sync().await?;
+    assert!(
+        ev.iter().any(
+            |e| matches!(e, Event::Message(m) if m.reply_to.as_deref() == Some(pic.id.as_str()))
+        )
+    );
+
+    mattia.delete_status(&text.id).await?;
+    assert_eq!(mattia.my_statuses().len(), 1);
+    silvia.sync().await?;
+    assert!(silvia.statuses().iter().all(|s| s.id != text.id));
+    // Testo vuoto e niente foto: non è un aggiornamento.
+    assert!(mattia.post_status(Some("  "), None, None).await.is_err());
+    Ok(())
+}

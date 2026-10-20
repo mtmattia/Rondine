@@ -285,3 +285,12 @@ Una riga per modifica: data, cosa è cambiato.
   Provato: messaggio programmato a un minuto, app chiusa, partito alle 22:14:11 e arrivato.
   Foto del profilo: si apre a tutto schermo con lo zoom dalla lista chat, dalle chiamate, dai
   gruppi e dalla scheda del contatto; l'app ora la prepara fino a 512 px (sempre entro 48 KiB).
+- 2026-10-20 — Aggiornamenti (storie, SPEC §7.10): messaggi `status`, `status_delete` e
+  `status_seen` nelle chat 1:1, depositi silenziosi; la foto si carica una volta come file
+  condiviso sul proprio nodo. Client: pubblica, togli, guarda (scarica la foto e dice "visto"),
+  scadenza a 24 ore; CLI `rondine aggiornamento pubblica|elenco|guarda|togli`; FFI. App: scheda
+  "Aggiornamenti" tra Chat e Chiamate (il mio, "Recenti" con l'anello verde, "Già visti"),
+  editor del testo su colore e della foto con didascalia, visualizzatore a tutto schermo con le
+  barre, tocco avanti/indietro, tenere premuto per fermare, giù per chiudere, su per rispondere
+  (o, sui miei, per vedere chi l'ha visto). La risposta in chat cita l'aggiornamento. Provato tra
+  i due emulatori: testo e foto pubblicati, visti, risposta arrivata con la citazione, "visto da 1".

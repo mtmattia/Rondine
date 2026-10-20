@@ -84,10 +84,44 @@ pub enum AppMessage {
         #[serde(default)]
         photo: Option<String>,
     },
+    /// Squillo, risposta o fine di una chiamata (SPEC §7.9).
+    Call(CallMsg),
     /// Un tipo che questa versione non conosce, da una versione più nuova: si ignora (SPEC §7).
     #[serde(other)]
     Unknown,
 }
+
+/// Messaggio di una chiamata (SPEC §7.9).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CallMsg {
+    pub v: u32,
+    /// Id della chiamata, uguale in tutti i suoi messaggi.
+    pub call: String,
+    pub op: CallOp,
+    pub ts: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub video: bool,
+    /// SDP con tutti i candidati ICE: in `offer` e `answer`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdp: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CallOp {
+    Offer,
+    Answer,
+    Hangup,
+    Reject,
+    Busy,
+}
+
+/// SDP più lungo di così: rifiutato.
+pub const MAX_SDP_BYTES: usize = 32 * 1024;
+/// Chi chiama riaggancia se nessuno risponde entro questo tempo.
+pub const CALL_RING_SECS: u64 = 45;
+/// Un'offerta più vecchia di così non squilla più: è una chiamata persa.
+pub const CALL_STALE_SECS: u64 = 60;
 
 /// Foto del profilo: JPEG di al massimo 48 KiB (SPEC §7.7).
 pub const MAX_PHOTO_BYTES: usize = 48 * 1024;
@@ -178,6 +212,7 @@ impl AppMessage {
             AppMessage::Profile { v, .. } => *v,
             AppMessage::Delete { v, .. } => *v,
             AppMessage::Rejoin { v, .. } => *v,
+            AppMessage::Call(c) => c.v,
             AppMessage::Unknown => crate::PROTOCOL_VERSION,
         }
     }
@@ -230,6 +265,21 @@ mod tests {
             r#"{"type":"location_update","v":1,"id":"x","ts":5,"lat":45.5,"lon":9.2,"live_until":60}"#,
         )?;
         assert!(matches!(u, AppMessage::LocationUpdate(ref l) if l.valid() && l.lat == 45.5));
+        let c: AppMessage = serde_json::from_str(
+            r#"{"type":"call","v":1,"call":"c","op":"offer","ts":5,"video":true,"sdp":"v=0"}"#,
+        )?;
+        assert!(matches!(c, AppMessage::Call(ref m) if m.op == CallOp::Offer && m.video));
+        assert_eq!(
+            serde_json::to_string(&AppMessage::Call(CallMsg {
+                v: 1,
+                call: "c".into(),
+                op: CallOp::Hangup,
+                ts: 5,
+                video: false,
+                sdp: None,
+            }))?,
+            r#"{"type":"call","v":1,"call":"c","op":"hangup","ts":5}"#
+        );
         Ok(())
     }
 }

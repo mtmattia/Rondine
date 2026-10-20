@@ -200,6 +200,7 @@ Chi riceve controlla che le due coincidano.
 { "v": 1, "type": "location_update", ... }   // §7.6
 { "v": 1, "type": "profile", ... }           // §7.7
 { "v": 1, "type": "rejoin", "group": "<id>" } // §7.8
+{ "v": 1, "type": "call", ... }              // §7.9
 ```
 
 Un `type` sconosciuto (da una versione più nuova dell'app) si **ignora** senza errori: così i
@@ -371,6 +372,39 @@ conversazioni cambiano a ogni messaggio, uno vecchio non serve) né foto e docum
 I messaggi arrivati dopo il backup e prima del ripristino non si possono più leggere. Il backup
 va usato su un telefono alla volta.
 
+### 7.9 Chiamate
+
+Voce e video viaggiano **direttamente tra i telefoni** con WebRTC, cifrati end-to-end
+(DTLS-SRTP). Lo squillo viaggia dentro MLS nella chat 1:1:
+
+```json
+{ "v": 1, "type": "call", "call": "<b64 16 byte>", "op": "offer", "ts": 1792240000,
+  "video": true, "sdp": "<SDP completo, con tutti i candidati ICE>" }
+{ "v": 1, "type": "call", "call": "<id>", "op": "answer", "ts": …, "sdp": "<SDP>" }
+{ "v": 1, "type": "call", "call": "<id>", "op": "hangup", "ts": … }
+{ "v": 1, "type": "call", "call": "<id>", "op": "reject", "ts": … }
+{ "v": 1, "type": "call", "call": "<id>", "op": "busy", "ts": … }
+```
+
+- L'SDP contiene l'impronta del certificato DTLS: arrivando dentro MLS è autenticata, quindi
+  nessuno può mettersi in mezzo alla chiamata.
+- ICE **non a goccia**: chi manda offerta o risposta aspetta di aver raccolto i candidati (al
+  massimo 3 s) e li mette tutti nell'SDP. Due messaggi bastano per collegarsi.
+- `hangup` chiude la chiamata, o la annulla prima della risposta; `reject` la rifiuta; `busy` dice
+  che si è già in un'altra chiamata. Senza risposta entro 45 s chi chiama riaggancia.
+- Un `offer` con `ts` più vecchio di 60 s non squilla: risulta solo come chiamata persa.
+- L'SDP è lungo al massimo 32 KiB.
+- Ogni telefono tiene il proprio registro delle chiamate (fatte, ricevute, perse, durata).
+
+**STUN e TURN.** `GET /v1/inboxes/{inbox}/turn` (proprietario) →
+`{ "urls": ["stun:…", "turn:…"], "username": "…", "credential": "…", "ttl": 86400 }`. Credenziali
+temporanee secondo la "TURN REST API" (coturn, `use-auth-secret`): `username` =
+`<scadenza unix>:<inbox>`, `credential` = b64 standard di HMAC-SHA1(segreto condiviso, username).
+Il server TURN inoltra solo pacchetti cifrati. Un nodo senza TURN dà solo gli `stun:` configurati
+(o nessuno): allora la chiamata riesce in rete locale e con molte reti, non con tutte.
+
+Limite noto: chiamate solo 1:1 (di gruppo, dopo).
+
 ## 8. Sveglia push
 
 Il proprietario registra un bersaglio:
@@ -455,6 +489,7 @@ finché non passa da SMS, QR o numero di sicurezza.
 | Metodo e percorso | Auth | Cosa fa |
 |---|---|---|
 | `GET /v1/info` | — | `{v, node_key, public_url, software}` |
+| `GET /v1/inboxes/{inbox}/turn` | proprietario | server STUN/TURN e credenziali temporanee (§7.9) |
 | `POST /v1/inboxes` | proprietario | crea o ritrova la casella → `{inbox}` |
 | `POST /v1/inboxes/{inbox}/permits` | proprietario | `{label}` → `Signed<Permit>` |
 | `POST /v1/inboxes/{inbox}/permits/revoke` | proprietario | `{id}` |

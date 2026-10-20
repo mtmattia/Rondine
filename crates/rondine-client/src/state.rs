@@ -259,6 +259,39 @@ pub struct State {
     /// Gruppi in cui chiedere di rientrare dopo il ripristino.
     #[serde(default)]
     pub rejoin_groups: Vec<String>,
+    /// Registro delle chiamate (SPEC §7.9).
+    #[serde(default)]
+    pub calls: Vec<CallRecord>,
+}
+
+/// Una chiamata nel registro (SPEC §7.9).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CallRecord {
+    pub id: String,
+    pub contact: PublicKey,
+    pub outgoing: bool,
+    pub video: bool,
+    pub started_at: u64,
+    pub answered_at: Option<u64>,
+    pub ended_at: Option<u64>,
+    pub status: CallStatus,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CallStatus {
+    /// Sta squillando.
+    Ringing,
+    /// Risposta: in corso, o finita se c'è `ended_at`.
+    Answered,
+    /// In arrivo e senza risposta.
+    Missed,
+    /// Rifiutata (da me se in arrivo, dall'altro se in uscita).
+    Declined,
+    /// In uscita, e l'altro era già in un'altra chiamata.
+    Busy,
+    /// In uscita, annullata o senza risposta.
+    Unanswered,
 }
 
 /// Segreti di un numero della rubrica: hash per i numeri verificati e, se avevo un numero, luogo

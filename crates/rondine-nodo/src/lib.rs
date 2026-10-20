@@ -48,7 +48,21 @@ pub struct Config {
     pub fcm: Option<FcmConfig>,
     /// Telefono Android che spedisce gli SMS di verifica (SPEC §13.4); senza, SMS "in prova".
     pub sms: Option<SmsGateway>,
+    /// Server STUN/TURN per le chiamate (SPEC §7.9).
+    pub turn: Option<TurnConfig>,
 }
+
+/// Server STUN/TURN da dare ai telefoni per le chiamate (SPEC §7.9).
+#[derive(Clone)]
+pub struct TurnConfig {
+    /// Per esempio `stun:turn.esempio.it:3478` e `turn:turn.esempio.it:3478`.
+    pub urls: Vec<String>,
+    /// Segreto condiviso con coturn (`use-auth-secret`); senza, solo gli `stun:`.
+    pub secret: Option<String>,
+}
+
+/// Durata delle credenziali TURN temporanee.
+pub const TURN_TTL_SECS: u64 = 86_400;
 
 /// L'app "SMS Gateway for Android" in modalità server locale (SPEC §13.4).
 #[derive(Clone)]
@@ -78,6 +92,7 @@ struct Inner {
     pusher: Pusher,
     fcm: Option<fcm::Fcm>,
     sms_gateway: Option<SmsGateway>,
+    turn: Option<TurnConfig>,
     http: reqwest::Client,
     rate: Mutex<HashMap<String, (u64, u32)>>,
     last_wake: Mutex<HashMap<String, WakeSlot>>,
@@ -103,6 +118,7 @@ impl AppState {
             store: Mutex::new(cfg.store),
             pusher: Pusher::new(cfg.allow_local_push)?,
             sms_gateway: cfg.sms,
+            turn: cfg.turn,
             http: push::http_client()?,
             fcm: match cfg.fcm {
                 Some(f) => Some(fcm::Fcm::new(f, push::http_client()?)),
@@ -203,6 +219,7 @@ pub fn router(state: AppState) -> Router {
             get(files::fetch).delete(files::delete),
         )
         .route("/v1/inboxes/{inbox}/keypackages", post(upload_keypackages))
+        .route("/v1/inboxes/{inbox}/turn", get(turn_credentials))
         .route(
             "/v1/inboxes/{inbox}/keypackages/claim",
             post(claim_keypackage),
@@ -670,6 +687,58 @@ pub struct MessageOut {
     pub id: String,
     pub blob: String,
     pub received_at: u64,
+}
+
+/// Server STUN/TURN e credenziali temporanee per le chiamate (SPEC §7.9).
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct TurnServers {
+    pub urls: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential: Option<String>,
+    #[serde(default)]
+    pub ttl: u64,
+}
+
+async fn turn_credentials(
+    State(s): State<AppState>,
+    Path(inbox): Path<String>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Json<TurnServers>> {
+    s.owner_of(&inbox, &headers, &method, &uri, &body)?;
+    let Some(turn) = s.0.turn.as_ref() else {
+        return Ok(Json(TurnServers::default()));
+    };
+    let Some(secret) = turn.secret.as_deref() else {
+        // Senza segreto i `turn:` non servirebbero a niente: solo gli `stun:`.
+        let urls = turn
+            .urls
+            .iter()
+            .filter(|u| u.starts_with("stun:") || u.starts_with("stuns:"))
+            .cloned()
+            .collect();
+        return Ok(Json(TurnServers {
+            urls,
+            ..Default::default()
+        }));
+    };
+    // TURN REST API (coturn `use-auth-secret`): utente "<scadenza>:<casella>",
+    // password HMAC-SHA1(segreto, utente) in base64 standard.
+    let username = format!("{}:{inbox}", now() + TURN_TTL_SECS);
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, secret.as_bytes());
+    let tag = ring::hmac::sign(&key, username.as_bytes());
+    let credential =
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tag.as_ref());
+    Ok(Json(TurnServers {
+        urls: turn.urls.clone(),
+        username: Some(username),
+        credential: Some(credential),
+        ttl: TURN_TTL_SECS,
+    }))
 }
 
 async fn fetch_messages(

@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 use rondine_client::{
-    ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent, NewFile,
+    CallOp, CallStatus, ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent,
+    NewFile,
 };
 use rondine_core::PublicKey;
 
@@ -140,6 +141,10 @@ enum Cmd {
     /// Notifiche UnifiedPush.
     #[command(subcommand)]
     Push(PushCmd),
+    /// Chiamate (SPEC §7.9): registro, server STUN/TURN e i messaggi di squillo. Audio e video
+    /// li fa l'app; qui l'SDP si legge da un file.
+    #[command(subcommand)]
+    Chiamata(ChiamataCmd),
     /// Elenca i gruppi.
     Gruppi,
     /// Chat di gruppo.
@@ -216,6 +221,38 @@ enum PosizioneCmd {
     },
     /// Smette di condividere una posizione in tempo reale.
     Ferma { id: String },
+}
+
+#[derive(Subcommand)]
+enum ChiamataCmd {
+    /// Registro delle chiamate.
+    Elenco,
+    /// Server STUN/TURN e credenziali temporanee dal tuo nodo.
+    Turn,
+    /// Fa squillare un contatto con l'offerta SDP nel file; stampa l'id della chiamata.
+    Chiama {
+        contatto: String,
+        #[arg(long)]
+        sdp: PathBuf,
+        #[arg(long)]
+        video: bool,
+    },
+    /// Risponde a una chiamata con la risposta SDP nel file.
+    Rispondi {
+        contatto: String,
+        id: String,
+        #[arg(long)]
+        sdp: PathBuf,
+    },
+    /// Riaggancia; con --rifiuta rifiuta, con --occupato dice che sei in un'altra chiamata.
+    Chiudi {
+        contatto: String,
+        id: String,
+        #[arg(long)]
+        rifiuta: bool,
+        #[arg(long, conflicts_with = "rifiuta")]
+        occupato: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -439,6 +476,30 @@ fn print_events(events: &[Event], client: &Client) {
     for e in events {
         match e {
             Event::NewContact { name, .. } => println!("+ nuovo contatto: {name}"),
+            Event::Call {
+                contact,
+                call,
+                op,
+                video,
+                ring,
+                ..
+            } => {
+                let who = client
+                    .contacts()
+                    .iter()
+                    .find(|c| &c.identity == contact)
+                    .map(|c| c.display_name.clone())
+                    .unwrap_or_else(|| contact.short());
+                let kind = if *video { "videochiamata" } else { "chiamata" };
+                match op {
+                    CallOp::Offer if *ring => println!("☎ {kind} da {who} ({call})"),
+                    CallOp::Offer => println!("☎ {kind} persa da {who}"),
+                    CallOp::Answer => println!("☎ {who} ha risposto ({call})"),
+                    CallOp::Hangup => println!("☎ {who} ha riagganciato ({call})"),
+                    CallOp::Reject => println!("☎ {who} ha rifiutato ({call})"),
+                    CallOp::Busy => println!("☎ {who} è occupato ({call})"),
+                }
+            }
             Event::Deleted { contact, ids } => {
                 let who = client
                     .contacts()
@@ -807,6 +868,81 @@ async fn main() -> anyhow::Result<()> {
                 println!("Foto messa: la vedono i tuoi contatti e i tuoi gruppi.");
             }
         }
+        Cmd::Chiamata(cmd) => match cmd {
+            ChiamataCmd::Elenco => {
+                if c.calls().is_empty() {
+                    println!("Nessuna chiamata.");
+                }
+                for k in c.calls() {
+                    let who = c
+                        .contacts()
+                        .iter()
+                        .find(|x| x.identity == k.contact)
+                        .map(|x| x.display_name.clone())
+                        .unwrap_or_else(|| k.contact.short());
+                    let dir = if k.outgoing { "→" } else { "←" };
+                    let kind = if k.video { "video" } else { "voce" };
+                    let status = match k.status {
+                        CallStatus::Ringing => "squilla".to_string(),
+                        CallStatus::Answered => match (k.answered_at, k.ended_at) {
+                            (Some(a), Some(e)) => format!("{} s", e.saturating_sub(a)),
+                            _ => "in corso".into(),
+                        },
+                        CallStatus::Missed => "persa".into(),
+                        CallStatus::Declined => "rifiutata".into(),
+                        CallStatus::Busy => "occupato".into(),
+                        CallStatus::Unanswered => "senza risposta".into(),
+                    };
+                    println!("{dir} {who} ({kind}): {status}  [{}]", k.id);
+                }
+            }
+            ChiamataCmd::Turn => {
+                let t = c.turn_servers().await?;
+                if t.urls.is_empty() {
+                    println!("Il tuo nodo non dà server STUN/TURN.");
+                }
+                for u in &t.urls {
+                    println!("{u}");
+                }
+                if let Some(user) = &t.username {
+                    println!("utente: {user} (valido {} s)", t.ttl);
+                }
+            }
+            ChiamataCmd::Chiama {
+                contatto,
+                sdp,
+                video,
+            } => {
+                let who = c.find_contact(&contatto)?.identity;
+                let id = c
+                    .start_call(&who, video, &std::fs::read_to_string(sdp)?)
+                    .await?;
+                println!("{id}");
+            }
+            ChiamataCmd::Rispondi { contatto, id, sdp } => {
+                let who = c.find_contact(&contatto)?.identity;
+                c.answer_call(&who, &id, &std::fs::read_to_string(sdp)?)
+                    .await?;
+                println!("Risposto.");
+            }
+            ChiamataCmd::Chiudi {
+                contatto,
+                id,
+                rifiuta,
+                occupato,
+            } => {
+                let who = c.find_contact(&contatto)?.identity;
+                let op = if rifiuta {
+                    CallOp::Reject
+                } else if occupato {
+                    CallOp::Busy
+                } else {
+                    CallOp::Hangup
+                };
+                c.end_call(&who, &id, op).await?;
+                println!("Chiusa.");
+            }
+        },
         Cmd::Scarica { id } => {
             println!("Salvato in {}", c.download(&id).await?.display());
         }

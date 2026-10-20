@@ -35,6 +35,13 @@ struct Args {
     /// Password del server locale del gateway SMS.
     #[arg(long, env = "RONDINE_SMS_PASSWORD")]
     sms_password: Option<String>,
+    /// Server STUN/TURN per le chiamate (SPEC §7.9), separati da virgole, es.
+    /// "stun:turn.esempio.it:3478,turn:turn.esempio.it:3478".
+    #[arg(long, env = "RONDINE_TURN", value_delimiter = ',')]
+    turn: Vec<String>,
+    /// Segreto condiviso con coturn (`static-auth-secret`) per le credenziali temporanee.
+    #[arg(long, env = "RONDINE_TURN_SEGRETO")]
+    turn_segreto: Option<String>,
 }
 
 fn load_or_create_key(path: &std::path::Path) -> anyhow::Result<Identity> {
@@ -90,6 +97,15 @@ async fn main() -> anyhow::Result<()> {
             }
             (Some(_), None) => anyhow::bail!("--sms-gateway vuole anche --sms-password"),
             _ => None,
+        },
+        turn: if args.turn.is_empty() {
+            None
+        } else {
+            tracing::info!(server = %args.turn.join(","), "STUN/TURN per le chiamate");
+            Some(rondine_nodo::TurnConfig {
+                urls: args.turn.clone(),
+                secret: args.turn_segreto.clone(),
+            })
         },
     })?;
     let listener = tokio::net::TcpListener::bind(&args.bind)

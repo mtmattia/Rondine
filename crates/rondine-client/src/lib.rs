@@ -1,6 +1,7 @@
 //! Client Rondine: tutto ciò che l'app sa fare, come funzioni (CLAUDE.md, regola 5).
 
 mod backup;
+mod calls;
 mod error;
 mod groups;
 mod lan;
@@ -25,12 +26,14 @@ use rondine_core::{
 use rondine_mls::{Device, Received};
 use serde_json::json;
 
+pub use calls::TurnServers;
 pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
+pub use rondine_core::envelope::CallOp;
 pub use rubrica::AddressBookMatch;
 pub use state::{
-    Attachment, ChatMessage, Contact, Delivery, GroupChat, GroupMember, GroupMessage, GroupRef,
-    Location, Outgoing, Source, State,
+    Attachment, CallRecord, CallStatus, ChatMessage, Contact, Delivery, GroupChat, GroupMember,
+    GroupMessage, GroupRef, Location, Outgoing, Source, State,
 };
 
 /// Foto o documento da mandare (SPEC §7.5).
@@ -180,6 +183,16 @@ pub enum Event {
         contact: PublicKey,
         ids: Vec<String>,
     },
+    /// Squillo, risposta o fine di una chiamata (SPEC §7.9). `ring`: un'offerta da far squillare
+    /// adesso (le vecchie risultano solo perse nel registro).
+    Call {
+        contact: PublicKey,
+        call: String,
+        op: CallOp,
+        video: bool,
+        sdp: Option<String>,
+        ring: bool,
+    },
 }
 
 /// Per dove è passata una busta (SPEC §12.3).
@@ -314,6 +327,7 @@ impl Client {
                 discovery_cache: Vec::new(),
                 pending_restore: false,
                 rejoin_groups: Vec::new(),
+                calls: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -369,6 +383,7 @@ impl Client {
                 discovery_cache: Vec::new(),
                 pending_restore: false,
                 rejoin_groups: Vec::new(),
+                calls: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -2432,6 +2447,7 @@ impl Client {
         self.batch = Batch::default();
         // Appena ripristinato da un backup: chat da riaprire e gruppi da cui rientrare (§7.8).
         self.finish_restore().await;
+        self.expire_calls();
         let mut events = self.flush_outbox().await;
         let path = format!("/v1/inboxes/{}/messages", self.state.inbox);
         let mut ids = Vec::new();
@@ -2805,6 +2821,7 @@ impl Client {
             AppMessage::Location(l) => self.received_location(sender, l),
             AppMessage::LocationUpdate(l) => self.received_location_update(sender, l),
             AppMessage::Profile { ts, photo, .. } => self.received_profile(sender, ts, photo),
+            AppMessage::Call(c) => self.received_call(sender, c),
             // Da una versione più nuova: non si sa cosa sia, si lascia perdere senza errori.
             AppMessage::Unknown => Ok(Vec::new()),
             AppMessage::Typing { active, ts, .. } => {

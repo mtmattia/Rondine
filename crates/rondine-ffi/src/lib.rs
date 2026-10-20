@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use rondine_client::{
-    ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent, GroupMessage, NewFile,
-    Source,
+    CallOp, CallStatus, ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent,
+    GroupMessage, NewFile, Source,
 };
 use rondine_core::PublicKey;
 use tokio::sync::Mutex;
@@ -307,6 +307,40 @@ pub struct ChatRow {
 }
 
 #[derive(uniffi::Record, Clone)]
+pub struct CallInfo {
+    pub id: String,
+    pub contact_id: String,
+    pub outgoing: bool,
+    pub video: bool,
+    pub started_at: u64,
+    pub answered_at: Option<u64>,
+    pub ended_at: Option<u64>,
+    /// "ringing", "answered", "missed", "declined", "busy", "unanswered".
+    pub status: String,
+}
+
+/// Un messaggio di chiamata arrivato (SPEC §7.9).
+#[derive(uniffi::Record, Clone)]
+pub struct CallSignal {
+    pub contact_id: String,
+    pub call: String,
+    /// "offer", "answer", "hangup", "reject", "busy".
+    pub op: String,
+    pub video: bool,
+    pub sdp: Option<String>,
+    /// Un'offerta da far squillare adesso.
+    pub ring: bool,
+}
+
+/// Server STUN/TURN per WebRTC.
+#[derive(uniffi::Record, Clone)]
+pub struct TurnInfo {
+    pub urls: Vec<String>,
+    pub username: Option<String>,
+    pub credential: Option<String>,
+}
+
+#[derive(uniffi::Record)]
 pub struct SyncResult {
     pub new_contacts: Vec<String>,
     pub messages: Vec<Message>,
@@ -325,6 +359,8 @@ pub struct SyncResult {
     pub photos_changed: bool,
     /// Qualcuno ha cancellato per tutti dei messaggi.
     pub messages_deleted: bool,
+    /// Squilli, risposte e fine delle chiamate, in ordine di arrivo.
+    pub calls: Vec<CallSignal>,
 }
 
 /// Come [`contact_info`], con la foto del profilo se il contatto l'ha mandata.
@@ -410,6 +446,16 @@ fn message(m: &ChatMessage) -> Message {
     }
 }
 
+fn call_op_name(op: CallOp) -> &'static str {
+    match op {
+        CallOp::Offer => "offer",
+        CallOp::Answer => "answer",
+        CallOp::Hangup => "hangup",
+        CallOp::Reject => "reject",
+        CallOp::Busy => "busy",
+    }
+}
+
 fn key(id: &str) -> Result<PublicKey> {
     Ok(PublicKey::from_b64(id)?)
 }
@@ -482,6 +528,8 @@ struct View {
     groups: Vec<GroupRow>,
     /// Messaggi per gruppo (id del gruppo).
     group_messages: std::collections::HashMap<String, Vec<GroupMessageInfo>>,
+    /// Registro delle chiamate, dalla più recente.
+    calls: Vec<CallInfo>,
 }
 
 fn view_of(c: &Client) -> View {
@@ -574,7 +622,31 @@ fn view_of(c: &Client) -> View {
             }
         })
         .collect();
+    let calls = c
+        .calls()
+        .iter()
+        .rev()
+        .map(|k| CallInfo {
+            id: k.id.clone(),
+            contact_id: k.contact.to_b64(),
+            outgoing: k.outgoing,
+            video: k.video,
+            started_at: k.started_at,
+            answered_at: k.answered_at,
+            ended_at: k.ended_at,
+            status: match k.status {
+                CallStatus::Ringing => "ringing",
+                CallStatus::Answered => "answered",
+                CallStatus::Missed => "missed",
+                CallStatus::Declined => "declined",
+                CallStatus::Busy => "busy",
+                CallStatus::Unanswered => "unanswered",
+            }
+            .into(),
+        })
+        .collect();
     View {
+        calls,
         profile,
         chats,
         contacts,
@@ -961,6 +1033,61 @@ impl Rondine {
         .await
     }
 
+    /// Registro delle chiamate, dalla più recente.
+    pub async fn calls(&self) -> Vec<CallInfo> {
+        self.read(|v| v.calls.clone())
+    }
+
+    /// Chiama un contatto con l'offerta SDP (già con tutti i candidati): l'id della chiamata.
+    pub async fn start_call(&self, contact_id: String, video: bool, sdp: String) -> Result<String> {
+        let k = key(&contact_id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.start_call(&k, video, &sdp).await?) }))
+            .await
+    }
+
+    pub async fn answer_call(&self, contact_id: String, call: String, sdp: String) -> Result<()> {
+        let k = key(&contact_id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.answer_call(&k, &call, &sdp).await?) }))
+            .await
+    }
+
+    /// `op`: "hangup" (riaggancia o annulla), "reject" (rifiuta), "busy" (occupato).
+    pub async fn end_call(&self, contact_id: String, call: String, op: String) -> Result<()> {
+        let k = key(&contact_id)?;
+        let op = match op.as_str() {
+            "hangup" => CallOp::Hangup,
+            "reject" => CallOp::Reject,
+            "busy" => CallOp::Busy,
+            _ => {
+                return Err(RondineError::Invalid(format!(
+                    "operazione sconosciuta: {op}"
+                )));
+            }
+        };
+        self.run(move |c| Box::pin(async move { Ok(c.end_call(&k, &call, op).await?) }))
+            .await
+    }
+
+    pub async fn delete_calls(&self, ids: Vec<String>) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.delete_calls(&ids)?) }))
+            .await
+    }
+
+    /// Server STUN/TURN del mio nodo, con credenziali temporanee.
+    pub async fn turn_servers(&self) -> Result<TurnInfo> {
+        self.run(|c| {
+            Box::pin(async move {
+                let t = c.turn_servers().await?;
+                Ok(TurnInfo {
+                    urls: t.urls,
+                    username: t.username,
+                    credential: t.credential,
+                })
+            })
+        })
+        .await
+    }
+
     /// Cancella messaggi: per me, o con `for_everyone` anche per il contatto (i miei).
     pub async fn delete_messages(
         &self,
@@ -1048,6 +1175,7 @@ impl Rondine {
             groups_changed: false,
             photos_changed: false,
             messages_deleted: false,
+            calls: Vec::new(),
         };
         for e in synced.groups {
             match e {
@@ -1088,6 +1216,21 @@ impl Rondine {
                 Event::LocationUpdate { .. } => out.locations_changed = true,
                 Event::PhotoChanged { .. } => out.photos_changed = true,
                 Event::Deleted { .. } => out.messages_deleted = true,
+                Event::Call {
+                    contact,
+                    call,
+                    op,
+                    video,
+                    sdp,
+                    ring,
+                } => out.calls.push(CallSignal {
+                    contact_id: contact.to_b64(),
+                    call,
+                    op: call_op_name(op).into(),
+                    video,
+                    sdp,
+                    ring,
+                }),
                 Event::Receipt { ids, .. } => {
                     out.receipts = out
                         .receipts

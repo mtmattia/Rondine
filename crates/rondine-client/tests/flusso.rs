@@ -19,6 +19,7 @@ async fn start_node() -> Result<String, Box<dyn std::error::Error>> {
         allow_local_push: true,
         fcm: None,
         sms: None,
+        turn: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     Ok(url)
@@ -503,6 +504,7 @@ async fn sta_scrivendo_effimero_e_senza_sveglia() -> R {
         allow_local_push: true,
         fcm: None,
         sms: None,
+        turn: None,
     })?;
     // Scadenza breve per provare un "sta scrivendo" che nessuno ritira.
     state.set_ephemeral_ttl(1);
@@ -716,6 +718,7 @@ async fn start_node_killable()
         allow_local_push: true,
         fcm: None,
         sms: None,
+        turn: None,
     })?;
     Ok((url, tokio::spawn(rondine_nodo::serve(listener, state))))
 }
@@ -946,6 +949,7 @@ async fn sono_collegato_aspetta_chi_non_e_connesso() -> R {
         allow_local_push: true,
         fcm: None,
         sms: None,
+        turn: None,
     })?;
     // Gli effimeri scadono subito: come un ritiro che arriva troppo tardi.
     state.set_ephemeral_ttl(0);
@@ -980,6 +984,7 @@ async fn start_node_with_state() -> Result<(String, AppState), Box<dyn std::erro
         allow_local_push: true,
         fcm: None,
         sms: None,
+        turn: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state.clone()));
     Ok((url, state))
@@ -1420,6 +1425,7 @@ async fn sveglia_fcm_dal_ripetitore() -> R {
         allow_local_push: true,
         fcm: Some(fcm),
         sms: None,
+        turn: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     let node = start_node().await?;
@@ -1497,6 +1503,7 @@ async fn sveglia_fcm_sul_nido_che_fa_da_ripetitore() -> R {
         allow_local_push: false,
         fcm: Some(fcm),
         sms: None,
+        turn: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     let tmp = TempDir::new()?;
@@ -1631,6 +1638,7 @@ async fn sms_di_verifica_dal_gateway_android() -> R {
             user: "sms".into(),
             password: "segreta".into(),
         }),
+        turn: None,
     })?;
     tokio::spawn(rondine_nodo::serve(listener, state));
     let tmp = TempDir::new()?;
@@ -1722,5 +1730,120 @@ async fn rispondere_e_cancellare_per_tutti() -> R {
             .iter()
             .all(|m| m.id != q.id)
     );
+    Ok(())
+}
+
+/// Chiamate (SPEC §7.9): lo squillo viaggia dentro MLS; risposta, riaggancio e registro delle
+/// chiamate da entrambe le parti; un'offerta vecchia non squilla.
+#[tokio::test]
+async fn squillo_risposta_e_registro_chiamate() -> R {
+    use rondine_client::{CallOp, CallStatus};
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &node).await?;
+    let to = silvia.identity();
+
+    let call = mattia.start_call(&to, true, "v=0 offerta").await?;
+    let ev = silvia.sync().await?;
+    let ring = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::Call {
+                call: id,
+                op: CallOp::Offer,
+                video,
+                sdp,
+                ring,
+                ..
+            } => Some((id.clone(), *video, sdp.clone(), *ring)),
+            _ => None,
+        })
+        .ok_or("nessuno squillo")?;
+    assert_eq!(ring, (call.clone(), true, Some("v=0 offerta".into()), true));
+
+    silvia
+        .answer_call(&mattia.identity(), &call, "v=0 risposta")
+        .await?;
+    let ev = mattia.sync().await?;
+    assert!(ev.iter().any(
+        |e| matches!(e, Event::Call { op: CallOp::Answer, sdp: Some(s), .. } if s == "v=0 risposta")
+    ));
+    mattia.end_call(&to, &call, CallOp::Hangup).await?;
+    let ev = silvia.sync().await?;
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::Call {
+            op: CallOp::Hangup,
+            ..
+        }
+    )));
+
+    // Registro: per Mattia fatta e risposta, per Silvia ricevuta e risposta.
+    let m = mattia
+        .calls()
+        .iter()
+        .find(|c| c.id == call)
+        .cloned()
+        .ok_or("registro")?;
+    assert!(m.outgoing && m.video && m.status == CallStatus::Answered && m.ended_at.is_some());
+    let s = silvia
+        .calls()
+        .iter()
+        .find(|c| c.id == call)
+        .cloned()
+        .ok_or("registro")?;
+    assert!(!s.outgoing && s.status == CallStatus::Answered);
+
+    // Una chiamata annullata prima della risposta è persa per chi la riceve.
+    let c2 = mattia.start_call(&to, false, "v=0").await?;
+    mattia.end_call(&to, &c2, CallOp::Hangup).await?;
+    silvia.sync().await?;
+    let s2 = silvia
+        .calls()
+        .iter()
+        .find(|c| c.id == c2)
+        .cloned()
+        .ok_or("registro")?;
+    assert_eq!(s2.status, CallStatus::Missed);
+    Ok(())
+}
+
+/// Credenziali TURN temporanee dal nodo (SPEC §7.9, TURN REST API di coturn).
+#[tokio::test]
+async fn credenziali_turn_dal_nodo() -> R {
+    use base64::Engine;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let node = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: node.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+        fcm: None,
+        sms: None,
+        turn: Some(rondine_nodo::TurnConfig {
+            urls: vec![
+                "stun:turn.esempio.it:3478".into(),
+                "turn:turn.esempio.it:3478".into(),
+            ],
+            secret: Some("segreto-condiviso".into()),
+        }),
+    })?;
+    tokio::spawn(rondine_nodo::serve(listener, state));
+    let tmp = TempDir::new()?;
+    let mattia = profile(&tmp, "Mattia", &node).await?;
+    let t = mattia.turn_servers().await?;
+    assert_eq!(t.urls.len(), 2);
+    let user = t.username.clone().ok_or("niente username")?;
+    let (expiry, inbox) = user.split_once(':').ok_or("formato")?;
+    assert_eq!(inbox, mattia.state().inbox);
+    assert!(expiry.parse::<u64>()? > rondine_core::now());
+    let key = ring::hmac::Key::new(
+        ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+        b"segreto-condiviso",
+    );
+    let expected = base64::engine::general_purpose::STANDARD
+        .encode(ring::hmac::sign(&key, user.as_bytes()).as_ref());
+    assert_eq!(t.credential.as_deref(), Some(expected.as_str()));
     Ok(())
 }

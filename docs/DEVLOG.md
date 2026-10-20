@@ -272,3 +272,8 @@ Una riga per modifica: data, cosa è cambiato.
   x86_64). Emoji: un messaggio di sole emoji (fino a 8) si mostra grande e senza bolla; nel testo
   le emoji sono un po' più grandi delle lettere. Provato sull'emulatore: cane ritagliato, mandato e
   ricevuto come sticker.
+- 2026-10-20 — "Condividi → Rondine": intent SEND e SEND_MULTIPLE (qualsiasi tipo), schermata
+  "Manda a…" con chat e gruppi, nella chat scelta un file apre l'anteprima con la didascalia, più
+  file partono dopo una conferma, il testo va nel campo. Le 8 chat più recenti sono scorciatoie di
+  condivisione (share-target), così compaiono direttamente nel menu Condividi come su WhatsApp.
+  Provato sull'emulatore con `am start -a android.intent.action.SEND`.

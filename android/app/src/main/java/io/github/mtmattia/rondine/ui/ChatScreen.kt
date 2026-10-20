@@ -505,6 +505,55 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
         }
     }
 
+    // Arrivato da "Condividi" per questa chat: il testo nel campo, un file con l'anteprima, più
+    // file dopo una conferma.
+    val share by ShareInbox.pending.collectAsState()
+    var shareMany by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    LaunchedEffect(share) {
+        val s = share ?: return@LaunchedEffect
+        val route = if (isGroup) "gruppo/$contactId" else "chat/$contactId"
+        if (s.target != route) return@LaunchedEffect
+        ShareInbox.pending.value = null
+        s.text?.let { t -> field.edit { replace(0, length, t) } }
+        when {
+            s.uris.size == 1 -> {
+                val uri = s.uris.first()
+                val mime = context.contentResolver.getType(uri).orEmpty()
+                onPicked(uri, asPhoto = mime.startsWith("image/") && mime != "image/gif")
+            }
+            s.uris.size > 1 -> shareMany = s.uris
+        }
+    }
+    if (shareMany.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { shareMany = emptyList() },
+            title = { Text("Mandare ${shareMany.size} file?") },
+            text = { Text("Partono uno dopo l'altro, senza didascalia.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val list = shareMany
+                    shareMany = emptyList()
+                    scope.launch {
+                        var sent = 0
+                        for (u in list) {
+                            try {
+                                val mime = context.contentResolver.getType(u).orEmpty()
+                                val f = pickFile(context, u, mime.startsWith("image/") && mime != "image/gif")
+                                sendFileHere(f.name, f.mime, f.data, null, f.thumb, f.width, f.height)
+                                sent++
+                            } catch (e: Exception) {
+                                snackbar.showSnackbar("Un file non è partito: ${e.message}")
+                            }
+                        }
+                        Repo.refresh()
+                        snackbar.showSnackbar("Mandati $sent file")
+                    }
+                }) { Text("Manda") }
+            },
+            dismissButton = { TextButton(onClick = { shareMany = emptyList() }) { Text("Annulla") } },
+        )
+    }
+
     picked?.let { f ->
         SendFileDialog(
             file = f,

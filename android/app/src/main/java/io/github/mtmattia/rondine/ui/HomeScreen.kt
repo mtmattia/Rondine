@@ -377,7 +377,7 @@ private fun openStore(context: Context, pkg: String) {
 }
 
 @Composable
-private fun SearchPill(value: String, onChange: (String) -> Unit) {
+internal fun SearchPill(value: String, onChange: (String) -> Unit) {
     Surface(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(50),

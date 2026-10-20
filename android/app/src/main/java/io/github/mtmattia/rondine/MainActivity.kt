@@ -111,6 +111,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        // Condiviso da un'altra app: si sceglie la chat (o è già scelta dalla scorciatoia).
+        intent?.let { io.github.mtmattia.rondine.ui.ShareInbox.fromIntent(it) }?.let { share ->
+            io.github.mtmattia.rondine.ui.ShareInbox.pending.value = share
+            openChatRequest.value = share.target ?: "condividi"
+            return
+        }
         intent?.getStringExtra(EXTRA_CHAT)?.let { openChatRequest.value = "chat/$it" }
         intent?.getStringExtra(EXTRA_GROUP)?.let { openChatRequest.value = "gruppo/$it" }
         val data = intent?.dataString
@@ -200,6 +206,19 @@ class MainActivity : ComponentActivity() {
             composable("gruppo/{id}/info") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable
                 GroupInfoScreen(id, onBack = { nav.popBackStack() }, onOpenChat = { nav.navigate("chat/$it") })
+            }
+            composable("condividi") {
+                io.github.mtmattia.rondine.ui.ShareTargetScreen(
+                    onBack = {
+                        io.github.mtmattia.rondine.ui.ShareInbox.pending.value = null
+                        nav.popBackStack()
+                    },
+                    onPick = { route ->
+                        io.github.mtmattia.rondine.ui.ShareInbox.pending.value =
+                            io.github.mtmattia.rondine.ui.ShareInbox.pending.value?.copy(target = route)
+                        nav.navigate(route) { popUpTo("home") }
+                    },
+                )
             }
             composable("qr") { MyQrScreen(onBack = { nav.popBackStack() }) }
             composable("impostazioni") {

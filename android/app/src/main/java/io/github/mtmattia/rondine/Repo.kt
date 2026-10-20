@@ -177,6 +177,7 @@ object Repo {
         chats.value = r.chats()
         groups.value = r.groups()
         calls.value = r.calls()
+        io.github.mtmattia.rondine.ui.ShareInbox.publishShortcuts(app, chats.value, groups.value)
         revision.value = revision.value + 1
     }
 

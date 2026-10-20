@@ -66,6 +66,7 @@ coprono.
 | `rondine-mls` | involucro sottile su openmls: dispositivo, key package, gruppi, cifratura |
 | `rondine-nodo` | il nodo: casella postale, permessi, sveglia push, nomi utente, bacheca di scoperta |
 | `rondine-client` | logica del client e stato su disco; è ciò che usano CLI e app |
+| `rondine-ritaglio` | ritaglio del soggetto delle foto per gli sticker, sul telefono (U²-Net piccolo con tract) |
 | `rondine-cli` | binario `rondine` |
 | `rondine-ffi` | ponte UniFFI verso Kotlin, usato dall'app Android |
 | `android/` | app Android (Kotlin + Compose); compila `rondine-ffi` con cargo-ndk |

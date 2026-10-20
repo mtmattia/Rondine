@@ -12,6 +12,7 @@ rondine-core = { path = "crates/rondine-core" }
 rondine-mls = { path = "crates/rondine-mls" }
 rondine-nodo = { path = "crates/rondine-nodo" }
 rondine-client = { path = "crates/rondine-client" }
+rondine-ritaglio = { path = "crates/rondine-ritaglio" }
 
 openmls = "0.9.1"
 openmls_rust_crypto = "0.6.0"
@@ -59,3 +60,9 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+# Il ritaglio degli sticker nei test: senza ottimizzazioni tract impiega decine di secondi.
+[profile.dev.package.tract-linalg]
+opt-level = 3
+[profile.dev.package.tract-core]
+opt-level = 3

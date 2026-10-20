@@ -69,4 +69,5 @@ Le regole per chi contribuisce (persone e agenti) sono in [`CLAUDE.md`](CLAUDE.m
 A scelta tra [MIT](LICENSE-MIT) e [Apache-2.0](LICENSE-APACHE).
 
 Gli sticker inclusi nell'app vengono da [Fluent Emoji](https://github.com/microsoft/fluentui-emoji)
-di Microsoft (MIT, licenza in `android/app/src/main/assets/sticker/`).
+di Microsoft (MIT, licenza in `android/app/src/main/assets/sticker/`). Il ritaglio del soggetto
+negli sticker personali usa U²-Net (Apache-2.0, in `android/app/src/main/assets/modelli/`).

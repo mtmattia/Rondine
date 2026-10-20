@@ -466,6 +466,51 @@ fn key(id: &str) -> Result<PublicKey> {
     Ok(PublicKey::from_b64(id)?)
 }
 
+/// Il modello del ritaglio, caricato una volta (dal file `path`).
+static CUTTER: std::sync::Mutex<Option<(String, Arc<rondine_ritaglio::Cutter>)>> =
+    std::sync::Mutex::new(None);
+
+/// Ritaglia il soggetto di una foto per farne uno sticker, sul telefono: dai pixel RGB
+/// (`width × height × 3` byte) la maschera, un byte per pixel (255 = soggetto). `model_path` è il
+/// modello U²-Net piccolo (NNEF) che l'app porta con sé.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn cut_subject(
+    model_path: String,
+    rgb: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>> {
+    on_runtime(async move {
+        tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+            let cutter = {
+                let mut slot = CUTTER
+                    .lock()
+                    .map_err(|_| RondineError::Internal("ritaglio bloccato".into()))?;
+                match slot.as_ref() {
+                    Some((p, c)) if *p == model_path => c.clone(),
+                    _ => {
+                        let bytes = std::fs::read(&model_path).map_err(|e| {
+                            RondineError::Internal(format!("modello del ritaglio: {e}"))
+                        })?;
+                        let c = Arc::new(
+                            rondine_ritaglio::Cutter::from_nnef(&bytes)
+                                .map_err(|e| RondineError::Internal(e.to_string()))?,
+                        );
+                        *slot = Some((model_path.clone(), c.clone()));
+                        c
+                    }
+                }
+            };
+            cutter
+                .mask(&rgb, width as usize, height as usize)
+                .map_err(|e| RondineError::Invalid(e.to_string()))
+        })
+        .await
+        .map_err(|e| RondineError::Internal(format!("ritaglio interrotto: {e}")))?
+    })
+    .await
+}
+
 /// Ripristina un profilo da un backup (SPEC §7.8) nella cartella, che deve essere vuota.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn restore_profile(dir: String, backup: Vec<u8>, code: String) -> Result<Arc<Rondine>> {

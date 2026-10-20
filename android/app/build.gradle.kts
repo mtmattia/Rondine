@@ -24,8 +24,8 @@ android {
         applicationId = "io.github.mtmattia.rondine"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.1.8"
+        versionCode = 10
+        versionName = "0.1.9"
         // Solo le architetture per cui c'è la libreria Rust: le altre librerie native (WebRTC,
         // JNA) non servirebbero a niente e allungherebbero l'APK.
         ndk { abiFilters += rustAbis }
@@ -47,6 +47,9 @@ android {
         sourceSets.getByName("debug").manifest.srcFile("src/sideload/AndroidManifest.xml")
         sourceSets.getByName("release").manifest.srcFile("src/sideload/AndroidManifest.xml")
     }
+
+    // Il modello del ritaglio si legge così com'è dall'APK, senza decomprimerlo.
+    androidResources { noCompress += listOf("tar") }
 
     // Due versioni con lo stesso pacchetto e la stessa firma, quindi aggiornabili a vicenda
     // (docs/PUBBLICAZIONE.md):
@@ -147,12 +150,14 @@ val cargoBuild = tasks.register<Exec>("cargoBuild") {
     environment("RUSTFLAGS", rustflags)
     // Se cambiano le opzioni, la libreria va ricompilata.
     inputs.property("rustflags", rustflags)
+    inputs.property("abis", rustAbis.joinToString(","))
     val args = mutableListOf("cargo", "ndk")
     rustAbis.forEach { args += listOf("-t", it) }
     args += listOf("-P", "26", "-o", rustJniDir.get().asFile.path, "build", "--release", "-p", "rondine-ffi")
     commandLine(args)
     inputs.dir(File(repoRoot, "crates"))
     inputs.file(File(repoRoot, "Cargo.lock"))
+    inputs.file(File(repoRoot, "Cargo.toml"))
     outputs.dir(rustJniDir)
 }
 

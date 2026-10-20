@@ -1,0 +1,14 @@
+[package]
+name = "rondine-ritaglio"
+description = "Ritaglio del soggetto di una foto per gli sticker, sul telefono (U²-Net piccolo con tract)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Solo il motore e il formato NNEF di tract: il lettore ONNX peserebbe 10 MB in più nell'app.
+tract-nnef = { version = "0.23", default-features = false }
+thiserror.workspace = true
+
+[lints]
+workspace = true

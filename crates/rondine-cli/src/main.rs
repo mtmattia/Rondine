@@ -111,6 +111,18 @@ enum Cmd {
     /// Posizione: fissa, in tempo reale, aggiornamenti.
     #[command(subcommand)]
     Posizione(PosizioneCmd),
+    /// Ritaglia il soggetto di una foto per farne uno sticker (PNG con lo sfondo trasparente),
+    /// con il modello U²-Net piccolo che porta l'app.
+    Ritaglia {
+        foto: PathBuf,
+        uscita: PathBuf,
+        #[arg(
+            long,
+            env = "RONDINE_MODELLO_RITAGLIO",
+            default_value = "android/app/src/main/assets/modelli/u2netp.nnef.tar"
+        )]
+        modello: PathBuf,
+    },
     /// Scarica di nuovo il file di un messaggio ricevuto (id mostrato da `leggi`).
     Scarica { id: String },
     /// Risponde a un messaggio (id mostrato da `leggi`).
@@ -671,6 +683,28 @@ async fn group_cmd(c: &mut Client, cmd: GruppoCmd) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // Non serve un profilo: lavora solo sulla foto.
+    if let Cmd::Ritaglia {
+        foto,
+        uscita,
+        modello,
+    } = &cli.cmd
+    {
+        let img = image::open(foto).context("lettura della foto")?.to_rgb8();
+        let (w, h) = (img.width() as usize, img.height() as usize);
+        let cutter = rondine_ritaglio::Cutter::from_nnef(
+            &std::fs::read(modello).context("lettura del modello")?,
+        )?;
+        let mask = cutter.mask(img.as_raw(), w, h)?;
+        let mut out = image::RgbaImage::new(img.width(), img.height());
+        for (i, (p, a)) in img.pixels().zip(mask).enumerate() {
+            let (x, y) = ((i % w) as u32, (i / w) as u32);
+            out.put_pixel(x, y, image::Rgba([p[0], p[1], p[2], a]));
+        }
+        out.save(uscita).context("salvataggio")?;
+        println!("Soggetto ritagliato in {}", uscita.display());
+        return Ok(());
+    }
     let dir = match cli.profilo {
         Some(p) => p,
         None => default_profile()?,
@@ -709,7 +743,7 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     match cli.cmd {
-        Cmd::Crea { .. } | Cmd::Ripristina { .. } => {}
+        Cmd::Crea { .. } | Cmd::Ripristina { .. } | Cmd::Ritaglia { .. } => {}
         Cmd::Backup { file } => {
             let (data, code) = c.export_backup()?;
             std::fs::write(&file, data).context("scrittura del backup")?;

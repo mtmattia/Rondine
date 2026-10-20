@@ -59,7 +59,8 @@ nomi utente.
 
 - **Foto (facoltativo):** per mostrare le foto recenti nel pannello degli allegati. Si possono
   concedere tutte, solo alcune, o nessuna: senza, foto e documenti si scelgono con il selettore
-  di sistema. Le foto non lasciano il telefono finché non le mandi tu.
+  di sistema. Le foto non lasciano il telefono finché non le mandi tu. Anche il ritaglio del soggetto per gli
+  sticker si fa sul telefono, senza servizi esterni.
 
 ## Chiamate
 

@@ -354,17 +354,24 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
             }
         }
     }
+    // Sticker da una foto: si apre l'editor, che ritaglia il soggetto.
+    var stickerPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
     val stickerPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) scope.launch {
-            try {
-                val data = readUri(context, uri)
-                StickerStore.addFavorite(context, StickerStore.fromImage(data, StickerStore.mimeOf(data)))
-                stickerRevision++
-                snackbar.showSnackbar("Sticker creato: lo trovi tra i preferiti ⭐")
-            } catch (e: Exception) {
-                snackbar.showSnackbar("Sticker non creato: ${e.message}")
-            }
-        }
+        if (uri != null) stickerPhoto = uri
+    }
+    stickerPhoto?.let { uri ->
+        StickerMakerDialog(
+            uri,
+            onDismiss = { stickerPhoto = null },
+            onSaved = { data ->
+                stickerPhoto = null
+                scope.launch {
+                    StickerStore.addFavorite(context, data)
+                    stickerRevision++
+                    snackbar.showSnackbar("Sticker creato: lo trovi tra i preferiti ⭐")
+                }
+            },
+        )
     }
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { onPicked(it, false) }
 
@@ -1136,6 +1143,34 @@ private fun Bubble(
             }
             return@Row
         }
+        // Solo emoji (al massimo 8): grandi e senza bolla.
+        val emojiCount = if (m.attachment == null && m.location == null && quote == null) emojiOnlyCount(m.body) else 0
+        if (emojiCount in 1..8) {
+            Column(horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start) {
+                if (isGroup && !m.outgoing && firstOfRun && m.senderName != null) {
+                    Text(m.senderName, color = senderColor(m.senderId), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text(
+                    m.body.trim(),
+                    fontSize = when (emojiCount) { 1 -> 52.sp; 2, 3 -> 40.sp; else -> 32.sp },
+                    lineHeight = when (emojiCount) { 1 -> 60.sp; 2, 3 -> 48.sp; else -> 40.sp },
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).background(colors.bubbleIn.copy(alpha = 0.85f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
+                    val st = m.status
+                    if (m.outgoing && st != null) {
+                        Spacer(Modifier.width(3.dp))
+                        MessageTicks(st, colors.bubbleMeta, 15.dp)
+                    }
+                }
+            }
+            return@Row
+        }
         Surface(
             shape = shape,
             color = if (m.outgoing) colors.bubbleOut else colors.bubbleIn,
@@ -1202,7 +1237,7 @@ private fun TextWithMeta(text: String, color: Color, modifier: Modifier, meta: @
     val drop = with(density) { 4.dp.roundToPx() }
     androidx.compose.ui.layout.Layout(
         content = {
-            Text(text, color = color, fontSize = 16.sp, onTextLayout = { layout[0] = it })
+            Text(withBigEmoji(text, 21.sp), color = color, fontSize = 16.sp, onTextLayout = { layout[0] = it })
             Row(verticalAlignment = Alignment.CenterVertically) { meta() }
         },
         modifier = modifier,

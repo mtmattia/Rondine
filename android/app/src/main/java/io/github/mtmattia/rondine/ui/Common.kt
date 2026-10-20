@@ -132,3 +132,49 @@ fun MessageTicks(status: MessageStatus, tint: Color, size: Dp) {
             Icon(Icons.Filled.DoneAll, "Letto", Modifier.size(size), tint = LocalChatColors.current.tickRead)
     }
 }
+
+/** Il carattere visibile `g` è un'emoji? (prima lettera nei blocchi delle emoji, bandiere, tasti 1️⃣) */
+private fun isEmojiGrapheme(g: String): Boolean {
+    if (g.isEmpty()) return false
+    val cp = g.codePointAt(0)
+    if (g.contains('⃣')) return true
+    return cp in 0x1F000..0x1FAFF || cp in 0x2600..0x27BF || cp in 0x2300..0x23FF ||
+        cp in 0x2B00..0x2BFF || cp in 0x2190..0x21FF || cp in 0x25A0..0x25FF || cp in 0x2900..0x297F ||
+        cp == 0x00A9 || cp == 0x00AE || cp == 0x203C || cp == 0x2049 || cp == 0x2122 || cp == 0x2139 ||
+        cp == 0x24C2 || cp == 0x3030 || cp == 0x303D || cp == 0x3297 || cp == 0x3299
+}
+
+/** I caratteri visibili del testo (un'emoji composta conta uno). */
+fun graphemes(text: String): List<String> {
+    val it = android.icu.text.BreakIterator.getCharacterInstance()
+    it.setText(text)
+    val out = mutableListOf<String>()
+    var start = it.first()
+    var end = it.next()
+    while (end != android.icu.text.BreakIterator.DONE) {
+        out += text.substring(start, end)
+        start = end
+        end = it.next()
+    }
+    return out
+}
+
+/** Quante emoji ci sono se il messaggio è fatto solo di emoji (spazi a parte), se no 0. */
+fun emojiOnlyCount(text: String): Int {
+    val g = graphemes(text.trim()).filter { it.isNotBlank() }
+    return if (g.isNotEmpty() && g.all(::isEmojiGrapheme)) g.size else 0
+}
+
+/** Testo con le emoji un po' più grandi delle lettere, come su WhatsApp. */
+fun withBigEmoji(text: String, emojiSize: androidx.compose.ui.unit.TextUnit): androidx.compose.ui.text.AnnotatedString =
+    androidx.compose.ui.text.buildAnnotatedString {
+        for (g in graphemes(text)) {
+            if (isEmojiGrapheme(g)) {
+                pushStyle(androidx.compose.ui.text.SpanStyle(fontSize = emojiSize))
+                append(g)
+                pop()
+            } else {
+                append(g)
+            }
+        }
+    }

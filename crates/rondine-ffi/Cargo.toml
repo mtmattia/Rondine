@@ -16,6 +16,7 @@ path = "src/bin/uniffi-bindgen.rs"
 [dependencies]
 rondine-client.workspace = true
 rondine-core.workspace = true
+rondine-ritaglio.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 uniffi = { version = "0.32", features = ["tokio", "cli"] }

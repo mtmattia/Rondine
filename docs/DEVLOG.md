@@ -263,3 +263,12 @@ Una riga per modifica: data, cosa è cambiato.
   copiavano a vicenda e una copia vecchia sovrascriveva quella nuova; ora lo stato del campo è
   l'unica fonte. Bolle come su WhatsApp: ora e spunte sulla stessa riga dell'ultima riga di testo
   quando c'è posto, così una bolla corta è stretta attorno al testo. Provato scrivendo con adb.
+- 2026-10-20 — Sticker col soggetto ritagliato. Nuovo crate `rondine-ritaglio`: U²-Net piccolo
+  (Apache-2.0) convertito nel formato NNEF di tract (Resize `half_pixel` al posto di
+  `pytorch_half_pixel`, che tract non conosce), maschera del soggetto tutta sul telefono, circa un
+  secondo. CLI `rondine ritaglia`, FFI `cut_subject`. Nell'app l'editor degli sticker mostra il
+  soggetto con il bordo bianco (o la foto intera) e lo salva tra i preferiti. Peso: la libreria
+  passa da 7,8 a 17 MB, quindi gli APK di GitHub ora contengono solo arm64 (l'AAB per Play anche
+  x86_64). Emoji: un messaggio di sole emoji (fino a 8) si mostra grande e senza bolla; nel testo
+  le emoji sono un po' più grandi delle lettere. Provato sull'emulatore: cane ritagliato, mandato e
+  ricevuto come sticker.

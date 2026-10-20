@@ -27,8 +27,8 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Messaggi vocali | ✅ | nell'app: un tocco sul microfono apre la registrazione con pausa, cestino e invio; viaggiano come file `audio/mp4` (SPEC §7.5) |
 | Rispondere, copiare, inoltrare, eliminare | ✅ | SPEC §7.1b: tieni premuto un messaggio; elimina per tutti solo i propri; anche nei gruppi |
 | Silenziare e svuotare le chat | ✅ | dalla lista chat, solo sul telefono |
-| Emoji | ✅ | tutte, con categorie, recenti e tonalità della pelle (selettore AndroidX) |
-| Sticker | ✅ | SPEC §7.5: 4 raccolte incluse (Fluent Emoji 3D, MIT), preferiti, recenti, creati da una foto, salvati da quelli ricevuti, dalla tastiera (Emoji Kitchen di Gboard) |
+| Emoji | ✅ | tutte, con categorie, recenti e tonalità della pelle (selettore AndroidX); i messaggi di sole emoji grandi e senza bolla |
+| Sticker | ✅ | SPEC §7.5: 4 raccolte incluse (Fluent Emoji 3D, MIT), preferiti, recenti, creati da una foto col soggetto ritagliato sul telefono (U²-Net, `rondine-ritaglio`) e il bordo bianco, salvati da quelli ricevuti, dalla tastiera (Emoji Kitchen di Gboard) |
 | GIF | ✅ | animate nella chat; dalla ricerca GIF della tastiera, dal telefono, GIF salvate; manca una ricerca dentro l'app (serve un fornitore: Giphy, Klipy…) |
 | Aggiornamenti dall'app | ✅ | dalle Release di GitHub, ognuna con il suo APK (libera o Play), controllo della firma prima di installare; non nell'AAB per Google Play |
 | Foto recenti negli allegati | ✅ | come su WhatsApp, con il permesso delle foto (anche "solo alcune") |

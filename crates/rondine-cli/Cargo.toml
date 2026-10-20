@@ -12,6 +12,8 @@ path = "src/main.rs"
 [dependencies]
 rondine-client.workspace = true
 rondine-core.workspace = true
+rondine-ritaglio.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true

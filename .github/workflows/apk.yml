@@ -68,12 +68,12 @@ jobs:
           pre=""; case "$tag" in v0.*) pre="--prerelease";; esac
           # Prima le novità (le mostra anche l'app quando propone l'aggiornamento), poi il resto.
           code=$(grep -oP 'versionCode = \K\d+' app/build.gradle.kts)
-          news=$(cat "../fastlane/metadata/android/it-IT/changelogs/${code}.txt" 2>/dev/null || true)
+          notes="$RUNNER_TEMP/note.md"
+          news="../fastlane/metadata/android/it-IT/changelogs/${code}.txt"
+          if [ -f "$news" ]; then cat "$news"; echo; fi > "$notes"
+          echo "Rondine ${tag}. Due versioni, stessa firma: si installano una sopra l'altra senza perdere niente. rondine-${tag}.apk è la versione libera (come su F-Droid): notifiche con ntfy. rondine-${tag}-play.apk è la versione Google: se manca ntfy, notifiche attraverso Google (FCM). L'AAB è per Google Play." >> "$notes"
           cd .. && gh release create "$tag" $pre "rondine-${tag}.apk" "rondine-${tag}-play.apk" "rondine-${tag}-play.aab" \
-            --target "$GITHUB_SHA" --title "Rondine ${tag}" \
-            --notes "${news:+$news
-
-}Rondine ${tag}. Due versioni, stessa firma: si installano una sopra l'altra senza perdere niente. rondine-${tag}.apk è la versione libera (come su F-Droid): notifiche con ntfy. rondine-${tag}-play.apk è la versione Google: se manca ntfy, notifiche attraverso Google (FCM). L'AAB è per Google Play."
+            --target "$GITHUB_SHA" --title "Rondine ${tag}" --notes-file "$notes"
         shell: bash
 
       - name: Compila l'APK di prova

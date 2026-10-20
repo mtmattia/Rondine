@@ -258,3 +258,8 @@ Una riga per modifica: data, cosa è cambiato.
   novità di fastlane. Provato sull'emulatore: una build firmata finta 0.1.0 trova la 0.1.5, la
   scarica e la installa, profilo intatto. Corretto anche il vuoto sopra la tastiera: lo Scaffold
   della chat lasciava lo spazio della barra di navigazione, che la colonna lasciava già.
+- 2026-10-20 — Corretto: dalla 0.1.5, scrivendo veloce si perdevano lettere. Il campo di testo
+  (passato a TextFieldState per ricevere GIF e sticker dalla tastiera) e la stringa della chat si
+  copiavano a vicenda e una copia vecchia sovrascriveva quella nuova; ora lo stato del campo è
+  l'unica fonte. Bolle come su WhatsApp: ora e spunte sulla stessa riga dell'ultima riga di testo
+  quando c'è posto, così una bolla corta è stretta attorno al testo. Provato scrivendo con adb.

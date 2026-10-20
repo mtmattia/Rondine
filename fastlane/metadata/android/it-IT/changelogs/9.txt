@@ -1,0 +1,1 @@
+Corretto: scrivendo veloce si perdevano lettere. Ora e spunte accanto al testo, come su WhatsApp. Aggiornamenti direttamente dall'app e niente spazio vuoto sopra la tastiera.

@@ -1,0 +1,1 @@
+Fixed: typing fast lost letters. Time and ticks next to the text, like WhatsApp. Updates right from the app, and no empty gap above the keyboard.

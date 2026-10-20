@@ -9,7 +9,10 @@ import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.delete
+import kotlinx.coroutines.flow.drop
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.combinedClickable
@@ -209,7 +212,13 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     val revision by Repo.revision.collectAsState()
     var contact by remember { mutableStateOf<ContactInfo?>(null) }
     var messages by remember { mutableStateOf<List<UiMessage>>(emptyList()) }
-    var text by rememberSaveable { mutableStateOf("") }
+    // Il testo che si sta scrivendo: lo stato del campo è l'unica fonte (copiarlo avanti e indietro
+    // in una stringa perdeva lettere scrivendo veloce).
+    val field = rememberTextFieldState()
+    val text = field.text.toString()
+    LaunchedEffect(field) {
+        snapshotFlow { field.text.toString() }.drop(1).collect { typingTo(it.isNotBlank()) }
+    }
     var sending by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val startCall = rememberCallStarter()
@@ -500,7 +509,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                 scope.launch {
                     try {
                         sendFileHere(f.name, f.mime, f.data, caption.trim().ifEmpty { null }, f.thumb, f.width, f.height)
-                        text = ""
+                        field.clearText()
                         picked = null
                         Repo.refresh()
                     } catch (e: RondineException) {
@@ -866,11 +875,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                     }
                 }
                 if (!(voiceLocked && recordingMs != null)) InputBar(
-                    text = text,
-                    onText = {
-                        text = it
-                        typingTo(it.isNotBlank())
-                    },
+                    field = field,
                     onContent = { onKeyboardContent(it) },
                     sending = sending,
                     emojiOpen = emojiOpen,
@@ -913,7 +918,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                 val r = replyTo?.id
                                 if (isGroup) Repo.client().sendGroupReply(contactId, body, r)
                                 else Repo.client().sendReply(contactId, body, r)
-                                text = ""
+                                field.clearText()
                                 replyTo = null
                                 Repo.refresh()
                             } catch (e: RondineException) {
@@ -948,10 +953,19 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                     )
                     emojiOpen -> ExpressionPanel(
                         onEmoji = { e ->
-                            text += e
-                            typingTo(true)
+                            field.edit { replace(selection.min, selection.max, e) }
                         },
-                        onBackspace = { text = text.dropLastGrapheme() },
+                        onBackspace = {
+                            field.edit {
+                                if (selection.collapsed) {
+                                    val end = selection.min
+                                    val keep = toString().substring(0, end).dropLastGrapheme().length
+                                    delete(keep, end)
+                                } else {
+                                    delete(selection.min, selection.max)
+                                }
+                            }
+                        },
                         onSticker = { s ->
                             scope.launch {
                                 val (data, mime) = StickerStore.bytes(context, s)
@@ -1157,13 +1171,7 @@ private fun Bubble(
                     )
                     if (m.body.isNotBlank()) Spacer(Modifier.size(4.dp))
                 }
-                if (m.body.isNotBlank() || (a == null && loc == null)) {
-                    Text(
-                        m.body, color = colors.bubbleText, fontSize = 16.sp,
-                        modifier = Modifier.padding(start = pad * 1.5f, end = pad),
-                    )
-                }
-                Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                val meta: @Composable () -> Unit = {
                     Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
                     val st = m.status
                     if (m.outgoing && st != null) {
@@ -1171,7 +1179,49 @@ private fun Bubble(
                         MessageTicks(st, colors.bubbleMeta, 15.dp)
                     }
                 }
+                if (m.body.isNotBlank() || (a == null && loc == null)) {
+                    TextWithMeta(m.body, colors.bubbleText, Modifier.padding(start = pad * 1.5f, end = pad), meta)
+                } else {
+                    Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) { meta() }
+                }
             }
+        }
+    }
+}
+
+/**
+ * Testo della bolla con ora e spunte in fondo a destra, come su WhatsApp: sulla stessa riga
+ * dell'ultima riga di testo se c'è posto, altrimenti su una riga sotto. Così una bolla corta è
+ * stretta attorno al testo invece di avere l'ora a capo e un vuoto a destra.
+ */
+@Composable
+private fun TextWithMeta(text: String, color: Color, modifier: Modifier, meta: @Composable () -> Unit) {
+    val layout = remember { arrayOfNulls<androidx.compose.ui.text.TextLayoutResult>(1) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val gap = with(density) { 10.dp.roundToPx() }
+    val drop = with(density) { 4.dp.roundToPx() }
+    androidx.compose.ui.layout.Layout(
+        content = {
+            Text(text, color = color, fontSize = 16.sp, onTextLayout = { layout[0] = it })
+            Row(verticalAlignment = Alignment.CenterVertically) { meta() }
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val textP = measurables[0].measure(constraints.copy(minWidth = 0))
+        val metaP = measurables[1].measure(androidx.compose.ui.unit.Constraints())
+        val tl = layout[0]
+        val lastRight = if (tl != null && tl.lineCount > 0) {
+            kotlin.math.ceil(tl.getLineRight(tl.lineCount - 1)).toInt()
+        } else {
+            textP.width
+        }
+        val inline = lastRight + gap + metaP.width <= constraints.maxWidth
+        val width = (if (inline) maxOf(textP.width, lastRight + gap + metaP.width) else maxOf(textP.width, metaP.width))
+            .coerceIn(constraints.minWidth, constraints.maxWidth)
+        val height = if (inline) textP.height + drop else textP.height + metaP.height
+        layout(width, height) {
+            textP.place(0, 0)
+            metaP.place(width - metaP.width, height - metaP.height)
         }
     }
 }
@@ -1181,8 +1231,7 @@ private fun Bubble(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun InputBar(
-    text: String,
-    onText: (String) -> Unit,
+    field: TextFieldState,
     onContent: (ByteArray) -> Unit,
     sending: Boolean,
     emojiOpen: Boolean,
@@ -1195,17 +1244,7 @@ private fun InputBar(
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val context = LocalContext.current
-    // Il campo lavora con TextFieldState (serve per ricevere GIF e sticker dalla tastiera), la
-    // chat con una stringa: si tengono allineati nei due sensi.
-    val field = rememberTextFieldState(text)
-    val currentText by rememberUpdatedState(text)
-    val currentOnText by rememberUpdatedState(onText)
-    LaunchedEffect(text) {
-        if (field.text.toString() != text) field.setTextAndPlaceCursorAtEnd(text)
-    }
-    LaunchedEffect(field) {
-        snapshotFlow { field.text.toString() }.collect { if (it != currentText) currentOnText(it) }
-    }
+    val text = field.text
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.Bottom,

@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -596,6 +597,10 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     val c = contact
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
+        // Il fondo lo gestisce la colonna (tastiera o barra di navigazione, mai tutte e due): se
+        // anche lo Scaffold lasciasse lo spazio della barra, sopra la tastiera resterebbe un vuoto
+        // alto quanto la barra (con i tre pulsanti, quasi un centimetro).
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             if (selected.isNotEmpty()) {
                 val sel = chosen()

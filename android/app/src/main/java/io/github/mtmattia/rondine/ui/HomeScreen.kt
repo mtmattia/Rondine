@@ -260,6 +260,7 @@ private fun ChatList(
                 }
             }
         }
+        item { io.github.mtmattia.rondine.update.UpdateBanner() }
         item { SearchPill(query) { query = it } }
         item {
             LazyRow(

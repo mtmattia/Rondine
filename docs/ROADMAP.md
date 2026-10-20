@@ -30,6 +30,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Emoji | ✅ | tutte, con categorie, recenti e tonalità della pelle (selettore AndroidX) |
 | Sticker | ✅ | SPEC §7.5: 4 raccolte incluse (Fluent Emoji 3D, MIT), preferiti, recenti, creati da una foto, salvati da quelli ricevuti, dalla tastiera (Emoji Kitchen di Gboard) |
 | GIF | ✅ | animate nella chat; dalla ricerca GIF della tastiera, dal telefono, GIF salvate; manca una ricerca dentro l'app (serve un fornitore: Giphy, Klipy…) |
+| Aggiornamenti dall'app | ✅ | dalle Release di GitHub, ognuna con il suo APK (libera o Play), controllo della firma prima di installare; non nell'AAB per Google Play |
 | Foto recenti negli allegati | ✅ | come su WhatsApp, con il permesso delle foto (anche "solo alcune") |
 | Foto del profilo | ✅ | SPEC §7.7: la vedono contatti e membri dei gruppi in comune, dentro MLS; in Impostazioni si sceglie dalla galleria o si toglie |
 | Posizione e posizione in tempo reale | ✅ | SPEC §7.6: fino a 8 ore, aggiornamenti silenziosi (senza sveglia) ogni 15 s anche ad app chiusa; mappa su due livelli (tessere OpenStreetMap del quadrato di ~2 km, punto esatto disegnato dal telefono), si può spegnere; client, CLI e app |

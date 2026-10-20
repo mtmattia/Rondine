@@ -1,0 +1,1 @@
+Updates right from the app (Settings → Updates, plus a notice when a new version is out); no more empty gap between the message bar and the keyboard.

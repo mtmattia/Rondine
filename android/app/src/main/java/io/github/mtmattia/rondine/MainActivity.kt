@@ -87,6 +87,8 @@ class MainActivity : ComponentActivity() {
                         notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
                     setupPush(interactive = false)
+                    // Versione nuova su GitHub? (al massimo ogni 12 ore, si spegne in Impostazioni)
+                    launch { io.github.mtmattia.rondine.update.Updater.autoCheck(this@MainActivity) }
                     // Condivisioni della posizione rimaste attive (per esempio dopo un riavvio):
                     // il servizio riparte ora che l'app è in primo piano.
                     if (Repo.client().liveLocations().isNotEmpty()) {

@@ -1,0 +1,1 @@
+Aggiornamenti direttamente dall'app (Impostazioni → Aggiornamenti, e un avviso quando esce una versione nuova); niente più spazio vuoto tra la barra di scrittura e la tastiera.

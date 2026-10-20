@@ -67,7 +67,11 @@ release non firmate da due cartelle diverse devono avere lo stesso `sha256sum` (
    chiave di firma dell'app (non quella generata da Google), caricandola con lo strumento PEPK
    che Play Console indica. È il passo da cui dipende l'aggiornamento tra i canali, e dopo non si
    può più cambiare facilmente.
-3. Caricare l'AAB della Release (`rondine-v<versione>-play.aab`).
+3. Caricare l'AAB della Release (`rondine-v<versione>-play.aab`). È compilato con
+   `-Prondine.negozio=true`: niente aggiornamenti da GitHub (Play vieta alle app di aggiornarsi da
+   sole) e niente permesso `REQUEST_INSTALL_PACKAGES`. Gli APK di GitHub invece si aggiornano
+   dall'app (Impostazioni → Aggiornamenti), ognuno con il proprio APK: `rondine-vX.Y.Z.apk` la
+   versione libera, `rondine-vX.Y.Z-play.apk` quella Play.
 4. 👤 **Scheda e moduli**:
    - informativa sulla privacy: `https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md`;
    - testi e immagini: `fastlane/metadata/android/`;

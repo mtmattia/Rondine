@@ -250,3 +250,11 @@ Una riga per modifica: data, cosa è cambiato.
   con Gboard sull'emulatore, Emoji Kitchen arriva come sticker e la ricerca GIF come GIF.
   Foto recenti sotto i pulsanti degli allegati (permesso foto, anche parziale). Corretto: il
   tocco lungo su foto e documenti apriva il file invece di selezionare il messaggio.
+- 2026-10-20 — Aggiornamenti dall'app: controllo delle Release di GitHub (all'avvio al massimo ogni
+  12 ore, o da Impostazioni), avviso nella lista chat con le novità, download con avanzamento,
+  controllo di pacchetto e firma, installazione con PackageInstaller. La versione libera prende
+  `rondine-vX.Y.Z.apk`, la Play `-play.apk`; l'AAB per Google Play (`-Prondine.negozio=true`) non
+  ha né aggiornamenti né `REQUEST_INSTALL_PACKAGES`. Le note della Release cominciano con le
+  novità di fastlane. Provato sull'emulatore: una build firmata finta 0.1.0 trova la 0.1.5, la
+  scarica e la installa, profilo intatto. Corretto anche il vuoto sopra la tastiera: lo Scaffold
+  della chat lasciava lo spazio della barra di navigazione, che la colonna lasciava già.

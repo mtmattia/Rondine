@@ -1,5 +1,7 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
@@ -485,6 +487,26 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             ) {
                 maps = !maps
                 MapTiles.setEnabled(context, maps)
+            }
+            if (io.github.mtmattia.rondine.update.Updater.supported(context)) {
+                val upd by io.github.mtmattia.rondine.update.Updater.state.collectAsState()
+                SettingRow(Icons.Filled.SystemUpdate, "Aggiornamenti", io.github.mtmattia.rondine.update.updateSubtitle(upd)) {
+                    io.github.mtmattia.rondine.update.onUpdateRow(context, scope)
+                }
+                var auto by remember { mutableStateOf(io.github.mtmattia.rondine.update.Updater.autoEnabled(context)) }
+                SettingRow(
+                    Icons.Filled.Update,
+                    "Controllo automatico degli aggiornamenti",
+                    if (auto) "Attivo: due volte al giorno chiede a GitHub l'ultima versione" else "Spento",
+                ) {
+                    auto = !auto
+                    io.github.mtmattia.rondine.update.Updater.setAutoEnabled(context, auto)
+                }
+            } else {
+                SettingRow(
+                    Icons.Filled.SystemUpdate, "Versione ${io.github.mtmattia.rondine.BuildConfig.VERSION_NAME}",
+                    if (io.github.mtmattia.rondine.BuildConfig.DEBUG) "Versione di prova" else "Gli aggiornamenti arrivano da Google Play",
+                ) {}
             }
             SettingRow(Icons.Filled.PrivacyTip, "Privacy", "Cosa resta sul telefono e cosa vede il nodo") {
                 context.startActivity(

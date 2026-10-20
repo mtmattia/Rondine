@@ -10,6 +10,9 @@ plugins {
 val repoRoot: File = rootProject.projectDir.parentFile
 val rustJniDir = layout.buildDirectory.dir("rustJniLibs")
 val uniffiDir = layout.buildDirectory.dir("generated/uniffi")
+// AAB per Google Play (`-Prondine.negozio=true`): niente aggiornamenti da GitHub, che Play vieta,
+// e niente permesso di installare app.
+val playStore = findProperty("rondine.negozio") == "true"
 val rustAbis = (findProperty("rondine.abis") as String? ?: "arm64-v8a,x86_64").split(",")
 
 android {
@@ -21,8 +24,8 @@ android {
         applicationId = "io.github.mtmattia.rondine"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
         // Solo le architetture per cui c'è la libreria Rust: le altre librerie native (WebRTC,
         // JNA) non servirebbero a niente e allungherebbero l'APK.
         ndk { abiFilters += rustAbis }
@@ -35,6 +38,14 @@ android {
         // Ripetitore FCM della versione Play (SPEC §8.1): il nido con le credenziali Firebase.
         val relay = (findProperty("rondine.ripetitore") as String?) ?: "https://cachyos-mattia.tail9cc49c.ts.net"
         buildConfigField("String", "PUSH_RELAY", "\"$relay\"")
+        buildConfigField("boolean", "PLAY_STORE", "$playStore")
+    }
+
+    // Il permesso di installare (per gli aggiornamenti da GitHub) sta in un manifest a parte, usato
+    // da tutte le build tranne l'AAB per Google Play.
+    if (!playStore) {
+        sourceSets.getByName("debug").manifest.srcFile("src/sideload/AndroidManifest.xml")
+        sourceSets.getByName("release").manifest.srcFile("src/sideload/AndroidManifest.xml")
     }
 
     // Due versioni con lo stesso pacchetto e la stessa firma, quindi aggiornabili a vicenda

@@ -78,6 +78,10 @@ il contenuto. Il registro delle chiamate resta solo sul telefono.
   mai il punto esatto, che è disegnato dal telefono. Le mappe si spengono in Impostazioni.
 - **Notifiche:** la sveglia passa dal distributore UnifiedPush che scegli (per esempio ntfy),
   che vede solo che è arrivata una sveglia.
+- **Aggiornamenti (versioni scaricate da GitHub):** al massimo due volte al giorno l'app chiede
+  a GitHub (api.github.com) qual è l'ultima versione, e la scarica da lì se scegli di aggiornare.
+  GitHub vede il tuo indirizzo IP e la versione di Rondine. Il controllo automatico si spegne in
+  Impostazioni; la versione installata da Google Play non lo fa.
 - **Mappe esterne:** toccando una posizione si apre l'app di mappe del telefono, con le sue regole.
 
 ## Minori

@@ -87,6 +87,11 @@
             android:name=".call.CallActionReceiver"
             android:exported="false" />
 
+        <!-- Esito dell'installazione di un aggiornamento da GitHub. -->
+        <receiver
+            android:name=".update.InstallReceiver"
+            android:exported="false" />
+
         <!-- Lettore di QR in verticale. -->
         <activity
             android:name=".QrCaptureActivity"

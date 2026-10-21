@@ -252,6 +252,9 @@ chiavi delle ultime 5 epoche, per i messaggi che incrociano un cambio di membri.
   per membro.
 - **Amministratore** = chi crea il gruppo. È l'unico che fa commit (aggiunge e toglie membri):
   così non nascono rami concorrenti. Un commit di un altro membro si scarta senza applicarlo.
+- **Passaggio del ruolo.** L'amministratore manda a tutti un messaggio `group` con `admin` uguale
+  a un altro membro: da lì l'amministratore è quello. Un `group` che cambia `admin` vale solo se
+  arriva dall'amministratore attuale e indica un membro del gruppo.
 - **Biglietti dei membri.** Ogni membro, entrando, chiede al proprio nodo un permesso nuovo con
   etichetta `gruppo` e lo annuncia nel gruppo con un `hello` (stesso formato del §7). Per un
   membro si tiene il biglietto con `issued_at` più recente (a parità vince quello mandato dal
@@ -271,9 +274,12 @@ chiavi delle ultime 5 epoche, per i messaggi che incrociano un cambio di membri.
   `name` è al massimo 64 caratteri. I biglietti degli altri membri sono quelli che
   l'amministratore ha ricevuto da loro, quindi contengono permessi emessi per lui: servono solo
   finché ogni membro non manda il proprio `hello`.
-- **Uscita.** Chi vuole uscire manda `{ "v": 1, "type": "leave" }`; l'amministratore lo toglie
-  con un commit, consegnato anche a chi esce. Chi viene tolto revoca il proprio permesso
-  `gruppo`. I membri tolti spariscono dall'elenco di tutti quando arriva il commit.
+- **Uscita.** Chi vuole uscire manda `{ "v": 1, "type": "leave" }` all'amministratore e revoca
+  subito il proprio permesso `gruppo` (da lì nessuno può più consegnargli messaggi del gruppo,
+  anche se l'amministratore non risponde); l'amministratore lo toglie con un commit, consegnato
+  anche a chi esce. I membri tolti spariscono dall'elenco di tutti quando arriva il commit.
+  L'amministratore che esce prima passa il ruolo (al primo degli altri membri); se è rimasto solo,
+  il gruppo finisce.
 - **Busta.** Si usano le buste del §6.1: `welcome` per chi entra, `mls` per commit e messaggi.
 - **Limite noto.** L'intestazione di un `PrivateMessage` MLS contiene in chiaro id del gruppo ed
   epoca, e il blob è lo stesso in ogni casella: nodi che si mettono d'accordo possono capire che

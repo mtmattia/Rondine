@@ -294,3 +294,14 @@ Una riga per modifica: data, cosa è cambiato.
   barre, tocco avanti/indietro, tenere premuto per fermare, giù per chiudere, su per rispondere
   (o, sui miei, per vedere chi l'ha visto). La risposta in chat cita l'aggiornamento. Provato tra
   i due emulatori: testo e foto pubblicati, visti, risposta arrivata con la citazione, "visto da 1".
+- 2026-10-21 — Gruppi: non si poteva uscire da un gruppo creato da sé (l'amministratore non
+  poteva uscire) né da un gruppo con l'amministratore irraggiungibile. Ora c'è il passaggio del
+  ruolo (SPEC §7.4: un `group` dall'amministratore con un altro `admin`), `set_group_admin` e
+  "Rendi amministratore" nell'app; l'amministratore che esce passa il ruolo al primo degli altri
+  membri; chi esce revoca subito il proprio permesso, quindi esce anche se l'amministratore non
+  risponde; `delete_group` toglie dalla lista un gruppo da cui si è usciti, o lo chiude in un passo
+  se si è rimasti soli (anche dal menu della lista chat). CLI `rondine gruppo amministratore` ed
+  `elimina`. Test nuovo; provato tra gli emulatori: Mattia esce, Silvia diventa amministratrice,
+  rimasta sola elimina il gruppo. Sticker: toccando uno sticker in chat (o dopo averne creato
+  uno) si sceglie se metterlo tra i preferiti e in quali pacchetti miei, anche nuovi; i pacchetti
+  compaiono nel pannello e si rinominano o eliminano tenendo premuta l'icona.

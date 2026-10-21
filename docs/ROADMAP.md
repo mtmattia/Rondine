@@ -22,13 +22,13 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Notifiche push (UnifiedPush) | ✅ | provate sull'emulatore con ntfy e un server ntfy locale, anche ad app chiusa |
 | Notifiche iPhone (APNs) | ⬜ | dopo Android |
 | Notifiche via Google (FCM), versione Play | ✅ | versione `play` con ripetitore FCM nel nido (SPEC §8.1), solo se manca un distributore UnifiedPush; la versione `foss` resta senza Google |
-| Gruppi | 🟡 | SPEC §7.4: client, CLI e app con la stessa chat delle 1:1 (foto, documenti, vocali, posizione anche in tempo reale, emoji, nomi colorati), info, aggiungi/togli, esci; max 100 membri; mancano spunte e "sta scrivendo" nei gruppi, passaggio del ruolo di amministratore |
+| Gruppi | 🟡 | SPEC §7.4: client, CLI e app con la stessa chat delle 1:1 (foto, documenti, vocali, posizione anche in tempo reale, emoji, nomi colorati), info, aggiungi/togli, esci; max 100 membri; passaggio del ruolo di amministratore, uscita anche dell'amministratore, gruppi eliminabili; mancano spunte e "sta scrivendo" nei gruppi |
 | Foto e documenti | ✅ | SPEC §7.5: cifrati sul telefono, fino a 64 MiB; nelle chat 1:1 nella casella di chi riceve, nei gruppi una copia sola sul nido di chi manda; client, nodo, CLI e app; manca la coda se il nodo non risponde |
 | Messaggi vocali | ✅ | nell'app: un tocco sul microfono apre la registrazione con pausa, cestino e invio; viaggiano come file `audio/mp4` (SPEC §7.5) |
 | Rispondere, copiare, inoltrare, eliminare | ✅ | SPEC §7.1b: tieni premuto un messaggio; elimina per tutti solo i propri; anche nei gruppi |
 | Silenziare e svuotare le chat | ✅ | dalla lista chat, solo sul telefono |
 | Emoji | ✅ | tutte, con categorie, recenti e tonalità della pelle (selettore AndroidX); i messaggi di sole emoji grandi e senza bolla |
-| Sticker | ✅ | SPEC §7.5: 4 raccolte incluse (Fluent Emoji 3D, MIT), preferiti, recenti, creati da una foto col soggetto ritagliato sul telefono (U²-Net, `rondine-ritaglio`) e il bordo bianco, salvati da quelli ricevuti, dalla tastiera (Emoji Kitchen di Gboard) |
+| Sticker | ✅ | SPEC §7.5: 4 raccolte incluse (Fluent Emoji 3D, MIT), preferiti, recenti, creati da una foto col soggetto ritagliato sul telefono (U²-Net, `rondine-ritaglio`) e il bordo bianco, pacchetti miei (crea, rinomina, elimina; si aggiunge toccando uno sticker in chat), salvati da quelli ricevuti, dalla tastiera (Emoji Kitchen di Gboard) |
 | GIF | ✅ | animate nella chat; dalla ricerca GIF della tastiera, dal telefono, GIF salvate; manca una ricerca dentro l'app (serve un fornitore: Giphy, Klipy…) |
 | Aggiornamenti dall'app | ✅ | dalle Release di GitHub, ognuna con il suo APK (libera o Play), controllo della firma prima di installare; non nell'AAB per Google Play |
 | Aggiornamenti (storie) | ✅ | SPEC §7.10: testo su colore o foto per 24 ore ai contatti, silenziosi; foto caricata una volta sul proprio nodo; "visto da"; risposta scorrendo verso l'alto (messaggio in chat che cita l'aggiornamento); cancellazione per tutti; CLI `rondine aggiornamento` |

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material3.AlertDialog
@@ -119,8 +120,31 @@ fun GroupListItem(row: GroupRow, onOpen: (String) -> Unit) {
     val unread = row.unread > 0u
     var menu by remember { mutableStateOf(false) }
     Box {
+    var confirmDelete by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    // Si cancella se ne sono fuori, o se ci sono rimasto solo (allora finisce).
+    val deletable = !row.group.active || row.group.members.isEmpty()
     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
         ChatMenuItems(row.group.id, row.group.muted) { menu = false }
+        if (deletable) {
+            DropdownMenuItem(
+                text = { Text("Elimina il gruppo", color = MaterialTheme.colorScheme.error) },
+                onClick = { menu = false; confirmDelete = true },
+            )
+        }
+    }
+    if (confirmDelete) {
+        DeleteGroupDialog(row.group.name, onDismiss = { confirmDelete = false }) {
+            confirmDelete = false
+            scope.launch {
+                try {
+                    Repo.client().deleteGroup(row.group.id)
+                    Repo.refresh()
+                } catch (e: RondineException) {
+                    Repo.notice.value = e.userMessage
+                }
+            }
+        }
     }
     Row(
         Modifier.fillMaxWidth()
@@ -321,13 +345,14 @@ fun NewGroupScreen(onBack: () -> Unit, onCreated: (String) -> Unit) {
 /** Info del gruppo: membri, e per l'amministratore aggiungere e togliere. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GroupInfoScreen(groupId: String, onBack: () -> Unit, onOpenChat: (String) -> Unit) {
+fun GroupInfoScreen(groupId: String, onBack: () -> Unit, onOpenChat: (String) -> Unit, onDeleted: () -> Unit = onBack) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val revision by Repo.revision.collectAsState()
     var group by remember { mutableStateOf<GroupInfo?>(null) }
     var adding by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     LaunchedEffect(groupId, revision) {
         try { group = Repo.client().group(groupId) } catch (_: RondineException) {}
     }
@@ -353,11 +378,35 @@ fun GroupInfoScreen(groupId: String, onBack: () -> Unit, onOpenChat: (String) ->
             }
         }
     }
+    if (confirmDelete) {
+        DeleteGroupDialog(g.name, onDismiss = { confirmDelete = false }) {
+            confirmDelete = false
+            scope.launch {
+                try {
+                    Repo.client().deleteGroup(groupId)
+                    Repo.refresh()
+                    onDeleted()
+                } catch (e: RondineException) {
+                    snackbar.showSnackbar(e.userMessage)
+                }
+            }
+        }
+    }
     if (confirmLeave) {
         AlertDialog(
             onDismissRequest = { confirmLeave = false },
             title = { Text("Uscire da «${g.name}»?") },
-            text = { Text("Non riceverai più i messaggi del gruppo. L'amministratore ti toglie appena riceve la richiesta.") },
+            text = {
+                val next = g.members.firstOrNull()?.name
+                Text(
+                    when {
+                        g.iAmAdmin && next != null ->
+                            "Non riceverai più i messaggi del gruppo. Il ruolo di amministratore passa a $next."
+                        g.iAmAdmin -> "Sei rimasto solo: il gruppo finisce."
+                        else -> "Non riceverai più i messaggi del gruppo. L'amministratore ti toglie appena riceve la richiesta."
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmLeave = false
@@ -413,30 +462,35 @@ fun GroupInfoScreen(groupId: String, onBack: () -> Unit, onOpenChat: (String) ->
                     onClick = if (m.isContact) ({ onOpenChat(m.id) }) else null,
                     menu = if (g.iAmAdmin && g.active) ({
                         DropdownMenuItem(
+                            text = { Text("Rendi amministratore") },
+                            onClick = { run("Ora l'amministratore è ${m.name}") { Repo.client().setGroupAdmin(groupId, m.id) } },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Togli dal gruppo", color = MaterialTheme.colorScheme.error) },
                             onClick = { run("${m.name} non è più nel gruppo") { Repo.client().removeGroupMember(groupId, m.id) } },
                         )
                     }) else null,
                 )
             }
-            if (g.active) {
-                item {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    if (g.iAmAdmin) {
-                        Text(
-                            "Sei l'amministratore: per uscire potrai passare il ruolo a un altro membro (presto).",
-                            Modifier.padding(16.dp), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        Row(
-                            Modifier.fillMaxWidth().clickable { confirmLeave = true }.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ExitToApp, null, tint = MaterialTheme.colorScheme.error)
-                            Spacer(Modifier.width(14.dp))
-                            Text("Esci dal gruppo", color = MaterialTheme.colorScheme.error, fontSize = 16.sp)
-                        }
-                    }
+            item {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // Rimasto solo (o già fuori): si elimina direttamente; con altri membri si esce.
+                val delete = !g.active || g.members.isEmpty()
+                Row(
+                    Modifier.fillMaxWidth().clickable {
+                        if (delete) confirmDelete = true else confirmLeave = true
+                    }.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (delete) Icons.Filled.Delete else Icons.AutoMirrored.Filled.ExitToApp,
+                        null, tint = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        if (delete) "Elimina il gruppo" else "Esci dal gruppo",
+                        color = MaterialTheme.colorScheme.error, fontSize = 16.sp,
+                    )
                 }
             }
         }
@@ -505,6 +559,17 @@ private fun AddMembersDialog(group: GroupInfo, onDismiss: () -> Unit, onAdd: (Li
         confirmButton = {
             TextButton(onClick = { onAdd(selected.toList()) }, enabled = selected.isNotEmpty()) { Text("Aggiungi") }
         },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
+    )
+}
+
+@Composable
+private fun DeleteGroupDialog(name: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Eliminare «$name»?") },
+        text = { Text("Il gruppo e i suoi messaggi spariscono da questo telefono.") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Elimina", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
     )
 }

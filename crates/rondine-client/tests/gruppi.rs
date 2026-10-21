@@ -185,8 +185,7 @@ async fn aggiungere_togliere_e_uscire() -> R {
     assert_eq!(group_texts(&mut carla).await?, ["solo noi due"]);
     assert!(group_texts(&mut bruno).await?.is_empty());
 
-    // L'amministratore non può uscire; Carla sì, e Anna la toglie da sola.
-    assert!(anna.leave_group(&g.id).await.is_err());
+    // Carla esce, e Anna la toglie da sola.
     carla.leave_group(&g.id).await?;
     assert!(!carla.find_group("Famiglia")?.active);
     sync_ok(&mut anna).await?;
@@ -530,5 +529,87 @@ async fn backup_e_ripristino() -> R {
     nuovo.send_group_text(&g.id, "eccomi").await?;
     // Carla ritira insieme il messaggio di Silvia e quello di Mattia rientrato.
     assert_eq!(group_texts(&mut carla).await?, ["ciao a tutti", "eccomi"]);
+    Ok(())
+}
+
+/// L'amministratore passa il ruolo (SPEC §7.4); poi il nuovo amministratore esce: il ruolo passa
+/// da solo a chi resta, che lo toglie. Rimasto solo, l'amministratore esce e il gruppo finisce.
+#[tokio::test]
+async fn passaggio_del_ruolo_e_uscita_dell_amministratore() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut anna = profile(&tmp, "Anna", &node).await?;
+    let mut bruno = profile(&tmp, "Bruno", &node).await?;
+    let mut carla = profile(&tmp, "Carla", &node).await?;
+    connect(&mut anna, &mut bruno).await?;
+    connect(&mut anna, &mut carla).await?;
+    let g = anna
+        .create_group("Gita", &[bruno.identity(), carla.identity()])
+        .await?;
+    sync_ok(&mut bruno).await?;
+    sync_ok(&mut carla).await?;
+
+    // Solo l'amministratore passa il ruolo, e solo a un membro.
+    assert!(
+        bruno
+            .set_group_admin(&g.id, &carla.identity())
+            .await
+            .is_err()
+    );
+    anna.set_group_admin(&g.id, &bruno.identity()).await?;
+    assert_eq!(anna.find_group("Gita")?.admin, bruno.identity());
+    sync_ok(&mut bruno).await?;
+    sync_ok(&mut carla).await?;
+    assert_eq!(bruno.find_group("Gita")?.admin, bruno.identity());
+    assert_eq!(carla.find_group("Gita")?.admin, bruno.identity());
+    // Ora Anna non toglie più nessuno, Bruno sì.
+    assert!(
+        anna.remove_group_member(&g.id, &carla.identity())
+            .await
+            .is_err()
+    );
+
+    // Bruno, amministratore, esce: il ruolo passa a un altro, che lo toglie.
+    bruno.leave_group(&g.id).await?;
+    assert!(!bruno.find_group("Gita")?.active);
+    sync_ok(&mut anna).await?;
+    sync_ok(&mut carla).await?;
+    sync_ok(&mut anna).await?;
+    sync_ok(&mut carla).await?;
+    let new_admin = anna.find_group("Gita")?.admin;
+    assert!(new_admin == anna.identity() || new_admin == carla.identity());
+    assert_eq!(carla.find_group("Gita")?.admin, new_admin);
+    assert!(
+        anna.find_group("Gita")?
+            .members
+            .iter()
+            .all(|m| m.identity != bruno.identity())
+    );
+    assert!(
+        carla
+            .find_group("Gita")?
+            .members
+            .iter()
+            .all(|m| m.identity != bruno.identity())
+    );
+    anna.send_group_text(&g.id, "ancora qui").await?;
+    assert_eq!(group_texts(&mut carla).await?, ["ancora qui"]);
+
+    let (mut admin, mut other) = if new_admin == anna.identity() {
+        (anna, carla)
+    } else {
+        (carla, anna)
+    };
+    // Con altri membri il gruppo non si cancella: prima si esce.
+    assert!(admin.delete_group(&g.id).await.is_err());
+    // Chi non è amministratore esce e poi lo toglie dalla lista.
+    other.leave_group(&g.id).await?;
+    other.delete_group(&g.id).await?;
+    assert!(other.find_group("Gita").is_err());
+    // L'amministratore rimasto solo cancella il gruppo in un passo.
+    sync_ok(&mut admin).await?;
+    assert!(admin.find_group("Gita")?.members.is_empty());
+    admin.delete_group(&g.id).await?;
+    assert!(admin.find_group("Gita").is_err());
     Ok(())
 }

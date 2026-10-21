@@ -205,7 +205,13 @@ class MainActivity : ComponentActivity() {
             }
             composable("gruppo/{id}/info") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable
-                GroupInfoScreen(id, onBack = { nav.popBackStack() }, onOpenChat = { nav.navigate("chat/$it") })
+                GroupInfoScreen(
+                    id,
+                    onBack = { nav.popBackStack() },
+                    onOpenChat = { nav.navigate("chat/$it") },
+                    // Gruppo eliminato: anche la sua chat non c'è più, si torna alla lista.
+                    onDeleted = { nav.popBackStack("home", inclusive = false) },
+                )
             }
             composable("condividi") {
                 io.github.mtmattia.rondine.ui.ShareTargetScreen(

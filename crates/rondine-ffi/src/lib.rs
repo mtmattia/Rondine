@@ -1111,6 +1111,19 @@ impl Rondine {
             .await
     }
 
+    /// Passa il ruolo di amministratore a un membro.
+    pub async fn set_group_admin(&self, id: String, member_id: String) -> Result<()> {
+        let k = key(&member_id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.set_group_admin(&id, &k).await?) }))
+            .await
+    }
+
+    /// Toglie dalla lista un gruppo da cui sono uscito, o in cui sono rimasto solo.
+    pub async fn delete_group(&self, id: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.delete_group(&id).await?) }))
+            .await
+    }
+
     pub async fn send_group_text(&self, id: String, body: String) -> Result<GroupMessageInfo> {
         self.run(move |c| {
             Box::pin(async move {

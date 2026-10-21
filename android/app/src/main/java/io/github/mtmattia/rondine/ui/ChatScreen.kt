@@ -362,6 +362,8 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
             }
         }
     }
+    /** Sticker da mettere tra i preferiti o in un pacchetto (toccato in chat o appena creato). */
+    var stickerToSave by remember { mutableStateOf<ByteArray?>(null) }
     // Sticker da una foto: si apre l'editor, che ritaglia il soggetto.
     var stickerPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
     val stickerPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -373,13 +375,19 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
             onDismiss = { stickerPhoto = null },
             onSaved = { data ->
                 stickerPhoto = null
+                // Nuovo sticker: tra i preferiti, e si può mettere anche in un pacchetto.
                 scope.launch {
-                    StickerStore.addFavorite(context, data)
-                    stickerRevision++
-                    snackbar.showSnackbar("Sticker creato: lo trovi tra i preferiti ⭐")
+                    StickerStore.setFavorite(context, data, true)
+                    stickerToSave = data
                 }
             },
         )
+    }
+    stickerToSave?.let { data ->
+        StickerSaveDialog(data) {
+            stickerToSave = null
+            stickerRevision++
+        }
     }
     val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { onPicked(it, false) }
 
@@ -735,11 +743,15 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                     val data = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                         java.io.File(saveable.path!!).readBytes()
                                     }
-                                    if (saveable.sticker) StickerStore.addFavorite(context, data) else StickerStore.addGif(context, data)
-                                    stickerRevision++
-                                    snackbar.showSnackbar(if (saveable.sticker) "Aggiunto agli sticker preferiti" else "Aggiunta alle GIF")
+                                    if (saveable.sticker) {
+                                        stickerToSave = data
+                                    } else {
+                                        StickerStore.addGif(context, data)
+                                        stickerRevision++
+                                        snackbar.showSnackbar("Aggiunta alle GIF")
+                                    }
                                 }
-                            }) { Icon(Icons.Filled.Star, if (saveable.sticker) "Aggiungi agli sticker preferiti" else "Aggiungi alle GIF") }
+                            }) { Icon(Icons.Filled.Star, if (saveable.sticker) "Aggiungi ai preferiti o a un pacchetto" else "Aggiungi alle GIF") }
                         }
                         IconButton(onClick = { forwarding = true }) { Icon(Icons.AutoMirrored.Filled.Forward, "Inoltra") }
                         IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "Elimina") }
@@ -933,6 +945,13 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                             Repo.refresh()
                                         } catch (e: RondineException) {
                                             snackbar.showSnackbar(e.userMessage)
+                                        }
+                                    }
+                                },
+                                onStickerTap = { path ->
+                                    scope.launch {
+                                        stickerToSave = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            java.io.File(path).readBytes()
                                         }
                                     }
                                 },
@@ -1193,6 +1212,7 @@ private fun Bubble(
     onDownload: () -> Unit,
     onOpenLocation: (uniffi.rondine_ffi.LocationInfo) -> Unit,
     onStopLocation: () -> Unit,
+    onStickerTap: (String) -> Unit,
 ) {
     val colors = LocalChatColors.current
     val big = 12.dp
@@ -1220,7 +1240,11 @@ private fun Bubble(
                 if (isGroup && !m.outgoing && firstOfRun && m.senderName != null) {
                     Text(m.senderName, color = senderColor(m.senderId), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
-                StickerMessage(sticker.path, onClick = { if (selecting) onSelect() }, onLongClick = onSelect)
+                StickerMessage(
+                    sticker.path,
+                    onClick = { if (selecting) onSelect() else sticker.path?.let(onStickerTap) },
+                    onLongClick = onSelect,
+                )
                 Row(
                     Modifier.clip(RoundedCornerShape(8.dp)).background(colors.bubbleIn.copy(alpha = 0.85f))
                         .padding(horizontal = 6.dp, vertical = 2.dp),

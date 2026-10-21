@@ -1,0 +1,1 @@
+Groups: admins can leave too (the role passes to another member), "Make admin", groups can be deleted, in one step if you are the only one left. Stickers: tap a sticker to add it to favourites or to one of your packs.

@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -60,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -75,6 +77,7 @@ import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /** Uno sticker: delle raccolte dentro l'app (`asset`) o salvato sul telefono (`file`). */
@@ -89,6 +92,9 @@ data class Sticker(val key: String, val emoji: String = "") {
 }
 
 class StickerPack(val id: String, val title: String, val stickers: List<Sticker>)
+
+/** Un pacchetto di sticker fatto da me (solo sul telefono). */
+class UserPack(val id: String, val name: String, val stickers: List<Sticker>)
 
 /** Sticker e GIF del telefono: raccolte incluse (Fluent Emoji 3D, MIT), preferiti, recenti. */
 object StickerStore {
@@ -154,6 +160,55 @@ object StickerStore {
     fun removeFavorite(s: Sticker) {
         if (!s.isAsset) File(s.path).delete()
     }
+
+    private fun packsDir(context: Context) = File(context.filesDir, "sticker-pacchetti").apply { mkdirs() }
+
+    /** I miei pacchetti, dal più vecchio; dentro, dallo sticker più recente. */
+    fun userPacks(context: Context): List<UserPack> =
+        packsDir(context).listFiles().orEmpty().filter { it.isDirectory }.sortedBy { it.name }.map { dir ->
+            UserPack(
+                dir.name,
+                File(dir, "nome.txt").takeIf { it.exists() }?.readText()?.trim().orEmpty().ifEmpty { "Pacchetto" },
+                dir.listFiles().orEmpty().filter { it.name != "nome.txt" }.sortedByDescending { it.lastModified() }
+                    .map { Sticker(Sticker.FILE + it.path) },
+            )
+        }
+
+    fun createPack(context: Context, name: String): String {
+        val id = "p${System.currentTimeMillis()}"
+        val dir = File(packsDir(context), id).apply { mkdirs() }
+        File(dir, "nome.txt").writeText(name.trim().take(40))
+        return id
+    }
+
+    fun renamePack(context: Context, id: String, name: String) {
+        File(File(packsDir(context), id), "nome.txt").writeText(name.trim().take(40))
+    }
+
+    fun deletePack(context: Context, id: String) {
+        File(packsDir(context), id).deleteRecursively()
+    }
+
+    private fun fileName(data: ByteArray): String {
+        val ext = when (mimeOf(data)) { "image/gif" -> "gif"; "image/png" -> "png"; else -> "webp" }
+        return "${sha(data)}.$ext"
+    }
+
+    /** Aggiunge (o toglie) lo sticker a un mio pacchetto. */
+    suspend fun setInPack(context: Context, id: String, data: ByteArray, present: Boolean) = withContext(Dispatchers.IO) {
+        val f = File(File(packsDir(context), id), fileName(data))
+        if (present) f.writeBytes(data) else f.delete()
+    }
+
+    /** Aggiunge (o toglie) lo sticker ai preferiti. */
+    suspend fun setFavorite(context: Context, data: ByteArray, present: Boolean) = withContext(Dispatchers.IO) {
+        val f = File(favoritesDir(context), fileName(data))
+        if (present) f.writeBytes(data) else f.delete()
+    }
+
+    fun isFavorite(context: Context, data: ByteArray) = File(favoritesDir(context), fileName(data)).exists()
+
+    fun inPack(context: Context, id: String, data: ByteArray) = File(File(packsDir(context), id), fileName(data)).exists()
 
     /** Salva una GIF tra le preferite. */
     suspend fun addGif(context: Context, data: ByteArray) = withContext(Dispatchers.IO) {
@@ -398,6 +453,7 @@ private sealed interface StickerSection {
     data object Recent : StickerSection
     data object Favorites : StickerSection
     data class Pack(val pack: StickerPack) : StickerSection
+    data class Mine(val id: String) : StickerSection
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -408,6 +464,8 @@ private fun StickerGrid(onSticker: (Sticker) -> Unit, onCreate: () -> Unit, revi
     var bump by remember { mutableIntStateOf(0) }
     val recents = remember(revision, bump) { StickerStore.recents(context) }
     val favorites = remember(revision, bump) { StickerStore.favorites(context) }
+    val mine = remember(revision, bump) { StickerStore.userPacks(context) }
+    var editingPack by remember { mutableStateOf<UserPack?>(null) }
     var section by remember {
         mutableStateOf<StickerSection>(if (recents.isNotEmpty()) StickerSection.Recent else StickerSection.Pack(packs.first()))
     }
@@ -431,19 +489,45 @@ private fun StickerGrid(onSticker: (Sticker) -> Unit, onCreate: () -> Unit, revi
                     contentAlignment = Alignment.Center,
                 ) { StickerImage(p.stickers.first(), Modifier.size(28.dp)) }
             }
+            mine.forEach { p ->
+                val sel = (section as? StickerSection.Mine)?.id == p.id
+                Box(
+                    Modifier
+                        .padding(horizontal = 2.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(if (sel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+                        .combinedClickable(onClick = { section = StickerSection.Mine(p.id) }, onLongClick = { editingPack = p }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val first = p.stickers.firstOrNull()
+                    if (first != null) StickerImage(first, Modifier.size(28.dp)) else Text(p.name.take(1).uppercase(), fontWeight = FontWeight.Bold)
+                }
+            }
             SectionIcon(Icons.Filled.AddPhotoAlternate, "Crea uno sticker da una foto", false, onCreate)
         }
         val shown = when (val s = section) {
             StickerSection.Recent -> recents
             StickerSection.Favorites -> favorites
             is StickerSection.Pack -> s.pack.stickers
+            is StickerSection.Mine -> mine.firstOrNull { it.id == s.id }?.stickers.orEmpty()
+        }
+        (section as? StickerSection.Mine)?.let { s ->
+            mine.firstOrNull { it.id == s.id }?.let { p ->
+                Text(
+                    "${p.name} · tieni premuta l'icona per rinominarlo o eliminarlo",
+                    Modifier.padding(horizontal = 12.dp), fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         if (shown.isEmpty()) {
             Text(
                 when (section) {
                     StickerSection.Favorites ->
-                        "Nessuno sticker preferito. Crea uno sticker da una foto con il pulsante +, o tieni " +
-                            "premuto uno sticker ricevuto per salvarlo."
+                        "Nessuno sticker preferito. Crea uno sticker da una foto con il pulsante +, o tocca " +
+                            "uno sticker ricevuto per salvarlo."
+                    is StickerSection.Mine -> "Pacchetto vuoto: tocca uno sticker ricevuto e aggiungilo qui."
                     else -> "Gli sticker che mandi compaiono qui."
                 },
                 Modifier.fillMaxWidth().padding(24.dp),
@@ -454,7 +538,7 @@ private fun StickerGrid(onSticker: (Sticker) -> Unit, onCreate: () -> Unit, revi
         }
         LazyVerticalGrid(GridCells.Fixed(4), Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
             items(shown, key = { it.key }) { s ->
-                val longClick = { if (!s.isAsset && section == StickerSection.Favorites) removing = s }
+                val longClick = { if (!s.isAsset && (section == StickerSection.Favorites || section is StickerSection.Mine)) removing = s }
                 Box(
                     Modifier
                         .padding(4.dp)
@@ -466,15 +550,136 @@ private fun StickerGrid(onSticker: (Sticker) -> Unit, onCreate: () -> Unit, revi
             }
         }
     }
+    editingPack?.let { p ->
+        PackEditDialog(p, onDismiss = { editingPack = null }) {
+            editingPack = null
+            if ((section as? StickerSection.Mine)?.id == p.id && StickerStore.userPacks(context).none { it.id == p.id }) {
+                section = StickerSection.Favorites
+            }
+            bump++
+        }
+    }
     removing?.let { s ->
         AlertDialog(
             onDismissRequest = { removing = null },
-            text = { Text("Togliere questo sticker dai preferiti?") },
+            text = { Text(if (section is StickerSection.Mine) "Togliere questo sticker dal pacchetto?" else "Togliere questo sticker dai preferiti?") },
             confirmButton = {
                 TextButton(onClick = { StickerStore.removeFavorite(s); removing = null; bump++ }) { Text("Togli") }
             },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("Annulla") } },
         )
+    }
+}
+
+@Composable
+private fun PackEditDialog(p: UserPack, onDismiss: () -> Unit, onDone: () -> Unit) {
+    val context = LocalContext.current
+    var name by remember { mutableStateOf(p.name) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (confirmDelete) "Eliminare «${p.name}»?" else "Pacchetto") },
+        text = {
+            if (confirmDelete) {
+                Text("Gli sticker del pacchetto spariscono da questo telefono.")
+            } else {
+                androidx.compose.material3.OutlinedTextField(name, { name = it.take(40) }, label = { Text("Nome") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            if (confirmDelete) {
+                TextButton(onClick = { StickerStore.deletePack(context, p.id); onDone() }) {
+                    Text("Elimina", color = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                TextButton(onClick = { if (name.isNotBlank()) StickerStore.renamePack(context, p.id, name); onDone() }) { Text("Salva") }
+            }
+        },
+        dismissButton = {
+            if (confirmDelete) {
+                TextButton(onClick = onDismiss) { Text("Annulla") }
+            } else {
+                TextButton(onClick = { confirmDelete = true }) { Text("Elimina il pacchetto", color = MaterialTheme.colorScheme.error) }
+            }
+        },
+    )
+}
+
+/**
+ * Dove tenere uno sticker: tra i preferiti e/o in uno dei miei pacchetti (anche nuovo). Si apre
+ * toccando uno sticker in chat e dopo averne creato uno da una foto.
+ */
+@Composable
+fun StickerSaveDialog(data: ByteArray, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var bump by remember { mutableIntStateOf(0) }
+    val packs = remember(bump) { StickerStore.userPacks(context) }
+    val fav = remember(bump) { StickerStore.isFavorite(context, data) }
+    val inPacks = remember(bump) { packs.filter { StickerStore.inPack(context, it.id, data) }.map { it.id }.toSet() }
+    var newName by remember { mutableStateOf<String?>(null) }
+    val preview = remember(data) { BitmapFactory.decodeByteArray(data, 0, data.size)?.asImageBitmap() }
+    fun toggle(block: suspend () -> Unit) {
+        scope.launch {
+            block()
+            bump++
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sticker") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                preview?.let { Image(it, "Sticker", Modifier.size(140.dp)) }
+                Spacer(Modifier.height(8.dp))
+                SaveRow(Icons.Filled.Star, "Preferiti", fav) { toggle { StickerStore.setFavorite(context, data, !fav) } }
+                packs.forEach { p ->
+                    SaveRow(null, p.name, p.id in inPacks) { toggle { StickerStore.setInPack(context, p.id, data, p.id !in inPacks) } }
+                }
+                val n = newName
+                if (n == null) {
+                    TextButton(onClick = { newName = "" }) {
+                        Icon(Icons.Filled.Add, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Nuovo pacchetto")
+                    }
+                } else {
+                    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+                    androidx.compose.runtime.LaunchedEffect(Unit) { focus.requestFocus() }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.OutlinedTextField(
+                            n, { newName = it.take(40) }, label = { Text("Nome del pacchetto") }, singleLine = true,
+                            modifier = Modifier.weight(1f).focusRequester(focus),
+                        )
+                        TextButton(onClick = {
+                            val name = n.trim()
+                            if (name.isEmpty()) return@TextButton
+                            newName = null
+                            toggle {
+                                val id = StickerStore.createPack(context, name)
+                                StickerStore.setInPack(context, id, data, true)
+                            }
+                        }) { Text("Crea") }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fatto") } },
+    )
+}
+
+@Composable
+private fun SaveRow(icon: ImageVector?, label: String, checked: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).combinedClickableCompat(onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = { onClick() })
+        if (icon != null) {
+            Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(label)
     }
 }
 

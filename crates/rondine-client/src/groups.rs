@@ -441,17 +441,51 @@ impl Client {
         self.save()
     }
 
-    /// Esce da un gruppo: chiede all'amministratore di togliermi e smette di ricevere.
-    pub async fn leave_group(&mut self, gid: &str) -> Result<()> {
+    /// Passa il ruolo di amministratore a un altro membro (SPEC §7.4).
+    pub async fn set_group_admin(&mut self, gid: &str, who: &PublicKey) -> Result<()> {
         let i = self.group_index(gid)?;
         let g = self.state.group_chats[i].clone();
         if !g.active {
             return Err(Error::Invalid("non fai più parte del gruppo".into()));
         }
-        if g.admin == self.identity.public() {
+        if g.admin != self.identity.public() {
             return Err(Error::Invalid(
-                "l'amministratore non può uscire dal gruppo".into(),
+                "solo l'amministratore passa il ruolo".into(),
             ));
+        }
+        if !g.members.iter().any(|m| &m.identity == who) {
+            return Err(Error::NotFound("non è nel gruppo".into()));
+        }
+        let my_card = self.my_group_card(i).await?;
+        let mut cards = vec![my_card];
+        cards.extend(g.members.iter().map(|m| m.card.clone()));
+        let roster = AppMessage::Group {
+            v: 1,
+            name: g.name.clone(),
+            admin: *who,
+            cards,
+        };
+        let envelope = self.group_encrypt(&gid_bytes(gid)?, &roster)?;
+        self.state.group_chats[i].admin = *who;
+        self.save()?;
+        self.fanout(&g.members, &envelope).await;
+        Ok(())
+    }
+
+    /// Esce da un gruppo: chiede all'amministratore di togliermi e smette subito di ricevere
+    /// (il permesso `gruppo` si revoca). L'amministratore prima passa il ruolo al primo degli
+    /// altri membri; se è rimasto solo, il gruppo finisce.
+    pub async fn leave_group(&mut self, gid: &str) -> Result<()> {
+        let i = self.group_index(gid)?;
+        let mut g = self.state.group_chats[i].clone();
+        if !g.active {
+            return Err(Error::Invalid("non fai più parte del gruppo".into()));
+        }
+        if g.admin == self.identity.public()
+            && let Some(next) = g.members.first().map(|m| m.identity)
+        {
+            self.set_group_admin(gid, &next).await?;
+            g = self.state.group_chats[i].clone();
         }
         let admin: Vec<GroupMember> = g
             .members
@@ -459,11 +493,11 @@ impl Client {
             .filter(|m| m.identity == g.admin)
             .cloned()
             .collect();
-        let envelope = self.group_encrypt(&gid_bytes(gid)?, &AppMessage::Leave { v: 1 })?;
-        if !self.fanout(&admin, &envelope).await.is_empty() || admin.is_empty() {
-            return Err(Error::Invalid(
-                "impossibile avvisare l'amministratore".into(),
-            ));
+        if !admin.is_empty() {
+            // Se l'amministratore non si raggiunge si esce lo stesso: col permesso revocato
+            // nessuno può più consegnarmi i messaggi del gruppo.
+            let envelope = self.group_encrypt(&gid_bytes(gid)?, &AppMessage::Leave { v: 1 })?;
+            self.fanout(&admin, &envelope).await;
         }
         let permit = {
             let g = &mut self.state.group_chats[i];
@@ -583,6 +617,22 @@ impl Client {
         for id in &ids {
             self.remove_files(id);
         }
+        self.save()
+    }
+
+    /// Toglie dalla lista un gruppo, con i messaggi: uno da cui sono uscito (o sono stato
+    /// tolto), oppure uno in cui sono rimasto solo, che così finisce.
+    pub async fn delete_group(&mut self, gid: &str) -> Result<()> {
+        let i = self.group_index(gid)?;
+        let g = &self.state.group_chats[i];
+        if g.active {
+            if !g.members.is_empty() {
+                return Err(Error::Invalid("prima esci dal gruppo".into()));
+            }
+            self.leave_group(gid).await?;
+        }
+        self.clear_group_chat(gid)?;
+        self.state.group_chats.retain(|g| g.id != gid);
         self.save()
     }
 
@@ -973,14 +1023,24 @@ impl Client {
                 name, admin, cards, ..
             } => {
                 let g = &self.state.group_chats[i];
-                if sender != g.admin || admin != g.admin {
+                if sender != g.admin {
                     return Err(Error::Invalid(
                         "elenco del gruppo non dall'amministratore".into(),
                     ));
                 }
                 let name = group_name(&name)?;
                 let members = self.device.members(&gid_bytes(gid)?)?;
+                // Passaggio del ruolo (SPEC §7.4): solo a un membro del gruppo.
+                if admin != g.admin {
+                    if !members.contains(&admin) {
+                        return Err(Error::Invalid("nuovo amministratore non nel gruppo".into()));
+                    }
+                    self.batch.groups.push(GroupEvent::MembersChanged {
+                        group: gid.to_string(),
+                    });
+                }
                 let g = &mut self.state.group_chats[i];
+                g.admin = admin;
                 g.name = name;
                 for card in cards {
                     merge_card(g, card, &members, &me, false);

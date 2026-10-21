@@ -230,8 +230,12 @@ enum GruppoCmd {
     },
     /// Toglie un membro (solo l'amministratore).
     Togli { gruppo: String, membro: String },
-    /// Esce dal gruppo.
+    /// Esce dal gruppo (l'amministratore prima passa il ruolo a un altro membro).
     Esci { gruppo: String },
+    /// Passa il ruolo di amministratore a un membro (solo l'amministratore).
+    Amministratore { gruppo: String, membro: String },
+    /// Toglie dalla lista un gruppo da cui sei uscito, o in cui sei rimasto solo.
+    Elimina { gruppo: String },
 }
 
 #[derive(Subcommand)]
@@ -730,6 +734,17 @@ async fn group_cmd(c: &mut Client, cmd: GruppoCmd) -> anyhow::Result<()> {
             let id = c.find_group(&gruppo)?.id.clone();
             c.leave_group(&id).await?;
             println!("Sei uscito dal gruppo.");
+        }
+        GruppoCmd::Amministratore { gruppo, membro } => {
+            let g = c.find_group(&gruppo)?.clone();
+            let who = group_member(&g, &membro)?;
+            c.set_group_admin(&g.id, &who).await?;
+            println!("Ora l'amministratore è {membro}.");
+        }
+        GruppoCmd::Elimina { gruppo } => {
+            let id = c.find_group(&gruppo)?.id.clone();
+            c.delete_group(&id).await?;
+            println!("Gruppo tolto dalla lista.");
         }
     }
     Ok(())

@@ -56,6 +56,12 @@ sudo tailscale set --operator=$USER   # una volta sola
 tailscale serve --bg --https=443 http://127.0.0.1:8340
 ```
 
+Per il collegamento diretto via internet (buco nel NAT, SPEC §12.8) il nodo deve rispondere a
+STUN: `RONDINE_STUN=0.0.0.0:3478`. Sulla tailnet basta così; per telefoni fuori dalla tailnet la
+porta UDP 3478 va aperta verso internet (o si mette un `stun:` pubblico in `RONDINE_TURN`).
+I due emulatori non possono provarlo (stanno dietro lo stesso NAT dell'emulatore): servono due
+telefoni.
+
 Con `rondine.nodo=https://<macchina>.<tailnet>.ts.net` in `~/.gradle/gradle.properties` l'APK
 propone quel nodo al primo avvio sui telefoni veri (sull'emulatore resta `127.0.0.1:8330`).
 

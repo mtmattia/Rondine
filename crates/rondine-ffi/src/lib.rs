@@ -306,6 +306,8 @@ pub struct ChatRow {
     pub typing: bool,
     /// Il contatto è raggiungibile in rete locale adesso.
     pub on_lan: bool,
+    /// C'è un collegamento diretto via internet aperto con il contatto (SPEC §12.8).
+    pub direct_link: bool,
 }
 
 /// Un aggiornamento (storia), mio o di un contatto (SPEC §7.10).
@@ -703,6 +705,7 @@ fn view_of(c: &Client) -> View {
             unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
             typing: c.is_typing(&r.contact.identity),
             on_lan: c.on_lan(&r.contact.identity),
+            direct_link: c.direct_link(&r.contact.identity),
         })
         .collect();
     let mut contacts: Vec<ContactInfo> = c
@@ -922,6 +925,27 @@ impl Rondine {
             })
         })
         .await
+    }
+
+    /// Aspetta una busta arrivata per una via diretta (rete locale, buco nel NAT), al massimo
+    /// `timeout_ms`, senza tenere occupato il client: appena torna `true` l'app sincronizza.
+    pub async fn wait_incoming(&self, timeout_ms: u64) -> bool {
+        let waiter = self.client.lock().await.incoming_waiter();
+        on_runtime(async move {
+            Ok(waiter
+                .wait(std::time::Duration::from_millis(timeout_ms))
+                .await)
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// Chiede subito un collegamento diretto con il contatto (SPEC §12.8). `false` se non si
+    /// può (c'è già, è in corso, il nodo non ha STUN).
+    pub async fn connect_direct(&self, key_b64: String) -> Result<bool> {
+        let k = key(&key_b64)?;
+        self.run(move |c| Box::pin(async move { Ok(c.connect_direct(&k).await?) }))
+            .await
     }
 
     /// Vicino dato a mano (`ip:porta`): per le prove sull'emulatore, dove mDNS non arriva.

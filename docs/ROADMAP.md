@@ -43,7 +43,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Conferme di lettura, "sta scrivendo" | ✅ | spunte ✓ / ✓✓ / ✓✓ verdi (SPEC §7.2), "sta scrivendo" effimero senza sveglia (§7.3) |
 | Più dispositivi per persona | ⬜ | ogni dispositivo membro MLS |
 | Backup e ripristino | ✅ | SPEC §7.8: file cifrato con codice di 30 cifre (Impostazioni → Backup, salvato dove vuoi), ripristino al primo avvio; chat 1:1 riaperte da sole, gruppi riaggiunti dall'amministratore; senza foto e documenti delle chat |
-| Collegamento diretto P2P | 🟡 | se il nodo non risponde: rete locale (mDNS) e indirizzi da "sono collegato" (IPv6); niente NAT traversal IPv4 |
+| Collegamento diretto P2P | ✅ | il diretto vince sul nodo: rete locale (mDNS), IPv6 da "sono collegato", e buco nel NAT IPv4 con QUIC (SPEC §12.8, il nodo fa solo da punto d'incontro con STUN); non riesce con NAT simmetrici |
 | Mesh tra utenti | ✅ | i contatti fanno da postini, fino a 4 passaggi, invisibile (SPEC §12.5) |
 | Rete locale senza internet | ✅ | mDNS + consegna diretta, profili anche senza nodo (SPEC §12) |
 | Mesh Bluetooth | ⬜ | M3 |
@@ -93,7 +93,8 @@ Collegamento diretto quando entrambi sono online, rete locale senza internet, no
 - [x] mesh tra utenti (postini fino a 4 passaggi) e scarto dei doppioni
 - [x] con il nodo spento, rete locale e mesh continuano a funzionare
 - [x] profilo senza nodo nel client e nella CLI (l'app non lo propone)
-- [ ] P2P via internet dietro NAT IPv4 (hole punching con il nodo come punto d'incontro)
+- [x] P2P via internet dietro NAT IPv4 (hole punching con il nodo come punto d'incontro, SPEC §12.8)
+- [ ] prova del buco nel NAT tra due telefoni veri su reti diverse (l'emulatore non lo permette)
 - [ ] Bluetooth come altro canale della mesh
 - [ ] annuncio mDNS rinnovato a mezzanotte (ora vale per il giorno di avvio e il successivo)
 

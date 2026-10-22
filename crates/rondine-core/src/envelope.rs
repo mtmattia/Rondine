@@ -46,6 +46,16 @@ pub enum AppMessage {
     Typing { v: u32, active: bool, ts: u64 },
     /// "Sono collegato": indirizzi per la consegna diretta (SPEC §12.3).
     Online { v: u32, addrs: Vec<String>, ts: u64 },
+    /// Buco nel NAT (SPEC §12.8): offerta o risposta con l'indirizzo visto da fuori e l'impronta
+    /// del certificato QUIC.
+    Punch {
+        v: u32,
+        id: String,
+        op: PunchOp,
+        addr: String,
+        cert: String,
+        ts: u64,
+    },
     /// Busta affidata a un postino della mesh (SPEC §12.5).
     Relay {
         v: u32,
@@ -242,6 +252,13 @@ pub struct FileMsg {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+pub enum PunchOp {
+    Offer,
+    Answer,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum ReceiptStatus {
     Delivered,
     Read,
@@ -255,6 +272,7 @@ impl AppMessage {
             | AppMessage::Receipt { v, .. }
             | AppMessage::Typing { v, .. }
             | AppMessage::Online { v, .. }
+            | AppMessage::Punch { v, .. }
             | AppMessage::Relay { v, .. }
             | AppMessage::Group { v, .. }
             | AppMessage::Leave { v } => *v,

@@ -13,6 +13,9 @@ axum.workspace = true
 mdns-sd.workspace = true
 if-addrs.workspace = true
 rustls.workspace = true
+quinn.workspace = true
+rcgen.workspace = true
+ring.workspace = true
 rustls-platform-verifier.workspace = true
 serde.workspace = true
 blake3.workspace = true
@@ -22,7 +25,6 @@ tokio.workspace = true
 
 [dev-dependencies]
 rondine-nodo.workspace = true
-ring.workspace = true
 base64.workspace = true
 tempfile.workspace = true
 

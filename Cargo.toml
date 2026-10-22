@@ -42,6 +42,10 @@ rustls-platform-verifier = "0.7"
 mdns-sd = "0.21"
 # Indirizzi del dispositivo da annunciare con "sono collegato" (SPEC §12.3).
 if-addrs = "0.15"
+# Collegamento diretto con il buco nel NAT (SPEC §12.8): QUIC su rustls/ring e certificati
+# autofirmati usa e getta.
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"

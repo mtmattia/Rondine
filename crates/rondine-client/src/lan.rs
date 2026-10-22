@@ -13,16 +13,12 @@ use rondine_core::lan::{MDNS_SERVICE, day, instance_name, lan_id};
 use rondine_core::{PublicKey, now};
 use serde::{Deserialize, Serialize};
 
+use crate::punch::{Inbox, MAX_BLOB_B64};
 use crate::{Error, Result};
 
-/// Limiti di SPEC §12.2.
-const MAX_BLOB_B64: usize = 256 * 1024 * 4 / 3 + 4;
-const MAX_QUEUE: usize = 1000;
-
-#[derive(Default)]
 struct Shared {
-    /// Buste arrivate dai vicini, in attesa del prossimo `sync`.
-    incoming: Mutex<Vec<String>>,
+    /// Buste arrivate dai vicini, in attesa del prossimo `sync` (comune con il buco nel NAT).
+    incoming: Arc<Inbox>,
     /// Key package da dare a chi avvia una chat; l'ultimo resta e si riusa.
     keypackages: Mutex<Vec<String>>,
 }
@@ -38,7 +34,6 @@ pub(crate) struct KeyPackage {
 }
 
 pub(crate) struct Lan {
-    shared: Arc<Shared>,
     addr: SocketAddr,
     /// Vicini dati a mano (test, CLI).
     manual: HashMap<PublicKey, SocketAddr>,
@@ -64,9 +59,10 @@ impl Lan {
         me: &PublicKey,
         keypackages: Vec<String>,
         discovery: bool,
+        incoming: Arc<Inbox>,
     ) -> Result<Self> {
         let shared = Arc::new(Shared {
-            incoming: Mutex::new(Vec::new()),
+            incoming,
             keypackages: Mutex::new(keypackages),
         });
         let listener = tokio::net::TcpListener::bind(bind).await?;
@@ -88,7 +84,6 @@ impl Lan {
         };
 
         Ok(Self {
-            shared,
             addr,
             manual: HashMap::new(),
             discovered,
@@ -156,31 +151,15 @@ impl Lan {
     pub(crate) fn neighbours(&self) -> usize {
         self.discovered.lock().map(|d| d.len()).unwrap_or(0) + self.manual.len()
     }
-
-    pub(crate) fn take_incoming(&self) -> Vec<String> {
-        self.shared
-            .incoming
-            .lock()
-            .map(|mut v| std::mem::take(&mut *v))
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn queue_len(&self) -> usize {
-        self.shared.incoming.lock().map(|v| v.len()).unwrap_or(0)
-    }
 }
 
 async fn deliver(State(s): State<Arc<Shared>>, Json(d): Json<Deliver>) -> StatusCode {
     if d.blob.len() > MAX_BLOB_B64 {
         return StatusCode::PAYLOAD_TOO_LARGE;
     }
-    let Ok(mut q) = s.incoming.lock() else {
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    };
-    if q.len() >= MAX_QUEUE {
+    if !s.incoming.push(d.blob) {
         return StatusCode::INSUFFICIENT_STORAGE;
     }
-    q.push(d.blob);
     StatusCode::ACCEPTED
 }
 

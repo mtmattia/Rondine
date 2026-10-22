@@ -158,11 +158,30 @@ object Repo {
     }
 
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var directWatch: kotlinx.coroutines.Job? = null
+
+    /** Buste arrivate per vie dirette (rete locale, buco nel NAT, SPEC §12.8): non passano dal
+     *  nodo, quindi nessuna sveglia push. Finché il processo è vivo si sincronizza appena
+     *  ne arriva una. */
+    private fun watchDirect() {
+        if (directWatch?.isActive == true) return
+        directWatch = scope.launch {
+            while (true) {
+                val r = rondine ?: break
+                if (r.waitIncoming(60_000uL)) {
+                    sync()
+                    // Una busta che non si riesce a elaborare non deve far girare a vuoto.
+                    kotlinx.coroutines.delay(250)
+                }
+            }
+        }
+    }
 
     /** Consegna diretta e scoperta mDNS in rete locale, finché il processo è vivo. Android
      *  scarta i pacchetti multicast se nessuna app tiene il MulticastLock. */
     private suspend fun startLan() {
         val r = rondine ?: return
+        watchDirect()
         try {
             val wifi = app.getSystemService(WifiManager::class.java)
             multicastLock = wifi?.createMulticastLock("rondine-mdns")?.apply {

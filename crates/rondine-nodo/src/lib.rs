@@ -61,6 +61,19 @@ pub struct TurnConfig {
     pub secret: Option<String>,
 }
 
+/// Server STUN minimo (SPEC §11, §12.8): risponde alle richieste *Binding* con l'indirizzo da cui
+/// arrivano. Gira finché il socket funziona.
+pub async fn serve_stun(socket: tokio::net::UdpSocket) -> std::io::Result<()> {
+    let mut buf = [0u8; 1500];
+    loop {
+        let (n, from) = socket.recv_from(&mut buf).await?;
+        if let Some(resp) = rondine_core::stun::answer(&buf[..n], from) {
+            // Un invio fallito riguarda solo quel client: si continua.
+            let _ = socket.send_to(&resp, from).await;
+        }
+    }
+}
+
 /// Durata delle credenziali TURN temporanee.
 pub const TURN_TTL_SECS: u64 = 86_400;
 

@@ -14,6 +14,7 @@ pub mod permit;
 pub mod phone;
 pub mod safety;
 pub mod signed;
+pub mod stun;
 pub mod username;
 
 pub use card::{Card, SignedCard};

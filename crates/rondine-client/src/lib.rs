@@ -6,6 +6,7 @@ mod error;
 mod groups;
 mod lan;
 mod net;
+mod punch;
 mod rubrica;
 mod scheduled;
 mod state;
@@ -31,6 +32,7 @@ use serde_json::json;
 pub use calls::TurnServers;
 pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
+pub use punch::IncomingWaiter;
 pub use rondine_core::envelope::CallOp;
 pub use rubrica::AddressBookMatch;
 pub use scheduled::{ScheduledMessage, ScheduledTarget};
@@ -238,6 +240,12 @@ pub struct Client {
     typing_sent: HashMap<PublicKey, (bool, u64)>,
     /// Rete locale, se avviata (SPEC §12).
     lan: Option<lan::Lan>,
+    /// Buco nel NAT e collegamenti diretti via internet (SPEC §12.8).
+    punch: punch::Punch,
+    /// Offerte e risposte `punch` arrivate, gestite alla fine di `sync`.
+    punch_jobs: Vec<PunchJob>,
+    /// Server STUN del mio nodo e quando li ho chiesti.
+    stun_cache: Option<(Vec<std::net::SocketAddr>, u64)>,
     /// Lavori della mesh raccolti durante l'elaborazione, eseguiti alla fine di `sync`.
     relay_jobs: Vec<RelayJob>,
     /// Eventi e azioni dei gruppi raccolti durante l'elaborazione (SPEC §7.4).
@@ -256,6 +264,15 @@ enum RelayJob {
     Local(String),
 }
 
+/// Messaggio `punch` da gestire (SPEC §12.8).
+struct PunchJob {
+    from: PublicKey,
+    id: String,
+    op: rondine_core::envelope::PunchOp,
+    addr: std::net::SocketAddr,
+    cert: String,
+}
+
 #[derive(Clone)]
 struct RelayMsg {
     id: String,
@@ -264,6 +281,11 @@ struct RelayMsg {
     hops: u32,
     blob: String,
 }
+
+/// Per quanto valgono offerta e risposta del buco nel NAT (SPEC §12.8).
+const PUNCH_TTL_SECS: u64 = 120;
+/// Per quanto si ricordano i server STUN del nodo.
+const STUN_CACHE_SECS: u64 = 3600;
 
 /// Ogni quanto la coda ritenta una consegna (SPEC §12.4), e quanto tiene ciò che non è un testo.
 const RETRY_SECS: u64 = 300;
@@ -355,6 +377,9 @@ impl Client {
             batch: Batch::default(),
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
+            punch: punch::Punch::default(),
+            punch_jobs: Vec::new(),
+            stun_cache: None,
             relay_jobs: Vec::new(),
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
@@ -414,6 +439,9 @@ impl Client {
             batch: Batch::default(),
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
+            punch: punch::Punch::default(),
+            punch_jobs: Vec::new(),
+            stun_cache: None,
             relay_jobs: Vec::new(),
         };
         client.save()?;
@@ -549,7 +577,14 @@ impl Client {
             .collect();
         // I key package nuovi stanno nell'archivio MLS: va salvato.
         self.save()?;
-        let lan = lan::Lan::start(bind, &self.identity.public(), kps, discovery).await?;
+        let lan = lan::Lan::start(
+            bind,
+            &self.identity.public(),
+            kps,
+            discovery,
+            self.punch.inbox(),
+        )
+        .await?;
         let addr = lan.addr();
         self.lan = Some(lan);
         self.announce_online().await;
@@ -680,9 +715,166 @@ impl Client {
         self.lan.as_ref().map(|l| l.neighbours()).unwrap_or(0)
     }
 
-    /// Buste arrivate in rete locale e non ancora elaborate (per i test).
+    // ---------- buco nel NAT (SPEC §12.8) ----------
+
+    /// Chiede subito un collegamento diretto al contatto, senza aspettare 5 minuti dal tentativo
+    /// precedente. `false` se non si può: c'è già, è in corso, nessun server STUN, nodo giù.
+    pub async fn connect_direct(&mut self, id: &PublicKey) -> Result<bool> {
+        Ok(self.offer_direct(id, true).await)
+    }
+
+    /// C'è un collegamento diretto via internet aperto con il contatto?
+    pub fn direct_link(&self, id: &PublicKey) -> bool {
+        self.punch.has_link(id)
+    }
+
+    /// Per aspettare le buste dirette senza tenere occupato il client.
+    pub fn incoming_waiter(&self) -> IncomingWaiter {
+        self.punch.waiter()
+    }
+
+    /// `true` appena arriva una busta per una via diretta, `false` dopo `timeout`.
+    pub async fn wait_incoming(&self, timeout: std::time::Duration) -> bool {
+        self.punch.waiter().wait(timeout).await
+    }
+
+    /// Quante buste aspettano nella mia casella del nodo (senza ritirarle).
+    pub async fn node_pending(&self) -> Result<usize> {
+        let path = format!("/v1/inboxes/{}/messages", self.state.inbox);
+        let bytes = self
+            .net
+            .owner::<()>(&self.identity, Method::GET, &self.state.node, &path, None)
+            .await?;
+        Ok(parse::<Vec<serde_json::Value>>(&bytes)?.len())
+    }
+
+    /// Server STUN del mio nodo (SPEC §7.9), ricordati per un'ora.
+    async fn stun_servers(&mut self) -> Vec<std::net::SocketAddr> {
+        if let Some((servers, at)) = &self.stun_cache
+            && at + STUN_CACHE_SECS > now()
+        {
+            return servers.clone();
+        }
+        let Ok(turn) = self.turn_servers().await else {
+            return Vec::new();
+        };
+        let servers = punch::stun_servers(&turn.urls).await;
+        self.stun_cache = Some((servers.clone(), now()));
+        servers
+    }
+
+    /// Contatto con cui ho una chat e che non ho bloccato.
+    fn punch_contact(&self, id: &PublicKey) -> Option<Contact> {
+        self.state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == id && !c.blocked && !c.groups.is_empty())
+            .cloned()
+    }
+
+    /// Offre il collegamento diretto (SPEC §12.8), se si può. `force` salta l'attesa tra due
+    /// tentativi.
+    async fn offer_direct(&mut self, id: &PublicKey, force: bool) -> bool {
+        if !self.punch.may_offer(id, force) {
+            return false;
+        }
+        let Some(contact) = self.punch_contact(id) else {
+            return false;
+        };
+        let servers = self.stun_servers().await;
+        if servers.is_empty() {
+            return false;
+        }
+        let Ok((pid, addr, cert)) = self.punch.offer(*id, &servers).await else {
+            return false;
+        };
+        let app = AppMessage::Punch {
+            v: 1,
+            id: pid,
+            op: rondine_core::envelope::PunchOp::Offer,
+            addr: addr.to_string(),
+            cert,
+            ts: now(),
+        };
+        self.send_punch(&contact, &app, Kind::Normal).await
+    }
+
+    /// Manda un `punch` senza coda né mesh: se non arriva, il tentativo scade da solo.
+    async fn send_punch(&mut self, c: &Contact, app: &AppMessage, kind: Kind) -> bool {
+        let Some(group) = self.preferred_group(c) else {
+            return false;
+        };
+        let Ok(plain) = serde_json::to_vec(app) else {
+            return false;
+        };
+        let Ok(ct) = self.device.encrypt(&group, &plain) else {
+            return false;
+        };
+        // L'archivio MLS va salvato subito: il messaggio ha fatto avanzare le chiavi.
+        if self.save().is_err() {
+            return false;
+        }
+        let envelope = Envelope::Mls {
+            v: 1,
+            msg: b64::encode(ct),
+        };
+        let Ok(bytes) = serde_json::to_vec(&envelope) else {
+            return false;
+        };
+        matches!(
+            self.try_deliver(&c.card, &b64::encode(bytes), kind).await,
+            Ok(Some(_))
+        )
+    }
+
+    /// Offerte ricevute (rispondo) e risposte alle mie offerte (mi collego).
+    async fn run_punch_jobs(&mut self) {
+        self.punch.expire();
+        for job in std::mem::take(&mut self.punch_jobs) {
+            match job.op {
+                rondine_core::envelope::PunchOp::Answer => {
+                    // Una risposta che non aspettavo più: niente da fare.
+                    let _ = self.punch.connect(job.from, &job.id, job.addr, &job.cert);
+                }
+                rondine_core::envelope::PunchOp::Offer => {
+                    if self.punch.has_pending(&job.from) {
+                        // Incrocio: vince l'offerta di chi ha la chiave più piccola.
+                        if self.identity.public() < job.from {
+                            continue;
+                        }
+                        self.punch.drop_pending(&job.from);
+                    }
+                    let Some(contact) = self.punch_contact(&job.from) else {
+                        continue;
+                    };
+                    let servers = self.stun_servers().await;
+                    if servers.is_empty() {
+                        continue;
+                    }
+                    let Ok((addr, cert)) = self
+                        .punch
+                        .answer(job.from, job.addr, &job.cert, &servers)
+                        .await
+                    else {
+                        continue;
+                    };
+                    let app = AppMessage::Punch {
+                        v: 1,
+                        id: job.id,
+                        op: rondine_core::envelope::PunchOp::Answer,
+                        addr: addr.to_string(),
+                        cert,
+                        ts: now(),
+                    };
+                    self.send_punch(&contact, &app, Kind::Quiet).await;
+                }
+            }
+        }
+    }
+
+    /// Buste arrivate per vie dirette (rete locale, buco nel NAT) e non ancora elaborate.
     pub fn lan_queue_len(&self) -> usize {
-        self.lan.as_ref().map(|l| l.queue_len()).unwrap_or(0)
+        self.punch.inbox().len()
     }
 
     /// Ritenta la coda (SPEC §12.4): ogni 5 minuti, o subito se il contatto è in rete locale o
@@ -762,6 +954,9 @@ impl Client {
             batch: Batch::default(),
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
+            punch: punch::Punch::default(),
+            punch_jobs: Vec::new(),
+            stun_cache: None,
             relay_jobs: Vec::new(),
         })
     }
@@ -1167,6 +1362,8 @@ impl Client {
             .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?
             .my_permit_id
             .clone();
+        // Niente più collegamento diretto con chi blocco (SPEC §12.8).
+        self.punch.close(id);
         if let Some(pid) = permit_id {
             self.revoke_permit(&pid).await?;
         }
@@ -1320,6 +1517,8 @@ impl Client {
         self.save()?;
         // La mia foto, se ce l'ho: anche chi aggiungo la vede subito (SPEC §7.7).
         self.send_profile_to(peer).await;
+        // E il collegamento diretto, se il nodo ha un server STUN (SPEC §12.8).
+        self.offer_direct(peer, false).await;
         Ok(())
     }
 
@@ -1327,7 +1526,8 @@ impl Client {
         self.deposit_with(card, envelope, Kind::Normal, None).await
     }
 
-    /// Una consegna senza coda né mesh (SPEC §12.4): il nodo del contatto, poi le vie dirette.
+    /// Una consegna senza coda né mesh (SPEC §12.4): prima il diretto vivo (buco nel NAT, rete
+    /// locale), poi il nodo del contatto, poi gli ultimi indirizzi annunciati.
     /// `Ok(None)`: nessuna via ha risposto. Un rifiuto esplicito del nodo resta un errore.
     async fn try_deliver(
         &self,
@@ -1336,6 +1536,16 @@ impl Client {
         kind: Kind,
     ) -> Result<Option<Route>> {
         let info = verify_card(card)?;
+        let id = info.identity;
+        if self.punch.has_link(&id) && self.punch.send(&id, blob).await.is_ok() {
+            return Ok(Some(Route::Direct));
+        }
+        let lan_peer = self.lan.as_ref().and_then(|l| l.peer(&id));
+        if let Some(addr) = lan_peer
+            && self.net.deliver_direct(addr, blob).await.is_ok()
+        {
+            return Ok(Some(Route::Direct));
+        }
         if let Some((node, inbox, permit)) = info.mailbox() {
             let res = self
                 .net
@@ -1358,7 +1568,11 @@ impl Client {
                 Err(_) => {}
             }
         }
-        for addr in self.direct_addrs(&info.identity) {
+        for addr in self
+            .direct_addrs(&id)
+            .into_iter()
+            .filter(|a| Some(*a) != lan_peer)
+        {
             if self.net.deliver_direct(addr, blob).await.is_ok() {
                 return Ok(Some(Route::Direct));
             }
@@ -1378,6 +1592,10 @@ impl Client {
         let info = verify_card(card)?;
         let blob = b64::encode(serde_json::to_vec(envelope)?);
         if let Some(route) = self.try_deliver(card, &blob, kind).await? {
+            // Passata dal nodo: si prova ad aprire il collegamento diretto (SPEC §12.8).
+            if route == Route::Node && kind == Kind::Normal {
+                self.offer_direct(&info.identity, false).await;
+            }
             return Ok(route);
         }
         if kind == Kind::Ephemeral {
@@ -2501,7 +2719,7 @@ impl Client {
             let items = match fetched {
                 Ok(items) => items,
                 // Previsto quando il nodo è giù: le altre vie (diretta, mesh) lo coprono.
-                Err(_) if self.lan.is_some() => Vec::new(),
+                Err(_) if self.lan.is_some() || self.punch.any_link() => Vec::new(),
                 Err(e) => return Err(e),
             };
             for item in items {
@@ -2537,9 +2755,7 @@ impl Client {
                 retired_acks.push((r.node, format!("{rpath}/ack"), rids));
             }
         }
-        if let Some(lan) = &self.lan {
-            blobs.extend(lan.take_incoming());
-        }
+        blobs.extend(self.punch.inbox().take());
         let online_before = self.online_marker();
         for blob in blobs {
             self.process_blob(&blob, &mut events);
@@ -2576,6 +2792,8 @@ impl Client {
                 }
             }
         }
+        // Offerte e risposte per il collegamento diretto (SPEC §12.8).
+        self.run_punch_jobs().await;
         // Azioni dei gruppi raccolte durante l'elaborazione (annunci, uscite, revoche).
         events.extend(self.run_pending().await);
         // Contatti nuovi: devono sapere dove trovarmi (SPEC §12.3).
@@ -2893,6 +3111,32 @@ impl Client {
                 }
                 for o in self.state.outbox.iter_mut().filter(|o| o.to == sender) {
                     o.next_try = 0;
+                }
+                Ok(Vec::new())
+            }
+            AppMessage::Punch {
+                id,
+                op,
+                addr,
+                cert,
+                ts,
+                ..
+            } => {
+                // Vecchia: chi l'ha mandata non aspetta più (SPEC §12.8).
+                let fresh = ts + PUNCH_TTL_SECS >= now();
+                let known = self
+                    .state
+                    .contacts
+                    .iter()
+                    .any(|c| c.identity == sender && !c.blocked);
+                if let (true, true, Ok(addr)) = (fresh, known, addr.parse()) {
+                    self.punch_jobs.push(PunchJob {
+                        from: sender,
+                        id,
+                        op,
+                        addr,
+                        cert,
+                    });
                 }
                 Ok(Vec::new())
             }

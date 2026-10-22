@@ -173,6 +173,9 @@ enum Cmd {
     Verifica { contatto: String },
     /// Blocca un contatto.
     Blocca { contatto: String },
+    /// Apre un collegamento diretto via internet con un contatto, anche dietro NAT (SPEC §12.8),
+    /// e resta in ascolto a ricevere finché non si preme Ctrl+C.
+    Diretto { contatto: String },
     /// Notifiche UnifiedPush.
     #[command(subcommand)]
     Push(PushCmd),
@@ -1230,6 +1233,39 @@ async fn main() -> anyhow::Result<()> {
                 c.safety_number(&contact.identity)
             );
             println!("Confrontalo di persona: se è uguale, usa `rondine verifica`.");
+        }
+        Cmd::Diretto { contatto } => {
+            let id = c.find_contact(&contatto)?.identity;
+            if !c.connect_direct(&id).await? && !c.direct_link(&id) {
+                anyhow::bail!(
+                    "collegamento diretto non disponibile: serve un server STUN sul nodo (SPEC §12.8)"
+                );
+            }
+            println!("Offerta mandata, aspetto la risposta…");
+            for _ in 0..300 {
+                if c.direct_link(&id) {
+                    break;
+                }
+                c.sync().await?;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            if !c.direct_link(&id) {
+                anyhow::bail!(
+                    "nessuna risposta: il contatto non è connesso o il NAT non lo permette"
+                );
+            }
+            println!("Collegati direttamente. Ctrl+C per uscire.");
+            loop {
+                let waiter = c.incoming_waiter();
+                waiter.wait(std::time::Duration::from_secs(30)).await;
+                let s = c.sync_all().await?;
+                print_events(&s.events, &c);
+                print_group_events(&s.groups, &c);
+                if !c.direct_link(&id) {
+                    println!("Collegamento chiuso.");
+                    break;
+                }
+            }
         }
         Cmd::Verifica { contatto } => {
             let id = c.find_contact(&contatto)?.identity;

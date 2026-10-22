@@ -638,7 +638,7 @@ async fn coda_finche_il_contatto_ricompare() -> R {
 }
 
 #[tokio::test]
-async fn col_nodo_attivo_si_passa_dal_nodo() -> R {
+async fn in_rete_locale_il_diretto_vince_sul_nodo() -> R {
     let node = start_node().await?;
     let tmp = TempDir::new()?;
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
@@ -646,13 +646,24 @@ async fn col_nodo_attivo_si_passa_dal_nodo() -> R {
     silvia.add(&mattia.invite_link()?).await?;
     mattia.sync().await?;
 
-    // Anche se sono nella stessa rete, il nodo resta la via principale (SPEC §12.4).
+    // Nella stessa rete il collegamento diretto vince sul nodo (SPEC §12.4).
     let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
     mattia.start_lan("127.0.0.1:0".parse()?, false).await?;
     mattia.add_lan_peer(silvia.identity(), s);
-    mattia.send_text(&silvia.identity(), "dal nodo").await?;
-    assert_eq!(silvia.lan_queue_len(), 0, "doveva passare dal nodo");
-    assert_eq!(texts(&silvia.sync().await?), ["dal nodo"]);
+    // Nella casella c'è già il "sono collegato" mandato da Mattia prima di trovarla.
+    let before = silvia.node_pending().await?;
+    mattia.send_text(&silvia.identity(), "diretto").await?;
+    assert_eq!(
+        silvia.lan_queue_len(),
+        1,
+        "doveva passare dalla rete locale"
+    );
+    assert_eq!(
+        silvia.node_pending().await?,
+        before,
+        "il nodo non doveva vederlo"
+    );
+    assert_eq!(texts(&silvia.sync().await?), ["diretto"]);
     Ok(())
 }
 

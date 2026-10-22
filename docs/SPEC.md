@@ -558,6 +558,11 @@ finché non passa da SMS, QR o numero di sicurezza.
 
 Gli errori sono `{"error": "<codice>", "message": "<testo>"}` con lo stato HTTP adatto.
 
+**STUN incorporato (facoltativo).** Il nodo può rispondere da sé alle richieste STUN *Binding*
+(RFC 8489) su una porta UDP (`--stun`, di solito 3478); allora `GET /v1/inboxes/{inbox}/turn`
+aggiunge `stun:<host del nodo>:<porta>` agli `urls`. Serve al buco nel NAT (§12.8) anche senza
+coturn. La porta UDP deve essere raggiungibile da internet.
+
 Pagine per i link condivisi (HTML, fuori da `/v1`, nessun dato salvato):
 
 | Metodo e percorso | Cosa fa |
@@ -567,9 +572,10 @@ Pagine per i link condivisi (HTML, fuori da `/v1`, nessun dato salvato):
 
 ## 12. Vie di consegna: nodo, diretto, mesh
 
-Il nodo resta la via principale, ma non l'unica: se non risponde, i telefoni si consegnano i
-messaggi direttamente (stessa rete o via internet) oppure se li fanno portare da altri utenti
-(mesh). Tutto è automatico e invisibile nell'app. Il contenuto è sempre la stessa busta (§6.1),
+**Il diretto vince sul nodo:** se c'è un collegamento diretto vivo (rete locale, o un buco nel NAT
+già aperto, §12.8) la busta va lì; il nodo è la rete di sicurezza quando il diretto non c'è o non
+risponde. Se anche il nodo non risponde, i telefoni provano gli ultimi indirizzi noti oppure si
+fanno portare i messaggi da altri utenti (mesh). Tutto è automatico e invisibile nell'app. Il contenuto è sempre la stessa busta (§6.1),
 cifrata con MLS per il destinatario: nessuna via aggiunge niente di leggibile.
 
 ### 12.1 Scoperta in rete locale (mDNS)
@@ -608,17 +614,22 @@ né mesh: il prossimo "sono collegato" lo sostituisce. Senza questo avviso chi h
 saprebbe mai dove trovare un contatto senza nodo che l'ha aggiunto dopo essersi acceso.
 
 ### 12.4 Ordine di consegna
-1. Deposito nel nodo del contatto (se il suo biglietto ne ha uno).
-2. Se il nodo non risponde: consegna diretta, all'indirizzo trovato con mDNS o a quelli dell'ultimo
-   "sono collegato".
-3. Se neanche quella va: il messaggio resta in coda sul telefono (spunta "in attesa") **e** parte
+1. Collegamento diretto vivo: la connessione QUIC aperta con il buco nel NAT (§12.8), poi
+   l'indirizzo trovato con mDNS (o dato a mano).
+2. Deposito nel nodo del contatto (se il suo biglietto ne ha uno).
+3. Se il nodo non risponde: consegna diretta agli indirizzi dell'ultimo "sono collegato".
+4. Se neanche quella va: il messaggio resta in coda sul telefono (spunta "in attesa") **e** parte
    nella mesh (§12.5).
-4. Finché non arriva la conferma di consegna (§7.2), la coda ritenta (nodo, poi diretto) ogni
+5. Finché non arriva la conferma di consegna (§7.2), la coda ritenta (stesso ordine) ogni
    5 minuti, e subito quando arriva un "sono collegato" o il contatto compare in rete locale.
    La coda di ciò che non è un testo (conferme, relay) si butta dopo un giorno.
 
-La consegna diretta via internet riesce quando l'indirizzo annunciato è raggiungibile (tipicamente
-IPv6); dietro un NAT IPv4 non riesce, e restano il nodo e la mesh.
+La consegna diretta agli indirizzi annunciati riesce quando sono raggiungibili (rete locale,
+IPv6); dietro un NAT IPv4 serve il buco del §12.8.
+
+Una busta consegnata direttamente arriva nella memoria dell'app del contatto, che la elabora
+subito; se l'app muore prima, la busta si perde come con la rete locale, e il messaggio si
+recupera dalla coda finché non arriva la conferma di consegna (§7.2).
 
 I depositi effimeri (§7.3) e i "sono collegato" (§12.3) non vanno in coda né nella mesh.
 
@@ -664,6 +675,54 @@ ancora ricevuto il biglietto nuovo continua a consegnare nella vecchia casella: 
 insieme alla nuova per 30 giorni (la conservazione dei nodi, §6), poi la lascia. Nome utente,
 numero verificato (§13) e voce nella bacheca appartengono al vecchio nodo: il nome si libera, gli
 altri si lasciano scadere, e si possono rifare sul nodo nuovo.
+
+### 12.8 Buco nel NAT IPv4 (hole punching)
+Due telefoni dietro NAT IPv4 si collegano direttamente. Il nodo serve solo da punto d'incontro:
+porta i due messaggi MLS qui sotto, poi esce di mezzo. È lo stesso schema delle chiamate (§7.9).
+
+1. **Indirizzo pubblico.** Chi vuole collegarsi apre un socket UDP IPv4 nuovo e chiede a un server
+   STUN (RFC 8489, solo *Binding*, senza autenticazione) il proprio indirizzo visto da fuori
+   (`XOR-MAPPED-ADDRESS`). I server sono gli `stun:` e `turn:` dati dal proprio nodo (§7.9);
+   senza, niente buco.
+2. **Offerta**, dentro MLS nella chat 1:1, consegnata come un messaggio normale (sveglia il
+   contatto) ma senza coda né mesh:
+   ```json
+   { "v": 1, "type": "punch", "id": "<b64 16 byte>", "op": "offer",
+     "addr": "203.0.113.5:40123", "cert": "<b64 SHA-256 del certificato DER>",
+     "ts": 1792240000 }
+   ```
+   Ognuno dei due genera per ogni tentativo un certificato autofirmato nuovo, e ne manda
+   l'impronta.
+3. **Risposta.** Chi la riceve (entro 120 s da `ts`) apre a sua volta un socket UDP, scopre il
+   proprio indirizzo con STUN, manda 5 datagrammi di 1 byte (`0x00`) all'`addr` dell'offerta, a
+   20 ms l'uno dall'altro, così il suo NAT lascia entrare i pacchetti di chi ha offerto. Poi si mette
+   in ascolto QUIC (RFC 9000) su quel socket e risponde, con un deposito silenzioso (senza
+   sveglia):
+   ```json
+   { "v": 1, "type": "punch", "id": "<id dell'offerta>", "op": "answer",
+     "addr": "198.51.100.7:51234", "cert": "<b64 SHA-256 del certificato DER>", "ts": … }
+   ```
+4. **Collegamento.** Chi ha offerto (entro 120 s dalla sua offerta) apre una connessione QUIC
+   dallo stesso socket verso l'`addr` della risposta, ALPN `rondine/1`, presentando il proprio
+   certificato. Ognuno accetta solo il certificato con l'impronta ricevuta dall'altro (TLS 1.3 con
+   certificato anche del client): le impronte sono arrivate dentro MLS, quindi nessuno si può
+   mettere in mezzo né spacciarsi per il contatto. Chi risponde accetta una sola connessione,
+   entro 30 s.
+
+Sulla connessione, nei due versi, ogni busta (§6.1) viaggia in uno stream bidirezionale: chi manda
+scrive i byte della busta (b64, come `blob` in §12.2, al massimo 256 KiB) e chiude; chi riceve la
+tratta come una arrivata dalla rete locale e risponde `ok` (2 byte ASCII), oppure chiude lo stream
+con il codice 1 se la sua coda (1000 buste, comune con la rete locale) è piena.
+
+- La connessione resta aperta con un keep-alive QUIC ogni 15 s (che tiene aperto anche il NAT) e
+  si chiude dopo 60 s senza pacchetti o dopo 10 minuti senza buste.
+- Un nuovo tentativo verso lo stesso contatto non prima di 5 minuti dal precedente. Il client
+  offre da solo quando consegna a un contatto passando dal nodo e non ha un collegamento diretto.
+- **Incrocio.** Se arriva un'offerta da un contatto a cui ho appena offerto anch'io, vince
+  l'offerta di chi ha la chiave pubblica più piccola (byte per byte): l'altro risponde a quella e
+  lascia perdere la propria.
+- Con NAT simmetrici (molte reti mobili) il buco non riesce: restano il nodo e la mesh. Se il nodo
+  non risponde non c'è punto d'incontro, e restano le altre vie.
 
 ## 13. Numero verificato
 

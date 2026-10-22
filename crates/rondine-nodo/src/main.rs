@@ -39,6 +39,10 @@ struct Args {
     /// "stun:turn.esempio.it:3478,turn:turn.esempio.it:3478".
     #[arg(long, env = "RONDINE_TURN", value_delimiter = ',')]
     turn: Vec<String>,
+    /// Risponde da sé alle richieste STUN su questo indirizzo UDP (SPEC §11), es. "0.0.0.0:3478":
+    /// serve al buco nel NAT tra i telefoni (§12.8). La porta va aperta verso internet.
+    #[arg(long, env = "RONDINE_STUN")]
+    stun: Option<String>,
     /// Segreto condiviso con coturn (`static-auth-secret`) per le credenziali temporanee.
     #[arg(long, env = "RONDINE_TURN_SEGRETO")]
     turn_segreto: Option<String>,
@@ -80,6 +84,26 @@ async fn main() -> anyhow::Result<()> {
         }
         None => None,
     };
+    let mut turn_urls = args.turn.clone();
+    if let Some(bind) = &args.stun {
+        let socket = tokio::net::UdpSocket::bind(bind)
+            .await
+            .with_context(|| format!("impossibile ascoltare STUN su {bind}"))?;
+        let port = socket.local_addr()?.port();
+        let host = rondine_core::username::node_host(&args.public_url)?;
+        // L'host del nodo senza la porta HTTP ("[::1]:8330" → "[::1]").
+        let host = match host.strip_prefix('[') {
+            Some(v6) => format!("[{}]", v6.split(']').next().unwrap_or_default()),
+            None => host.split(':').next().unwrap_or_default().to_string(),
+        };
+        turn_urls.insert(0, format!("stun:{host}:{port}"));
+        tracing::info!(bind = %bind, "STUN incorporato");
+        tokio::spawn(async move {
+            if let Err(e) = rondine_nodo::serve_stun(socket).await {
+                tracing::error!(error = %e, "STUN fermo");
+            }
+        });
+    }
     let state = AppState::new(Config {
         public_url: args.public_url.clone(),
         node_key: node_key.clone(),
@@ -98,12 +122,12 @@ async fn main() -> anyhow::Result<()> {
             (Some(_), None) => anyhow::bail!("--sms-gateway vuole anche --sms-password"),
             _ => None,
         },
-        turn: if args.turn.is_empty() {
+        turn: if turn_urls.is_empty() {
             None
         } else {
-            tracing::info!(server = %args.turn.join(","), "STUN/TURN per le chiamate");
+            tracing::info!(server = %turn_urls.join(","), "STUN/TURN per chiamate e buco nel NAT");
             Some(rondine_nodo::TurnConfig {
-                urls: args.turn.clone(),
+                urls: turn_urls,
                 secret: args.turn_segreto.clone(),
             })
         },

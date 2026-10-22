@@ -305,3 +305,15 @@ Una riga per modifica: data, cosa è cambiato.
   rimasta sola elimina il gruppo. Sticker: toccando uno sticker in chat (o dopo averne creato
   uno) si sceglie se metterlo tra i preferiti e in quali pacchetti miei, anche nuovi; i pacchetti
   compaiono nel pannello e si rinominano o eliminano tenendo premuta l'icona.
+- 2026-10-22 — Buco nel NAT IPv4 (SPEC §12.8), su principio di Mattia "il diretto vince sul nodo".
+  Ordine di consegna nuovo (§12.4): collegamento diretto vivo (QUIC o rete locale) prima del nodo.
+  STUN minimo in `rondine-core::stun` (vettore RFC 5769), STUN incorporato nel nodo
+  (`--stun 0.0.0.0:3478`, annunciato in `/turn`). Client: modulo `punch` con offerta e risposta
+  `punch` dentro MLS, 5 datagrammi per aprire il NAT, QUIC (quinn) con certificati autofirmati
+  fissati dalle impronte nei due versi, keep-alive 15 s, chiusura dopo 10 minuti senza buste;
+  offerta automatica quando si aggiunge un contatto o si consegna passando dal nodo (al massimo
+  ogni 5 minuti), incrocio risolto dalla chiave più piccola; bloccare chiude il collegamento (bug
+  trovato dal test). CLI `rondine diretto`, FFI `connect_direct` e `wait_incoming`; l'app
+  sincronizza appena arriva una busta diretta. 5 test nuovi in `tests/diretto.rs`; il test che
+  voleva il nodo come via principale ora vuole il diretto. Provato su 127.0.0.1 e avvio dell'app
+  sull'emulatore: il NAT vero va provato con due telefoni.

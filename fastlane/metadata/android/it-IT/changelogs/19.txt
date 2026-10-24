@@ -1,0 +1,1 @@
+L'app non chiede più di verificare il tuo numero con un SMS del nodo: il tuo numero lo verificano i tuoi amici, con uno squillo dalla tua pagina nella loro app. Il nodo non vede nessun numero.

@@ -1,0 +1,1 @@
+The app no longer asks you to verify your number with an SMS from the node: your friends verify it with a ring from your page in their app. The node sees no phone numbers.

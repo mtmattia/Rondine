@@ -1466,6 +1466,8 @@ impl Client {
             .contact_mut(id)
             .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
         c.verified = true;
+        // Confermata di persona: se era la chat a parte di una chiave cambiata, si unisce.
+        self.note_key_change(id);
         self.save()
     }
 
@@ -2079,8 +2081,10 @@ impl Client {
     }
 
     /// Un contatto nuovo ha lo stesso nome utente o numero di un altro con un'altra chiave?
-    /// Allora il codice di sicurezza è cambiato: lo si ricorda per avvisare e, se la chiave
-    /// vecchia non era verificata di persona, la chat di prima continua con la nuova (SPEC §10).
+    /// Allora il codice di sicurezza è cambiato: lo si ricorda per avvisare. La chat di prima
+    /// continua con la chiave nuova solo se questa è confermata (numero verificato via SMS, o
+    /// codice confrontato di persona, l'unico che vale anche contro una vecchia chiave verificata
+    /// di persona); altrimenti resta una chat a parte, segnalata, finché non lo diventa (SPEC §10).
     pub(crate) fn note_key_change(&mut self, id: &PublicKey) {
         let Some(new) = self.state.contacts.iter().find(|c| &c.identity == id) else {
             return;
@@ -2088,6 +2092,7 @@ impl Client {
         let (username, phone) = (new.username.clone(), new.phone.clone());
         let issued = |c: &Contact| verify_card(&c.card).map(|i| i.issued_at).unwrap_or(0);
         let new_issued = issued(new);
+        let (proven, in_person) = (new.trust() != Trust::None, new.verified);
         let Some(old) = self
             .state
             .contacts
@@ -2105,7 +2110,7 @@ impl Client {
             c.previous_key = Some(old.identity);
         }
         // Solo verso la chiave più recente: un messaggio tardivo della vecchia non torna indietro.
-        if !old.verified && new_issued >= issued(&old) {
+        if proven && (!old.verified || in_person) && new_issued >= issued(&old) {
             self.merge_contact(&old, id);
         }
     }
@@ -3903,6 +3908,9 @@ impl Client {
             c.phone = Some(n.clone());
             c.phone_verified_by = Some(verified_by.clone());
         }
+        // Ora che il numero è verificato, la chiave nuova può prendere la chat di prima.
+        self.note_key_change(&contact.identity);
+        self.resend_after_key_change().await;
         self.save()?;
         contact.phone = Some(n);
         contact.phone_verified_by = Some(verified_by);

@@ -425,3 +425,8 @@ Una riga per modifica: data, cosa è cambiato.
   profilo abbandonato; i messaggi rimasti con una spunta sola ripartono da soli verso la chiave
   nuova. Non vale per chi era verificato di persona. Test
   `chiave_nuova_continua_la_stessa_chat` e `contatto_verificato_non_si_sostituisce`.
+- 2026-10-24 — La chat passa alla chiave nuova solo se questa ha il numero verificato via SMS.
+  Senza conferma (chi ha preso il numero o il nome di un amico) resta una chat a parte, mostrata
+  come "(!) nome" con un avviso, e si unisce appena la chiave si conferma (SMS o codice di
+  persona). Test `chiave_nuova_con_numero_verificato_continua_la_stessa_chat`,
+  `chiave_nuova_senza_verifica_e_una_chat_a_parte` e `chat_a_parte_si_unisce_dopo_la_verifica`.

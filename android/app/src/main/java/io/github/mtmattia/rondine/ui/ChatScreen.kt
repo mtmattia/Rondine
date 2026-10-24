@@ -1245,10 +1245,15 @@ private fun KeyBanner(c: uniffi.rondine_ffi.ContactInfo, onVerify: () -> Unit) {
     val changed = c.previousKey != null
     val viaNode = c.source == "nome" || c.source == "rubrica"
     if (!changed && !viaNode) return
-    val text = if (changed) {
-        "Il codice di sicurezza di ${c.name} è cambiato e la chat continua con la chiave nuova. " +
-            "Di solito vuol dire che ha reinstallato l'app, ma potrebbe essere qualcuno che si " +
-            "spaccia per lui o per lei: verificalo."
+    val name = c.name.removePrefix("(!) ")
+    val text = if (changed && c.trust == "nessuno") {
+        "Attenzione: ha il nome o il numero di $name, ma una chiave diversa e nessun SMS lo " +
+            "conferma. Potrebbe essere qualcuno che ha preso il suo numero: per questo è una chat " +
+            "a parte. Fidati solo dopo aver confrontato il codice di sicurezza di persona."
+    } else if (changed) {
+        "Il codice di sicurezza di $name è cambiato e la chat continua con la chiave nuova, " +
+            "confermata dal numero verificato. Di solito vuol dire che ha reinstallato l'app: " +
+            "per esserne certo, confrontate il codice di sicurezza."
     } else if (c.trust == "numero") {
         "Il nodo ha confermato con un SMS il numero di ${c.name}. Per non doverti fidare nemmeno " +
             "del nodo, confrontate il codice di sicurezza."

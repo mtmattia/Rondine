@@ -457,7 +457,11 @@ fn parts(
 }
 
 fn describe(c: &Contact) -> String {
-    let mut s = c.display_name.clone();
+    let mut s = if c.flagged() {
+        format!("(!) {}", c.display_name)
+    } else {
+        c.display_name.clone()
+    };
     if let Some(u) = &c.username {
         s.push_str(&format!(" @{u}"));
     }

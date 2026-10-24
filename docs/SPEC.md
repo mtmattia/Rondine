@@ -635,7 +635,9 @@ Limiti e scadenze: voce ≤ 4 KiB, al massimo 8 voci per luogo, durata massima 3
 - `POST /v1/board/lookup` `{"locs": ["<b64>", …]}` → `{"<loc>": [voci], …}` (solo i luoghi con
   voci);
 
-al massimo 1000 elementi per richiesta, con gli stessi controlli delle richieste singole. Il
+al massimo 1000 elementi per richiesta (corpo fino a 8 MiB per `batch`), con gli stessi
+controlli delle richieste singole. Il client pubblica a lotti di 100 voci (ognuna porta un
+biglietto sigillato, circa 1,5 KB), così resta sotto i 512 KiB dei nodi fino alla 0.1.14. Il
 client tiene i segreti calcolati (`loc`, `key`) per non ripetere l'Argon2 a ogni ricerca, e
 ripubblica una voce solo quando è passata metà della sua durata.
 
@@ -666,6 +668,10 @@ come quando qualcuno reinstalla l'app, o come farebbe un nodo che prova a metter
 La crittografia è la stessa per tutti e tre: il grado dice solo quanto è sicuro che la chiave sia
 davvero di quella persona.
 ## 11. API del nodo (`/v1`)
+
+Ogni errore sotto `/v1/` è `{"error": "<codice>", "message": "<testo in italiano>"}`, anche quelli
+che il nodo non produce da sé (corpo troppo grande → `413 too_large`, JSON non valido, rotta che
+non c'è): un errore in un altro formato vuol dire che l'indirizzo non è un nodo Rondine.
 
 | Metodo e percorso | Auth | Cosa fa |
 |---|---|---|

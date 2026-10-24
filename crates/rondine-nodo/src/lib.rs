@@ -427,7 +427,10 @@ pub fn router(state: AppState) -> Router {
             "/v1/names/{name}/password",
             put(put_name_password).get(get_name_password),
         )
-        .route("/v1/board/batch", post(put_board_batch))
+        .route(
+            "/v1/board/batch",
+            post(put_board_batch).layer(DefaultBodyLimit::max(MAX_BOARD_BATCH_BYTES)),
+        )
         .route("/v1/board/lookup", post(lookup_board))
         .route("/v1/board/{loc}", put(put_board).get(get_board))
         .route("/v1/phone/lookup", post(phone::lookup_batch))
@@ -441,7 +444,39 @@ pub fn router(state: AppState) -> Router {
         .route("/invito", get(web::invite_page))
         .route("/{at_name}", get(web::name_page))
         .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES * 2))
+        .layer(axum::middleware::from_fn(json_errors))
         .with_state(state)
+}
+
+/// Anche gli errori prodotti da axum (corpo troppo grande, JSON non valido, rotta che non c'è)
+/// escono come `{"error", "message"}` (SPEC §11): altrimenti il client li scambia per la pagina
+/// di un sito che non è un nodo. Le pagine web (`/invito`, `/@nome`) restano come sono.
+async fn json_errors(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let api = req.uri().path().starts_with("/v1/");
+    let res = next.run(req).await;
+    let status = res.status();
+    let is_json = res
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json"));
+    if !api || is_json || !(status.is_client_error() || status.is_server_error()) {
+        return res;
+    }
+    let text = axum::body::to_bytes(res.into_body(), 4096)
+        .await
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let (code, message) = match status {
+        StatusCode::PAYLOAD_TOO_LARGE => {
+            ("too_large", "richiesta troppo grande per il nodo".into())
+        }
+        StatusCode::NOT_FOUND => ("not_found", "il nodo non conosce questa richiesta".into()),
+        StatusCode::METHOD_NOT_ALLOWED => ("method_not_allowed", "metodo non ammesso".into()),
+        s if s.is_server_error() => ("internal", "errore interno del nodo".into()),
+        _ => ("bad_request", format!("richiesta non valida: {text}")),
+    };
+    ApiError::new(status, code, message).into_response()
 }
 
 /// Avvia il nodo su un listener già aperto, con la pulizia periodica.
@@ -1378,6 +1413,8 @@ async fn put_board(
 
 /// Al massimo tanti elementi per richiesta a lotti (SPEC §9, §13.3).
 pub const MAX_BATCH: usize = 1000;
+/// Corpo di `POST /v1/board/batch`: `MAX_BATCH` voci da `MAX_ENTRY_BYTES` in base64, con firme.
+const MAX_BOARD_BATCH_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Deserialize)]
 struct BoardBatch {

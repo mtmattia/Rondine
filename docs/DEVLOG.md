@@ -411,3 +411,8 @@ Una riga per modifica: data, cosa è cambiato.
   stessa identità; profilo da capo con stesso nome e password → nome ripreso. Corretti durante la
   prova: due backup insieme facevano due file (mutex) e il correttore cambiava il nome utente.
   1 test nel core (+1 nel backup), 4 di accettazione.
+- 2026-10-24 — Bug: con una rubrica di qualche centinaio di numeri la ricerca falliva con "questo
+  indirizzo non sembra un nodo Rondine". La pubblicazione mandava fino a 1000 voci (circa 1,5 MB)
+  e il nodo, con il limite di 512 KiB, rispondeva 413 in testo semplice. Ora il client pubblica a
+  lotti di 100, `POST /v1/board/batch` accetta fino a 8 MiB e tutti gli errori sotto `/v1/` escono
+  in JSON. Test `rubrica_grande_si_pubblica_a_lotti` e `errori_del_nodo_sempre_in_json`.

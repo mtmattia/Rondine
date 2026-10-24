@@ -2338,3 +2338,48 @@ async fn tre_gradi_di_fiducia() -> R {
     assert_eq!(c.trust(), Trust::InPerson);
     Ok(())
 }
+
+/// Bug: con una rubrica grande (centinaia di numeri) la pubblicazione superava il limite di
+/// dimensione del nodo, che rispondeva in testo semplice: "non sembra un nodo Rondine".
+#[tokio::test]
+async fn rubrica_grande_si_pubblica_a_lotti() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    mattia.set_phone("3401112233")?;
+    silvia.set_phone("3402223344")?;
+    let mut rubrica: Vec<String> = (0..600).map(|i| format!("+39 333 000 {i:04}")).collect();
+    rubrica.push("3402223344".into());
+    mattia.scan_address_book(&rubrica).await?;
+    let found = silvia.scan_address_book(&["3401112233".into()]).await?;
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].contact.display_name, "Mattia");
+    Ok(())
+}
+
+/// Anche gli errori che produce axum da sé escono in JSON, con un messaggio in italiano.
+#[tokio::test]
+async fn errori_del_nodo_sempre_in_json() -> R {
+    let node = start_node().await?;
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let http = reqwest::Client::new();
+    let big = http
+        .post(format!("{node}/v1/phone/lookup"))
+        .header("content-type", "application/json")
+        .body(vec![b' '; 2 * 1024 * 1024])
+        .send()
+        .await?;
+    assert_eq!(big.status(), 413);
+    let v: serde_json::Value = big.json().await?;
+    assert_eq!(v["error"], "too_large");
+    let bad = http
+        .post(format!("{node}/v1/board/lookup"))
+        .body("non json")
+        .send()
+        .await?;
+    assert!(bad.status().is_client_error());
+    let v: serde_json::Value = bad.json().await?;
+    assert!(v["message"].is_string(), "{v}");
+    Ok(())
+}

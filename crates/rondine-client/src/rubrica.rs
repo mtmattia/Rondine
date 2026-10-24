@@ -17,6 +17,9 @@ use crate::{BOARD_TTL_SECS, Client, Error, Result};
 
 /// Elementi per richiesta a lotti (SPEC §9).
 const BATCH: usize = 1000;
+/// Voci pubblicate per richiesta: ognuna porta un biglietto sigillato (circa 1,5 KB), e i nodi
+/// fino alla 0.1.14 accettano corpi di 512 KB al massimo.
+const PUT_BATCH: usize = 100;
 
 /// Un numero della rubrica che corrisponde a qualcuno su Rondine.
 #[derive(Debug, Clone)]
@@ -279,7 +282,7 @@ impl Client {
             numbers.push(s.number.clone());
         }
         for board in self.state.boards.clone() {
-            for part in puts.chunks(BATCH) {
+            for part in puts.chunks(PUT_BATCH) {
                 self.net
                     .call(
                         Method::POST,

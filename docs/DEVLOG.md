@@ -435,3 +435,4 @@ Una riga per modifica: data, cosa è cambiato.
   chat e i suoi messaggi da questo telefono, il contatto resta e la chat ricompare col prossimo
   messaggio, come su WhatsApp. "Svuota chat" la lascia nella lista. Test
   `elimina_chat_e_ricompare_con_un_messaggio`.
+- 2026-10-24 — App: appena salvato il numero (configurazione iniziale, Nuova chat, Impostazioni) compare "Verifica adesso il tuo numero", che manda subito l'SMS e chiede il codice (con la password se il numero è protetto).

@@ -749,6 +749,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             run {
                 val n = Repo.client().setPhone(value)
                 Repo.refresh()
+                Repo.askVerifyPhone.value = true
                 "Numero salvato: $n"
             }
         }

@@ -483,3 +483,4 @@ Una riga per modifica: data, cosa è cambiato.
   ricorda le chiamate degli ultimi 2 minuti (risponde anche se la richiesta arriva dopo), e l'app
   chiede filtro chiamate e permessi all'avvio, con le istruzioni se Android li blocca. Test
   `la_richiesta_di_verifica_sveglia_il_telefono`; provato sull'emulatore il percorso dei permessi.
+- 2026-10-25 — Versione 0.1.19 (versionCode 20).

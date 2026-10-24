@@ -1,0 +1,1 @@
+Number verification with a ring fixed: the request wakes the other phone and the ring arrives when Rondine is ready for it. At startup the app asks to be the call screener and for the permissions it needs, and explains how to unlock them if Android blocks them. Direct connection over IPv6 too, possible more often on 4G and 5G.

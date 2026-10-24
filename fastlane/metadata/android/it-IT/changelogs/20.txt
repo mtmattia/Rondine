@@ -1,0 +1,1 @@
+Verifica del numero con uno squillo sistemata: la richiesta sveglia il telefono dell'altro e lo squillo arriva quando Rondine è pronta a riceverlo. All'avvio l'app chiede di usarla come filtro chiamate e i permessi che servono, e spiega come sbloccarli se Android li blocca. Collegamento diretto anche su IPv6, più spesso possibile in 4G e 5G.

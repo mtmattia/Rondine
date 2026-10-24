@@ -973,43 +973,58 @@ Obiettivo: chi gestisce un nodo non vede **chi scrive a chi**, **quanto** si scr
 di telefono**. Oggi (§6, §9, §13) vede la quantità e la dimensione dei messaggi depositati, il
 permesso di ogni mittente, gli IP e, verificando, il numero in chiaro.
 
-### 14.1 Il numero lo vede solo il gateway SMS
+Ordine dei metodi per il numero, deciso con Mattia: **squillo**, poi **SMS tra amici**, poi **QR di
+persona**. Niente gateway SMS e niente registro dei numeri sul nodo.
 
-Tre parti diverse, nessuna delle quali sa tutto:
+### 14.1 Il numero lo verificano gli amici, non il nodo
 
-| Chi | Sa | Non sa |
-|---|---|---|
-| **gateway SMS** | il numero, e che è su Rondine | la chiave, il nodo, i contatti |
-| **nodo** | che una chiave ha un numero confermato | quale numero |
-| **chi ti ha in rubrica** | il tuo numero (lo aveva già) e la tua chiave | niente di più |
+Il tuo numero lo conosce già chi ti ha in rubrica: la verifica la fa lui, da telefono a telefono.
+Nessun nodo e nessun gateway vede numeri o codici; il registro dei numeri (§13) e il gateway SMS
+(§13.4) non servono più.
 
-1. Il gateway è un servizio a sé, con una sua chiave HPKE pubblicata (come la chiave di sigillo,
-   §6.3), che comanda il telefono che spedisce gli SMS (§13.4). Ha senso quando lo gestisce
-   qualcuno diverso da chi gestisce il nodo: se è la stessa persona, unisce le due metà.
-2. Il client sceglie un segreto casuale `r` (32 byte) e calcola l'**impronta**
-   `c = blake3("rondine v2 numero" || numero || r)`. Chiude `{numero, r}` per il gateway (HPKE) e
-   manda al proprio nodo la busta chiusa e `c`. Il nodo la inoltra senza poterla aprire.
-3. Il gateway apre la busta, controlla che `c` torni, manda l'SMS con il codice, e alla conferma
-   del codice (che passa ancora chiuso attraverso il nodo) firma la **ricevuta**
-   `{c, issued_at}`. Il gateway tiene per ogni numero solo l'ultima `c` confermata.
-4. Il nodo lega la ricevuta alla chiave: firma il **timbro** `{c, identity, issued_at}` e lo tiene
-   nel suo registro (`c` → chiave). Non conosce né il numero né `r`: non può provare tutti i
-   numeri, perché senza `r` l'impronta non si ricalcola.
-5. **Stesso numero confermato di nuovo** (telefono nuovo, SIM rubata): il gateway lo riconosce e
-   dice al nodo "`c'` sostituisce `c`". Il nodo applica la password (§3.4: `409 phone_locked`
-   senza la prova) e, se passa, segna `c` come **non più valido**.
-6. Il client mette nel biglietto della bacheca (§9) il timbro, la ricevuta e `r`. Chi apre il
-   biglietto (cioè chi conosce i due numeri) ricalcola `c` dal numero che ha in rubrica e da `r`,
-   controlla le firme di gateway e nodo, e chiede al nodo, senza dire chi è:
-   `POST /v1/stamps/check {c, identity}` → `{valid}`. Un timbro sostituito o di un profilo
-   abbandonato (§9, fermo da più di 3 giorni) non vale: il biglietto si scarta.
+| Chi | Sa |
+|---|---|
+| **nodo** | niente: né numeri, né codici, né chi verifica chi |
+| **chi ti verifica** | il tuo numero (lo aveva già) e che la tua chiave ha quella SIM |
+| **operatore telefonico** | che quei due numeri si sono chiamati o scritti (come per ogni chiamata) |
 
-Risultato: in rubrica si trova solo chi ha confermato il **suo** numero, nessuno può appendere un
-biglietto con un numero non suo, e i biglietti dei profili abbandonati non agganciano più. Non
-c'è un elenco interrogabile per numero: ci si trova solo **in due**, se ci si ha a vicenda in
-rubrica. Limite: chi conosce entrambi i numeri può aprire il biglietto della coppia e vedere che
-quelle due persone si conoscono (non legge le chat, e non può impersonarle).
+**Trovarsi.** Come oggi con la bacheca a coppie (§9): ci si trova solo se ci si ha a vicenda in
+rubrica, e il contatto trovato è **non verificato**. I biglietti dei profili fermi da più di 3
+giorni si scartano (§9).
 
+**Verificare: chi verifica chiama o scrive il numero che ha in rubrica**, e la prova torna dalla
+chiave da verificare, dentro la chat cifrata (MLS). Una chiave falsa data da qualcuno nel mezzo
+non riceve lo squillo né l'SMS, che arrivano alla SIM vera: la risposta della SIM vera arriva
+dalla chiave vera, e la chiave falsa non passa mai la prova. Resta solo chi ha in mano la SIM
+(furto o duplicato), come per ogni verifica via telefono.
+
+1. **Squillo** (metodo principale; gratis e automatico).
+   - Chi verifica manda nella chat `{"type": "verify_ring", "id"}` (che è partito non dice quando),
+     aspetta un tempo a caso tra 3 e 20 s e chiama il numero, chiudendo dopo 4 s; poi una
+     seconda volta dopo un altro tempo a caso. Annota gli istanti di inizio delle chiamate.
+   - Il telefono chiamato vede nel registro le chiamate perse da quel numero e risponde nella
+     chat `{"type": "verify_ring_seen", "id", "at": [t1, t2]}` (secondi, ora del telefono).
+   - Chi verifica accetta se entrambi gli istanti coincidono con i suoi entro 2 s (tenendo conto
+     della differenza tra gli orologi, stimata dai messaggi della chat). Indovinarli a caso riesce
+     circa una volta su 200.
+   - Serve il permesso di leggere il registro chiamate a chi viene verificato: c'è nella versione
+     libera (F-Droid, GitHub). Dove manca (versione Play, iPhone) si usa l'SMS.
+2. **SMS tra amici** (alternativa).
+   - Chi verifica sceglie un codice a caso di 8 cifre e lo manda **dalla sua SIM** al numero, con
+     l'SMS già scritto dall'app: "Rondine: <nome> ti chiede di confermare il tuo numero, codice
+     12345678 — rondine:verifica/12345678".
+   - Chi lo riceve tocca il link (o copia il codice) e la sua app lo rimanda nella chat
+     `{"type": "verify_sms", "id", "code"}`. Chi verifica controlla codice e chiave.
+3. **QR di persona** (§10): la garanzia più forte, senza telefono né operatore.
+
+Esito: il contatto passa al grado **"numero verificato da te"** (§10), per quella chiave e quel
+numero. Vale solo per chi ha verificato: ognuno verifica i suoi contatti. Se la chiave del
+contatto cambia (§10, reinstallazione), la verifica decade e l'app propone di rifarla; con lo
+squillo è un tocco solo.
+
+**In tutto il mondo.** Non serve un gateway né un fornitore di SMS per ogni Paese: ognuno usa la
+sua tariffa. Uno squillo non risposto di solito non costa; un SMS internazionale o in roaming
+può costare a chi lo manda, e l'app lo dice prima di mandarlo.
 ### 14.2 Avviso di giacenza al posto del deposito
 
 Come la posta quando non ti trovano: il messaggio **resta sul telefono di chi scrive**, al nodo

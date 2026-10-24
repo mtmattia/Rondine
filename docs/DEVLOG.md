@@ -450,3 +450,6 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-24 — Mesh tra amici facoltativa e spenta di base (Impostazioni → Privacy → "Aiuto dagli
   amici", CLI `rondine mesh si|no`): spenta, i messaggi che non partono aspettano sul telefono e
   non si fa da postino per gli altri. Test `mesh_spenta_di_base`.
+- 2026-10-24 — SPEC §14.1 riscritta: il numero lo verificano gli amici, da telefono a telefono
+  (squillo con istanti casuali, poi SMS con codice dalla SIM di chi verifica, poi QR), al posto
+  della ricevuta del gateway. Il nodo non vede numeri né codici.

@@ -843,7 +843,8 @@ mod tests {
             "https://non-stun".to_string(),
         ];
         let got = stun_servers(&urls).await;
-        let want: Vec<SocketAddr> = ["127.0.0.1:5000", "127.0.0.1:3478"]
+        // Anche IPv6: serve al buco su IPv6 (SPEC §12.8).
+        let want: Vec<SocketAddr> = ["127.0.0.1:5000", "127.0.0.1:3478", "[::1]:3478"]
             .iter()
             .filter_map(|s| s.parse().ok())
             .collect();

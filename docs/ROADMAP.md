@@ -112,6 +112,9 @@ Il contenuto è già illeggibile. Restano da nascondere al gestore del nodo:
 - [ ] dimensioni dei messaggi arrotondate (padding) e ritiri a intervalli fissi
 - [x] avvisi sulla chiave e tre gradi di fiducia (di persona, numero, non verificato; SPEC §10)
 - [ ] Tor (Arti) nell'app e nodi come servizi onion: il nodo non vede nemmeno l'IP
+- [x] cassaforte sul nodo: backup automatico con password, ripristino con nome o numero anche su
+      un altro telefono, promemoria nel backup di Android, nome e numero protetti dalla password (SPEC §7.8)
+- [ ] "Salva nella galleria" e salvataggio automatico dei file ricevuti in Pictures/Rondine
 - [ ] nessun log degli IP nel nodo, scritto e verificabile
 
 ### M3 — Senza rete

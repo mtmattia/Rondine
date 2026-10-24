@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 e successivi: nel backup di sistema e nel passaggio a un telefono nuovo va solo il
+     promemoria con nome utente o numero e nodo (SPEC §7.8). Messaggi e chiavi restano fuori. -->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <include domain="sharedpref" path="ricordo.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="ricordo.xml" />
+    </device-transfer>
+</data-extraction-rules>

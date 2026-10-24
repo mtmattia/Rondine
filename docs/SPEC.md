@@ -55,7 +55,8 @@ l'univocità è per nodo, come per l'email: `nome@nodo`.
   - **Recupero col numero.** Se chi tiene il nome ha verificato un numero su questo nodo (§13),
     il nome passa a un'altra identità che verifica lo stesso numero sullo stesso nodo. Il nodo
     ricorda l'hash del numero accanto al nome (quando lo si prende, o quando poi si verifica il
-    numero). Come su WhatsApp, chi controlla il numero controlla il nome.
+    numero). Come su WhatsApp, chi controlla il numero controlla il nome. Se però chi tiene il
+    nome ha una cassaforte (§7.8), serve anche che sia fermo da almeno 7 giorni.
   - **Scadenza.** Un nome torna libero quando l'identità che lo tiene non usa più nessuna sua
     casella del nodo (nessuna richiesta firmata dal proprietario) da **180 giorni**. Il nodo
     aggiorna "visto l'ultima volta" al massimo una volta all'ora per casella.
@@ -476,6 +477,39 @@ conversazioni cambiano a ogni messaggio, uno vecchio non serve) né foto e docum
 I messaggi arrivati dopo il backup e prima del ripristino non si possono più leggere. Il backup
 va usato su un telefono alla volta.
 
+**Cassaforte sul nodo (backup automatico con password).** Per non perdere il profilo se si
+cancella l'app o si cambia telefono, il client tiene una copia del backup sul **proprio nodo**,
+cifrata con una **password** scelta dalla persona. Il nodo conserva solo dati cifrati: senza la
+password non apre niente.
+
+- **Password:** almeno 8 caratteri. Al primo avvio (e la prima volta dopo l'aggiornamento che la
+  introduce) l'app la chiede; si può rimandare.
+- **Chiavi:** `sale` = 16 byte casuali; `radice = Argon2id(password, sale, m = 65536 KiB, t = 3,
+  p = 1, 32 byte)`; `chiave = blake3_derive_key("rondine v1 cassaforte chiave", radice)`;
+  `accesso = blake3_derive_key("rondine v1 cassaforte accesso", radice)`;
+  `verifica = blake3(accesso)`. Il client tiene `sale`, `chiave` e `accesso`, non la password.
+- **Contenuto:** `nonce (24 byte) || XChaCha20-Poly1305(chiave, nonce, dati)`, con `dati` lo
+  stesso JSON del file di backup. Al massimo 32 MiB.
+- **Quando:** subito dopo aver scelto la password, poi alla sincronizzazione se l'ultima copia ha
+  più di 6 ore. Cambiare password rifà la copia con un sale nuovo.
+- **Ripristino (anche su un altro telefono):** si dà il **nome utente** (`nome@nodo`) oppure il
+  **numero verificato** (§13) e la password. Il client chiede il sale
+  (`POST /v1/vault/find`), ricava le chiavi e manda `accesso` (`POST /v1/vault/open`): il nodo
+  risponde con la cassaforte solo se `blake3(accesso) = verifica`. Al massimo **10 tentativi
+  sbagliati al giorno** per cassaforte. Poi il ripristino prosegue come quello dal file.
+- **Verifica in due passaggi:** chi ha una cassaforte non perde nome (§3.2) e numero (§13.2) con
+  un semplice SMS: un'altra identità li prende solo se la cassaforte è di un'identità ferma da
+  almeno **7 giorni**, come su WhatsApp. Così un duplicato della SIM non basta.
+- **Rilevamento della vecchia sessione:** l'app chiede ad Android di salvare nel backup del
+  sistema (Google o Seedvault, cifrato col blocco schermo) solo un **promemoria** con nome utente,
+  numero e nodo, mai chiavi o messaggi. Reinstallando l'app, Android lo rimette a posto e l'app
+  propone "Ripristina il profilo di @nome": basta la password. Senza promemoria lo si cerca a mano
+  con nome o numero.
+
+Limite noto: chi gestisce il nodo ha la cassaforte e potrebbe provare tutte le password offline,
+pagando un Argon2id da 64 MiB per tentativo. Una password lunga lo rende inutile; per chi tiene il
+nodo in casa il problema non c'è. Chi scrive dall'esterno invece ha solo i 10 tentativi al giorno.
+
 ### 7.9 Chiamate
 
 Voce e video viaggiano **direttamente tra i telefoni** con WebRTC, cifrati end-to-end
@@ -665,6 +699,10 @@ davvero di quella persona.
 | `POST /v1/inboxes/{inbox}/phone/confirm` | proprietario | `{code, card}` → `Signed<PhoneClaim>` |
 | `DELETE /v1/inboxes/{inbox}/phone` | proprietario | toglie il numero dall'elenco |
 | `GET /v1/phone/{phone_hash}` | — | `{card, claim}` (§13.3) |
+| `PUT /v1/inboxes/{inbox}/vault` | proprietario | `{salt, verifier, blob}` (b64): salva la cassaforte (§7.8) |
+| `DELETE /v1/inboxes/{inbox}/vault` | proprietario | toglie la cassaforte |
+| `POST /v1/vault/find` | — | `{name}` o `{phone_hash}` → `{salt}` |
+| `POST /v1/vault/open` | — | `{name}` o `{phone_hash}`, `{auth}` → `{blob, updated_at}` |
 
 Gli errori sono `{"error": "<codice>", "message": "<testo>"}` con lo stato HTTP adatto.
 
@@ -859,7 +897,8 @@ p = 1, 32 byte)`. Lento apposta: chi volesse provare tutti i numeri deve pagare 
 2. `POST /v1/inboxes/{inbox}/phone/confirm` (proprietario) `{code, card}`: con il codice giusto
    (al massimo 5 tentativi) il nodo firma l'attestazione e la pubblica nell'elenco dei numeri,
    insieme al biglietto. Un numero già verificato da un altro passa a chi lo conferma adesso
-   (come quando una SIM cambia proprietario).
+   (come quando una SIM cambia proprietario), salvo che chi lo aveva abbia una cassaforte e non sia
+   fermo da almeno 7 giorni (§7.8): allora `409 phone_locked`.
 
 ```json
 Signed<PhoneClaim>, firmato dal nodo:

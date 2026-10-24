@@ -375,3 +375,17 @@ Una riga per modifica: data, cosa è cambiato.
   (`[verificato di persona]`…), FFI `trust`, app: icona piena o vuota accanto al nome, riquadro
   con la spiegazione nella pagina del numero di sicurezza, banner apposito per il numero
   verificato. 1 test. Versione 0.1.14.
+- 2026-10-24 — Cassaforte sul nodo (SPEC §7.8), richiesta di Mattia: "il backup parte da subito,
+  se cancello l'app rileva la vecchia sessione, ripristina da altro dispositivo, password a 2
+  fattori". Password → Argon2id (64 MiB) → chiave di cifratura e prova d'accesso separate; il nodo
+  tiene solo blob, sale e `blake3(accesso)`, la restituisce con la prova giusta (10 errori al
+  giorno). Copia subito e poi ogni 6 ore alla sync. Ripristino con nome utente o numero verificato
+  + password (`rondine recupera`, FFI `restore_from_vault`). Verifica in due passaggi: con la
+  cassaforte, nome e numero non passano a un'altra identità con un SMS finché il proprietario non
+  è fermo da 7 giorni (`phone_locked`). App: dialogo "Proteggi il tuo profilo" al primo avvio e
+  dopo l'aggiornamento (con il nome utente se manca; "Più tardi" lo rimanda di un giorno), voce in
+  Impostazioni → Chat, "Ripristina da un altro dispositivo" all'inizio, e promemoria (nome o numero
+  e nodo, niente segreti) nel backup di Android: reinstallando, "Bentornato! @nome". Provato
+  sull'emulatore con il trasporto locale di bmgr: disinstallata e reinstallata, ripristinata la
+  stessa identità. 1 test nel core, 3 di accettazione. Argon2 ottimizzato anche nei test (8 s →
+  0,4 s).

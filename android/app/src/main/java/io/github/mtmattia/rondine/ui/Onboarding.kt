@@ -83,6 +83,18 @@ fun Onboarding() {
     var busy by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    // Reinstallazione: Android ha rimesso il promemoria, si propone subito il ripristino (SPEC §7.8).
+    var old by remember { mutableStateOf(Repo.oldSession()) }
+    var otherDevice by remember { mutableStateOf(false) }
+    old?.let { o ->
+        VaultRestoreDialog(o.who, o.node, found = o.label, onDismiss = {
+            Repo.forgetOldSession()
+            old = null
+        })
+    }
+    if (otherDevice) {
+        VaultRestoreDialog("", defaultNode(), found = null, onDismiss = { otherDevice = false })
+    }
     var backupBytes by remember { mutableStateOf<ByteArray?>(null) }
     val openBackup = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
@@ -137,8 +149,11 @@ fun Onboarding() {
                 )
                 Spacer(Modifier.height(24.dp))
                 Button(onClick = { started = true }, Modifier.fillMaxWidth()) { Text("Inizia") }
+                TextButton(onClick = { otherDevice = true }, enabled = !busy) {
+                    Text("Ripristina da un altro dispositivo")
+                }
                 TextButton(onClick = { openBackup.launch(arrayOf("*/*")) }, enabled = !busy) {
-                    Text("Ripristina da un backup")
+                    Text("Ripristina da un file di backup")
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
                 if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)

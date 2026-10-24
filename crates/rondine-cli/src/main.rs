@@ -52,6 +52,25 @@ enum Cmd {
     },
     /// Salva un backup cifrato del profilo e stampa il codice per aprirlo (SPEC §7.8).
     Backup { file: PathBuf },
+    /// Cassaforte sul nodo (SPEC §7.8): senza opzioni copia adesso il profilo e dice com'è messa.
+    Cassaforte {
+        /// Sceglie o cambia la password (almeno 8 caratteri) e copia subito il profilo.
+        #[arg(long)]
+        password: Option<String>,
+        /// Toglie la cassaforte dal nodo.
+        #[arg(long)]
+        togli: bool,
+    },
+    /// Ripristina il profilo dalla cassaforte del nodo, anche su un altro dispositivo.
+    Recupera {
+        /// Nome utente (mattia, @mattia) o numero verificato.
+        chi: String,
+        /// Il nodo della cassaforte.
+        #[arg(long)]
+        nodo: String,
+        #[arg(long)]
+        password: String,
+    },
     /// Mostra chi sei e il tuo link d'invito.
     Io,
     /// Aggiunge il nodo, o passa a un altro (la vecchia casella si ritira ancora per 30 giorni).
@@ -823,6 +842,23 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if let Cmd::Recupera {
+        chi,
+        nodo,
+        password,
+    } = &cli.cmd
+    {
+        let mut c = Client::restore_from_vault(&dir, nodo, chi, password).await?;
+        println!("Profilo ripristinato dalla cassaforte in {}", dir.display());
+        println!("Chiave: {}", c.identity());
+        let s = c.sync_all().await?;
+        print_events(&s.events, &c);
+        println!(
+            "Chat riaperte con i contatti; i gruppi ti riaggiungono quando l'amministratore è in linea."
+        );
+        return Ok(());
+    }
+
     let mut c = Client::open(&dir).with_context(|| {
         format!(
             "nessun profilo in {} (crealo con `rondine crea --nome … --nodo …`)",
@@ -831,12 +867,28 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     match cli.cmd {
-        Cmd::Crea { .. } | Cmd::Ripristina { .. } | Cmd::Ritaglia { .. } => {}
+        Cmd::Crea { .. } | Cmd::Ripristina { .. } | Cmd::Recupera { .. } | Cmd::Ritaglia { .. } => {
+        }
         Cmd::Backup { file } => {
             let (data, code) = c.export_backup()?;
             std::fs::write(&file, data).context("scrittura del backup")?;
             println!("Backup salvato in {}.", file.display());
             println!("Codice per aprirlo (annotalo, non si può recuperare):\n{code}");
+        }
+        Cmd::Cassaforte { password, togli } => {
+            if togli {
+                c.remove_vault().await?;
+                println!("Cassaforte tolta dal nodo.");
+            } else {
+                match password {
+                    Some(p) => c.set_vault_password(&p).await?,
+                    None => c.backup_to_vault().await?,
+                }
+                println!(
+                    "Profilo copiato nella cassaforte del nodo. Si ricopia da solo ogni 6 ore. Per ripristinarlo: `rondine recupera <nome o numero> --nodo {} --password …`",
+                    c.state().node
+                );
+            }
         }
         Cmd::Nodo { url } => {
             c.set_node(&url).await?;

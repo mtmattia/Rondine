@@ -33,9 +33,17 @@ internet:
 - l'identificativo della tua casella, la tua chiave pubblica e la dimensione dei dati cifrati;
 - l'indirizzo della sveglia push (UnifiedPush), se attivi le notifiche: la sveglia non contiene
   né mittente né contenuto;
-- il nome utente, se ne scegli uno: è pubblico per scelta, e lo puoi liberare;
+- il nome utente, se ne scegli uno: è pubblico per scelta, e lo puoi liberare. Il nodo ricorda
+  anche quando hai usato la tua casella l'ultima volta (al massimo una volta all'ora), perché i nomi
+  abbandonati da 180 giorni tornano liberi, e accanto al nome l'hash del numero verificato, se ne
+  hai uno, perché chi verifica lo stesso numero possa recuperarlo;
 - **una sola eccezione, solo se la chiedi:** per verificare il tuo numero con un SMS il tuo nodo
   vede il numero una volta per mandare il codice, poi ne conserva solo un hash lento (Argon2id).
+
+**Limite noto:** chi scrive deposita il messaggio collegandosi al nodo di chi riceve, quindi quel
+nodo vede l'indirizzo IP di chi deposita. Se chi scrive usa lo stesso nodo (o il nodo ne conosce
+l'indirizzo per altre vie), il gestore potrebbe dedurre chi scrive a chi dall'IP. Il contenuto resta
+illeggibile; nasconderlo del tutto richiede di depositare attraverso altri (vedi ROADMAP).
 
 I messaggi restano sul nodo finché il telefono non li ritira, al massimo 30 giorni; poi vengono
 cancellati.

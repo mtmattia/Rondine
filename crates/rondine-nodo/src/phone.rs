@@ -166,6 +166,8 @@ pub async fn confirm(
     // Un numero sta in una casella sola: se questa ne aveva un altro, lo lascia.
     db.delete_phone_dir(&inbox)?;
     db.put_phone_dir(&p.phone_hash, &inbox, &entry)?;
+    // I nomi di chi verifica si potranno recuperare con questo numero (SPEC §3.2).
+    db.set_names_phone(&owner.to_b64(), &p.phone_hash)?;
     db.phone_done(&inbox)?;
     Ok(Json(claim))
 }

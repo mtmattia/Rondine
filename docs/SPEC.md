@@ -51,7 +51,14 @@ l'univocità è per nodo, come per l'email: `nome@nodo`.
 - Nell'app si mostra `@nome` se il nodo è quello predefinito della persona che guarda, altrimenti
   `@nome@nodo`.
 - Il nodo assegna un nome al primo che lo chiede. Solo la stessa identità può aggiornarlo o
-  liberarlo.
+  liberarlo, con due eccezioni (per chi ha perso il telefono o cancellato l'app senza backup):
+  - **Recupero col numero.** Se chi tiene il nome ha verificato un numero su questo nodo (§13),
+    il nome passa a un'altra identità che verifica lo stesso numero sullo stesso nodo. Il nodo
+    ricorda l'hash del numero accanto al nome (quando lo si prende, o quando poi si verifica il
+    numero). Come su WhatsApp, chi controlla il numero controlla il nome.
+  - **Scadenza.** Un nome torna libero quando l'identità che lo tiene non usa più nessuna sua
+    casella del nodo (nessuna richiesta firmata dal proprietario) da **180 giorni**. Il nodo
+    aggiorna "visto l'ultima volta" al massimo una volta all'ora per casella.
 
 Record (`Signed<NameClaim>`, firmato dall'identità):
 
@@ -123,6 +130,11 @@ svegliare il destinatario.
   "expires_at": null
 }
 ```
+
+`label` è un promemoria generico (`invito`, `pubblico`, `contatto`, `gruppo`, …) e **non deve
+identificare il contatto**: il permesso viaggia in ogni deposito, e un'etichetta con la chiave di
+chi scrive direbbe al nodo chi parla con chi. Quale permesso è di quale contatto lo sa solo il
+telefono che l'ha chiesto (per revocarlo).
 
 Il nodo verifica firma, casella, scadenza, che l'`id` non sia revocato e un limite di frequenza
 per `id`. Un permesso revocato non funziona più; per bloccare un contatto basta revocare il suo.

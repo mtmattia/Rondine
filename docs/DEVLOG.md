@@ -343,3 +343,11 @@ Una riga per modifica: data, cosa è cambiato.
   rifiutato resta nella chat con una ✗ rossa, toccandolo "Mancato invio" con la causa e Riprova
   (CLI `rondine riprova`). L'app mostra subito il testo con una freccetta blu "in invio" e
   svuota la casella. 3 test nuovi; provato sull'emulatore (✗, finestra, Riprova).
+- 2026-10-24 — Nomi utente recuperabili (SPEC §3.2): chi verifica lo stesso numero sullo stesso
+  nodo riprende il nome (il nodo tiene l'hash del numero accanto al nome), e i nomi di identità che
+  non usano il nodo da 180 giorni tornano liberi (`last_seen` delle caselle, aggiornato al più ogni
+  ora; pulizia oraria). Migrazione automatica del database del nodo. Liberato a mano `mymattia` sul
+  nodo di Mattia (profilo cancellato senza backup). Fuga di metadati corretta: l'etichetta dei
+  permessi per i contatti era `contatto:<chiave corta>` e viaggiava in ogni deposito, quindi il
+  nodo poteva sapere chi scrive a chi; ora è solo `contatto` (SPEC §5). PRIVACY.md: limite noto
+  dell'IP di chi deposita; ROADMAP: sezione metadati. 3 test nuovi.

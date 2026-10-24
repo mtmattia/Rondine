@@ -2134,3 +2134,100 @@ async fn nome_e_info_del_profilo() -> R {
     assert!(silvia.about_of(&im).is_none());
     Ok(())
 }
+
+/// Verifica il numero di un profilo con il codice "in prova" del nodo.
+async fn verify_phone(c: &mut Client, state: &AppState, phone: &str) -> R {
+    c.request_phone(phone).await?;
+    let code = sms_code(
+        state,
+        &rondine_core::phone::normalize(phone, rondine_core::phone::DEFAULT_COUNTRY)?,
+    )?;
+    c.confirm_phone(&code).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn nome_recuperato_col_numero_verificato() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let tmp = TempDir::new()?;
+    let mut vecchio = profile(&tmp, "Mattia", &node).await?;
+    verify_phone(&mut vecchio, &state, "340 111 2233").await?;
+    vecchio.claim_username("mattia").await?;
+
+    // App cancellata senza backup: identità nuova, il nome risulta preso.
+    let mut nuovo = profile(&tmp, "Mattia2", &node).await?;
+    let err = nuovo
+        .claim_username("mattia")
+        .await
+        .err()
+        .ok_or("doveva essere preso")?;
+    assert_eq!(err.node_code(), Some("name_taken"));
+    // Un estraneo con un altro numero non lo prende.
+    let mut altro = profile(&tmp, "Altro", &node).await?;
+    verify_phone(&mut altro, &state, "340 999 8877").await?;
+    assert!(altro.claim_username("mattia").await.is_err());
+
+    // Verificato lo stesso numero, il nome torna suo.
+    verify_phone(&mut nuovo, &state, "340 111 2233").await?;
+    nuovo.claim_username("mattia").await?;
+    let card = nuovo
+        .lookup_username(&format!(
+            "mattia@{}",
+            rondine_core::username::node_host(&node)?
+        ))
+        .await?;
+    assert_eq!(card.signer, nuovo.identity());
+    Ok(())
+}
+
+#[tokio::test]
+async fn nome_libero_dopo_lunga_inattivita() -> R {
+    let (node, state) = start_node_with_state().await?;
+    // Scadenza di 2 s invece di 180 giorni.
+    state.set_name_ttl(2);
+    let tmp = TempDir::new()?;
+    let mut attivo = profile(&tmp, "Attivo", &node).await?;
+    let sparito = profile(&tmp, "Sparito", &node).await?;
+    attivo.claim_username("attivo").await?;
+    let mut sparito = sparito;
+    sparito.claim_username("sparito").await?;
+    drop(sparito);
+
+    let mut altro = profile(&tmp, "Altro", &node).await?;
+    for _ in 0..3 {
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        // Chi usa l'app tiene il suo nome.
+        attivo.sync().await?;
+    }
+    assert!(altro.claim_username("attivo").await.is_err());
+    // Chi non si fa vivo da più della scadenza lo perde.
+    altro.claim_username("sparito").await?;
+    Ok(())
+}
+
+/// Il permesso viaggia in ogni deposito: la sua etichetta non deve dire al nodo chi scrive
+/// (SPEC §5). Prima era `contatto:<chiave corta>`.
+#[tokio::test]
+async fn il_permesso_non_dice_al_nodo_chi_scrive() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    silvia.sync().await?;
+    for (chi, di) in [(&silvia, &mattia), (&mattia, &silvia)] {
+        let c = chi
+            .contacts()
+            .iter()
+            .find(|c| c.identity == di.identity())
+            .ok_or("contatto mancante")?;
+        let card = rondine_core::card::verify_card(&c.card)?;
+        let (_, _, permit) = card.mailbox().ok_or("senza casella")?;
+        let label = permit.verify()?.label;
+        for key in [chi.identity(), di.identity()] {
+            assert!(!label.contains(&key.short()), "etichetta rivelatrice: {label}");
+        }
+    }
+    Ok(())
+}

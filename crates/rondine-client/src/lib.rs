@@ -545,9 +545,7 @@ impl Client {
             .cloned()
             .collect();
         for c in contacts {
-            let permit = self
-                .new_permit(&format!("contatto:{}", c.identity.short()))
-                .await?;
+            let permit = self.new_permit("contatto").await?;
             let card = self.card_with(Some(&permit))?;
             let permit_id = permit.verify()?.id;
             if let Some(cm) = self.contact_mut(&c.identity) {
@@ -1516,10 +1514,7 @@ impl Client {
 
         let permit = match &contact.my_permit_id {
             Some(_) => None,
-            None if self.has_node() => Some(
-                self.new_permit(&format!("contatto:{}", peer.short()))
-                    .await?,
-            ),
+            None if self.has_node() => Some(self.new_permit("contatto").await?),
             None => None,
         };
         let my_card = self.card_with(permit.as_ref().or(self.state.invite_permit.as_ref()))?;

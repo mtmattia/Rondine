@@ -113,7 +113,12 @@ struct Inner {
     sms: Mutex<Vec<(String, String)>>,
     /// Durata dei depositi effimeri ("sta scrivendo"), in secondi.
     ephemeral_ttl: std::sync::atomic::AtomicU64,
+    /// Scadenza dei nomi inattivi, in secondi.
+    name_ttl: std::sync::atomic::AtomicU64,
 }
+
+/// Dopo quanto un nome di chi non usa più il nodo torna libero (SPEC §3.2).
+pub const NAME_TTL_SECS: u64 = 180 * 24 * 3600;
 
 /// Quanto resta un deposito effimero se nessuno lo ritira (SPEC §6).
 pub const EPHEMERAL_TTL_SECS: u64 = 30;
@@ -140,6 +145,7 @@ impl AppState {
             rate: Mutex::new(HashMap::new()),
             last_wake: Mutex::new(HashMap::new()),
             ephemeral_ttl: std::sync::atomic::AtomicU64::new(EPHEMERAL_TTL_SECS),
+            name_ttl: std::sync::atomic::AtomicU64::new(NAME_TTL_SECS),
             sms: Mutex::new(Vec::new()),
         })))
     }
@@ -196,13 +202,24 @@ impl AppState {
             .store(secs, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Cambia la scadenza dei nomi inattivi: serve ai test.
+    pub fn set_name_ttl(&self, secs: u64) {
+        self.0
+            .name_ttl
+            .store(secs, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn name_ttl(&self) -> u64 {
+        self.0.name_ttl.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn db(&self) -> Result<MutexGuard<'_, Store>, ApiError> {
         self.0.store.lock().map_err(|_| ApiError::internal())
     }
 
     /// Cancella messaggi e voci di bacheca scaduti.
     pub fn purge(&self) -> Result<(), ApiError> {
-        Ok(self.db()?.purge(now(), MESSAGE_TTL_SECS)?)
+        Ok(self.db()?.purge(now(), MESSAGE_TTL_SECS, self.name_ttl())?)
     }
 }
 
@@ -393,8 +410,14 @@ impl AppState {
         body: &[u8],
     ) -> ApiResult<PublicKey> {
         let key = self.authenticate(headers, method, uri, body)?;
-        match self.db()?.inbox_owner(inbox)? {
-            Some(owner) if owner == key.to_b64() => Ok(key),
+        let db = self.db()?;
+        match db.inbox_owner(inbox)? {
+            Some(owner) if owner == key.to_b64() => {
+                // Il proprietario c'è ancora: i suoi nomi non scadono (SPEC §3.2).
+                let gap = (self.name_ttl() / 4).min(3600);
+                db.touch_inbox(inbox, now(), gap)?;
+                Ok(key)
+            }
             Some(_) => Err(ApiError::forbidden("la casella non è tua")),
             None => Err(ApiError::not_found("casella sconosciuta")),
         }
@@ -886,14 +909,26 @@ async fn put_name(
     s.rate_limit(&format!("owner:{}", claim.signer))?;
     let identity = claim.signer.to_b64();
     let db = s.db()?;
-    if let Some((owner, _)) = db.name(&name)?
-        && owner != identity
+    let t = now();
+    let my_phone = db.verified_phone_of(&identity)?;
+    if let Some(row) = db.name_row(&name)?
+        && row.identity != identity
     {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "name_taken",
-            "nome già in uso su questo nodo",
-        ));
+        // Si prende il nome di un altro solo se è scaduto o se si è verificato il suo stesso
+        // numero (SPEC §3.2).
+        let last = db
+            .last_seen_of(&row.identity)?
+            .unwrap_or(0)
+            .max(row.updated_at);
+        let expired = last + s.name_ttl() < t;
+        let same_phone = row.phone_hash.is_some() && row.phone_hash == my_phone;
+        if !expired && !same_phone {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "name_taken",
+                "nome già in uso su questo nodo (se era tuo, verifica lo stesso numero di telefono)",
+            ));
+        }
     }
     if db.names_of(&identity)?.iter().any(|n| n != &name) {
         return Err(ApiError::new(
@@ -903,7 +938,7 @@ async fn put_name(
         ));
     }
     let record = serde_json::to_string(&claim).map_err(|_| ApiError::internal())?;
-    db.put_name(&name, &identity, &record, now())?;
+    db.put_name(&name, &identity, &record, my_phone.as_deref(), t)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

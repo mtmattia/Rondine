@@ -128,6 +128,19 @@ impl Store {
         if !has_expiry {
             conn.execute("ALTER TABLE messages ADD COLUMN expires_at INTEGER", [])?;
         }
+        // Migrazioni per i nomi (SPEC §3.2): ultima attività delle caselle e numero del nome.
+        let has_last_seen = conn
+            .prepare("SELECT 1 FROM pragma_table_info('inboxes') WHERE name = 'last_seen'")?
+            .exists([])?;
+        if !has_last_seen {
+            conn.execute("ALTER TABLE inboxes ADD COLUMN last_seen INTEGER", [])?;
+        }
+        let has_name_phone = conn
+            .prepare("SELECT 1 FROM pragma_table_info('names') WHERE name = 'phone_hash'")?
+            .exists([])?;
+        if !has_name_phone {
+            conn.execute("ALTER TABLE names ADD COLUMN phone_hash TEXT", [])?;
+        }
         Ok(Self { conn })
     }
 
@@ -146,6 +159,38 @@ impl Store {
             .query_row("SELECT owner FROM inboxes WHERE inbox = ?1", [inbox], |r| {
                 r.get(0)
             })
+            .optional()
+    }
+
+    /// Il proprietario ha usato la casella: "visto l'ultima volta", al massimo ogni `gap` secondi.
+    pub fn touch_inbox(&self, inbox: &str, now: u64, gap: u64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE inboxes SET last_seen = ?2
+             WHERE inbox = ?1 AND COALESCE(last_seen, created_at) <= ?3",
+            params![inbox, to_i64(now), to_i64(now.saturating_sub(gap))],
+        )?;
+        Ok(())
+    }
+
+    /// Ultima attività di un'identità su questo nodo (la più recente delle sue caselle).
+    pub fn last_seen_of(&self, identity: &str) -> Result<Option<u64>> {
+        let v: Option<i64> = self.conn.query_row(
+            "SELECT MAX(COALESCE(last_seen, created_at)) FROM inboxes WHERE owner = ?1",
+            [identity],
+            |r| r.get(0),
+        )?;
+        Ok(v.map(to_u64))
+    }
+
+    /// Hash del numero verificato da un'identità su questo nodo, se c'è.
+    pub fn verified_phone_of(&self, identity: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT p.phone_hash FROM phone_dir p JOIN inboxes i ON p.inbox = i.inbox
+                 WHERE i.owner = ?1 LIMIT 1",
+                [identity],
+                |r| r.get(0),
+            )
             .optional()
     }
 
@@ -397,21 +442,52 @@ impl Store {
     // --- nomi ---
 
     pub fn name(&self, name: &str) -> Result<Option<(String, String)>> {
+        Ok(self.name_row(name)?.map(|r| (r.identity, r.record)))
+    }
+
+    pub fn name_row(&self, name: &str) -> Result<Option<NameRow>> {
         self.conn
             .query_row(
-                "SELECT identity, record FROM names WHERE name = ?1",
+                "SELECT identity, record, phone_hash, updated_at FROM names WHERE name = ?1",
                 [name],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| {
+                    Ok(NameRow {
+                        identity: r.get(0)?,
+                        record: r.get(1)?,
+                        phone_hash: r.get(2)?,
+                        updated_at: to_u64(r.get(3)?),
+                    })
+                },
             )
             .optional()
     }
 
-    pub fn put_name(&self, name: &str, identity: &str, record: &str, now: u64) -> Result<()> {
+    /// Registra (o passa a `identity`) un nome, con il numero verificato di chi lo prende.
+    pub fn put_name(
+        &self,
+        name: &str,
+        identity: &str,
+        record: &str,
+        phone_hash: Option<&str>,
+        now: u64,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO names (name, identity, record, updated_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT (name) DO UPDATE SET record = excluded.record,
+            "INSERT INTO names (name, identity, record, phone_hash, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (name) DO UPDATE SET identity = excluded.identity,
+                 record = excluded.record,
+                 phone_hash = COALESCE(excluded.phone_hash, names.phone_hash),
                  updated_at = excluded.updated_at",
-            params![name, identity, record, to_i64(now)],
+            params![name, identity, record, phone_hash, to_i64(now)],
+        )?;
+        Ok(())
+    }
+
+    /// Un'identità ha verificato un numero: i suoi nomi si potranno recuperare con quello.
+    pub fn set_names_phone(&self, identity: &str, phone_hash: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE names SET phone_hash = ?2 WHERE identity = ?1",
+            params![identity, phone_hash],
         )?;
         Ok(())
     }
@@ -536,7 +612,14 @@ impl Store {
 
     // --- pulizia ---
 
-    pub fn purge(&self, now: u64, message_ttl: u64) -> Result<()> {
+    pub fn purge(&self, now: u64, message_ttl: u64, name_ttl: u64) -> Result<()> {
+        // Nomi di identità che non usano il nodo da più di `name_ttl` (SPEC §3.2).
+        let cutoff = to_i64(now.saturating_sub(name_ttl));
+        self.conn.execute(
+            "DELETE FROM names WHERE updated_at < ?1 AND identity NOT IN
+                 (SELECT owner FROM inboxes WHERE COALESCE(last_seen, created_at) >= ?1)",
+            [cutoff],
+        )?;
         self.conn.execute(
             "DELETE FROM messages WHERE received_at < ?1",
             [to_i64(now.saturating_sub(message_ttl))],
@@ -557,6 +640,16 @@ impl Store {
             .execute("DELETE FROM board WHERE expires_at <= ?1", [to_i64(now)])?;
         Ok(())
     }
+}
+
+/// Un nome registrato (SPEC §3.2).
+#[derive(Debug, Clone)]
+pub struct NameRow {
+    pub identity: String,
+    pub record: String,
+    /// Hash del numero verificato da chi lo tiene: chi verifica lo stesso numero lo recupera.
+    pub phone_hash: Option<String>,
+    pub updated_at: u64,
 }
 
 /// Verifica del numero in corso per una casella (SPEC §13.2).

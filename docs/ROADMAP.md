@@ -100,6 +100,16 @@ Collegamento diretto quando entrambi sono online, rete locale senza internet, no
 - [ ] Bluetooth come altro canale della mesh
 - [ ] annuncio mDNS rinnovato a mezzanotte (ora vale per il giorno di avvio e il successivo)
 
+### Metadati: il nodo non deve vedere niente (richiesta di Mattia del 2026-10-24)
+Il contenuto è già illeggibile. Restano da nascondere al gestore del nodo:
+- [x] etichette dei permessi senza la chiave di chi scrive (SPEC §5)
+- [ ] deposito "sigillato" attraverso un altro nodo o un contatto, così il nodo di chi riceve non
+      vede l'IP di chi scrive
+- [ ] casella con una chiave sua invece della chiave d'identità (il nodo non lega casella e
+      biglietto)
+- [ ] dimensioni dei messaggi arrotondate (padding) e ritiri a intervalli fissi
+- [ ] nessun log degli IP nel nodo, scritto e verificabile
+
 ### M3 — Senza rete
 Mesh Bluetooth e Wi-Fi Direct, consegna differita.
 

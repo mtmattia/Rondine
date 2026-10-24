@@ -2226,7 +2226,10 @@ async fn il_permesso_non_dice_al_nodo_chi_scrive() -> R {
         let (_, _, permit) = card.mailbox().ok_or("senza casella")?;
         let label = permit.verify()?.label;
         for key in [chi.identity(), di.identity()] {
-            assert!(!label.contains(&key.short()), "etichetta rivelatrice: {label}");
+            assert!(
+                !label.contains(&key.short()),
+                "etichetta rivelatrice: {label}"
+            );
         }
     }
     Ok(())

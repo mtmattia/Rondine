@@ -39,6 +39,11 @@ struct Args {
     /// "stun:turn.esempio.it:3478,turn:turn.esempio.it:3478".
     #[arg(long, env = "RONDINE_TURN", value_delimiter = ',')]
     turn: Vec<String>,
+    /// Staffette per il deposito sigillato (SPEC §6.3), separate da virgole: altri nodi da
+    /// suggerire ai client (es. il secondo nodo di casa). Verso queste si inoltra anche se sono
+    /// su indirizzi privati (tailnet).
+    #[arg(long, env = "RONDINE_STAFFETTE", value_delimiter = ',')]
+    staffetta: Vec<String>,
     /// Risponde da sé alle richieste STUN su questo indirizzo UDP (SPEC §11), es. "0.0.0.0:3478":
     /// serve al buco nel NAT tra i telefoni (§12.8). La porta va aperta verso internet.
     #[arg(long, env = "RONDINE_STUN")]
@@ -132,6 +137,10 @@ async fn main() -> anyhow::Result<()> {
             })
         },
     })?;
+    if !args.staffetta.is_empty() {
+        tracing::info!(staffette = %args.staffetta.join(","), "staffette per il deposito sigillato");
+        state.set_relays(args.staffetta.clone());
+    }
     let listener = tokio::net::TcpListener::bind(&args.bind)
         .await
         .with_context(|| format!("impossibile ascoltare su {}", args.bind))?;

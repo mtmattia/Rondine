@@ -213,6 +213,8 @@ pub enum Event {
 enum Route {
     Direct,
     Node,
+    /// Nel nodo, ma senza sigillo: nessuna staffetta disponibile (SPEC §6.3).
+    NodeUnsealed,
     /// In coda sul telefono finché il contatto non ricompare in rete locale.
     Queued,
     /// Effimera senza strada: buttata.
@@ -252,6 +254,8 @@ pub struct Client {
     /// Contatti che in rete locale non hanno risposto (app in pausa?): fino a quando si passa
     /// prima dal nodo (SPEC §12.4).
     slow_lan: std::sync::Mutex<HashMap<PublicKey, u64>>,
+    /// Chiavi di sigillo e staffette dei nodi (SPEC §6.3): URL → (chiave, staffette, quando).
+    seal_cache: std::sync::Mutex<SealCache>,
     /// Lavori della mesh raccolti durante l'elaborazione, eseguiti alla fine di `sync`.
     relay_jobs: Vec<RelayJob>,
     /// Eventi e azioni dei gruppi raccolti durante l'elaborazione (SPEC §7.4).
@@ -290,10 +294,32 @@ struct RelayMsg {
 
 /// Per quanto valgono offerta e risposta del buco nel NAT (SPEC §12.8).
 const PUNCH_TTL_SECS: u64 = 120;
+type SealCache = HashMap<String, (Option<rondine_core::seal::SealConfig>, Vec<String>, u64)>;
+
+/// Per quanto si ricordano chiave di sigillo e staffette di un nodo.
+const SEAL_CACHE_SECS: u64 = 3600;
+
 /// Per quanto un contatto che in rete locale non ha risposto passa prima dal nodo.
 const SLOW_LAN_SECS: u64 = 300;
 /// Per quanto si ricordano i server STUN del nodo.
 const STUN_CACHE_SECS: u64 = 3600;
+
+/// Il nodo offre il deposito sigillato (SPEC §6.3)? Se no, non si usa come proprio nodo.
+async fn require_seal(net: &Net, node: &str) -> Result<()> {
+    let info: serde_json::Value = net.get(node, "/v1/info").await?;
+    let ok = serde_json::from_value::<rondine_core::Signed<rondine_core::seal::SealConfig>>(
+        info["seal"].clone(),
+    )
+    .ok()
+    .filter(|s| info["node_key"].as_str() == Some(s.signer.to_b64().as_str()))
+    .and_then(|s| s.verify().ok())
+    .is_some_and(|c| c.supported());
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::NoSeal(node.to_string()))
+    }
+}
 
 /// Stato di un messaggio appena mandato: in coda, inviato, o non partito con il motivo.
 fn apply_route(msg: &mut ChatMessage, res: Result<Route>) {
@@ -302,9 +328,10 @@ fn apply_route(msg: &mut ChatMessage, res: Result<Route>) {
             msg.status = Delivery::Pending;
             msg.error = None;
         }
-        Ok(_) => {
+        Ok(route) => {
             msg.status = Delivery::Sent;
             msg.error = None;
+            msg.unsealed = route == Route::NodeUnsealed;
         }
         Err(e) => {
             msg.status = Delivery::Failed;
@@ -343,6 +370,7 @@ impl Client {
         std::fs::create_dir_all(dir)?;
         let identity = Identity::generate();
         let net = Net::new()?;
+        require_seal(&net, &node).await?;
 
         let created: serde_json::Value = parse(
             &net.owner(
@@ -409,6 +437,7 @@ impl Client {
             stun_cache: None,
             want_offer: Default::default(),
             slow_lan: Default::default(),
+            seal_cache: Default::default(),
             relay_jobs: Vec::new(),
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
@@ -474,6 +503,7 @@ impl Client {
             stun_cache: None,
             want_offer: Default::default(),
             slow_lan: Default::default(),
+            seal_cache: Default::default(),
             relay_jobs: Vec::new(),
         };
         client.save()?;
@@ -494,6 +524,7 @@ impl Client {
         {
             return Err(Error::Invalid("è già il tuo nodo".into()));
         }
+        require_seal(&self.net, &node).await?;
         let old_invite = self.state.invite_permit.clone();
         let old_boards = self.state.boards.clone();
         let created: serde_json::Value = parse(
@@ -989,6 +1020,7 @@ impl Client {
             stun_cache: None,
             want_offer: Default::default(),
             slow_lan: Default::default(),
+            seal_cache: Default::default(),
             relay_jobs: Vec::new(),
         })
     }
@@ -1588,24 +1620,12 @@ impl Client {
             }
         }
         if let Some((node, inbox, permit)) = info.mailbox() {
-            let res = self
-                .net
-                .call(
-                    Method::POST,
-                    node,
-                    &format!("/v1/inboxes/{inbox}/messages"),
-                    &json!({
-                        "permit": permit,
-                        "blob": blob,
-                        "ephemeral": kind == Kind::Ephemeral,
-                        "quiet": kind == Kind::Quiet,
-                    }),
-                )
-                .await;
-            match res {
-                Ok(_) => return Ok(Some(Route::Node)),
+            match self.deposit_node(node, inbox, permit, blob, kind).await {
+                Ok(route) => return Ok(Some(route)),
                 // Il nodo ha risposto di no (permesso revocato, casella piena…): non si aggira.
-                Err(Error::Node { status, .. }) if status < 500 => return res.map(|_| None),
+                Err(e @ Error::Node { status, .. }) if status < 500 => return Err(e),
+                // Nodo senza sigillo: scartato (SPEC §6.3).
+                Err(e @ Error::NoSeal(_)) => return Err(e),
                 Err(_) => {}
             }
         }
@@ -1621,6 +1641,146 @@ impl Client {
         Ok(None)
     }
 
+    /// Deposito nel nodo di un contatto, sigillato attraverso una staffetta (SPEC §6.3); se non
+    /// c'è nessuna staffetta, diretto e segnato "senza sigillo". Un nodo senza sigillo è scartato.
+    async fn deposit_node(
+        &self,
+        node: &str,
+        inbox: &str,
+        permit: &rondine_core::SignedPermit,
+        blob: &str,
+        kind: Kind,
+    ) -> Result<Route> {
+        let request = json!({
+            "inbox": inbox,
+            "permit": permit,
+            "blob": blob,
+            "ephemeral": kind == Kind::Ephemeral,
+            "quiet": kind == Kind::Quiet,
+        });
+        let node_key = permit.verify()?.node_key;
+        let (cfg, relays) = self.node_seal(node, &node_key, false).await?;
+        let cfg = cfg.ok_or_else(|| Error::NoSeal(node.to_string()))?;
+        let pt = serde_json::to_vec(&request)?;
+        for relay in self.relay_candidates(node, &relays).await {
+            let (plico, ctx) = rondine_core::seal::seal_request(&cfg, &pt)?;
+            let Ok((200, resp)) = self.net.relay(&relay, node, plico).await else {
+                continue;
+            };
+            let Ok(inner) = ctx
+                .open_response(&resp)
+                .map_err(Error::from)
+                .and_then(|b| Ok(serde_json::from_slice::<serde_json::Value>(&b)?))
+            else {
+                continue;
+            };
+            let status = u16::try_from(inner["status"].as_u64().unwrap_or(500)).unwrap_or(500);
+            if (200..300).contains(&status) {
+                return Ok(Route::Node);
+            }
+            return Err(Error::Node {
+                status,
+                code: inner["body"]["error"]
+                    .as_str()
+                    .unwrap_or("error")
+                    .to_string(),
+                message: inner["body"]["message"]
+                    .as_str()
+                    .unwrap_or("deposito rifiutato")
+                    .to_string(),
+            });
+        }
+        // Nessuna staffetta ha consegnato: il nodo offre ancora il sigillo? (la chiave ricordata
+        // può essere vecchia)
+        let (fresh, _) = self.node_seal(node, &node_key, true).await?;
+        if fresh.is_none() {
+            return Err(Error::NoSeal(node.to_string()));
+        }
+        self.net
+            .call(
+                Method::POST,
+                node,
+                &format!("/v1/inboxes/{inbox}/messages"),
+                &json!({
+                    "permit": permit,
+                    "blob": blob,
+                    "ephemeral": kind == Kind::Ephemeral,
+                    "quiet": kind == Kind::Quiet,
+                }),
+            )
+            .await?;
+        Ok(Route::NodeUnsealed)
+    }
+
+    /// Chiave di sigillo di un nodo (firmata dalla `node_key` attesa) e le staffette che
+    /// suggerisce; ricordate per un'ora. `Ok((None, _))`: il nodo risponde ma non ha il sigillo.
+    async fn node_seal(
+        &self,
+        node: &str,
+        node_key: &PublicKey,
+        fresh: bool,
+    ) -> Result<(Option<rondine_core::seal::SealConfig>, Vec<String>)> {
+        let t = now();
+        if !fresh
+            && let Ok(c) = self.seal_cache.lock()
+            && let Some((cfg, relays, at)) = c.get(node)
+            && at + SEAL_CACHE_SECS > t
+        {
+            return Ok((cfg.clone(), relays.clone()));
+        }
+        let info: serde_json::Value = self.net.get(node, "/v1/info").await?;
+        let cfg = serde_json::from_value::<rondine_core::Signed<rondine_core::seal::SealConfig>>(
+            info["seal"].clone(),
+        )
+        .ok()
+        .filter(|s| &s.signer == node_key)
+        .and_then(|s| s.verify().ok())
+        .filter(|c| c.supported());
+        let relays: Vec<String> = info["relays"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.trim_end_matches('/').to_string()))
+                    .take(8)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Ok(mut c) = self.seal_cache.lock() {
+            c.insert(node.to_string(), (cfg.clone(), relays.clone(), t));
+        }
+        Ok((cfg, relays))
+    }
+
+    /// Staffette per depositare in `target`, mai `target` stesso: il mio nodo, quelle che
+    /// suggerisce, quelle che suggerisce il destinatario, i nodi dei contatti (SPEC §6.3).
+    async fn relay_candidates(&self, target: &str, target_relays: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        if self.has_node() {
+            let own = self.state.node.trim_end_matches('/').to_string();
+            out.push(own.clone());
+            if let Ok(info) = self.net.get::<serde_json::Value>(&own, "/v1/info").await
+                && let Some(a) = info["relays"].as_array()
+            {
+                out.extend(
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.trim_end_matches('/').to_string())),
+                );
+            }
+        }
+        out.extend(target_relays.iter().cloned());
+        out.extend(self.state.contacts.iter().filter_map(|c| {
+            verify_card(&c.card).ok().and_then(|i| {
+                i.mailbox()
+                    .map(|(n, _, _)| n.trim_end_matches('/').to_string())
+            })
+        }));
+        let target = target.trim_end_matches('/');
+        let mut seen = std::collections::HashSet::new();
+        out.retain(|u| u != target && seen.insert(u.clone()));
+        out.truncate(6);
+        out
+    }
+
     /// Consegna una busta (SPEC §12.4): nodo, poi diretto; se nessuna via risponde resta in coda
     /// sul telefono e parte nella mesh. Le effimere non vanno né in coda né nella mesh.
     async fn deposit_with(
@@ -1634,7 +1794,7 @@ impl Client {
         let blob = b64::encode(serde_json::to_vec(envelope)?);
         if let Some(route) = self.try_deliver(card, &blob, kind).await? {
             // Passata dal nodo: si prova ad aprire il collegamento diretto (SPEC §12.8).
-            if route == Route::Node && kind == Kind::Normal {
+            if matches!(route, Route::Node | Route::NodeUnsealed) && kind == Kind::Normal {
                 self.want_offer.insert(info.identity);
             }
             return Ok(route);
@@ -1771,6 +1931,7 @@ impl Client {
             location: None,
             reply_to: reply_to.map(str::to_string),
             error: None,
+            unsealed: false,
         };
         let app = AppMessage::Text {
             v: 1,
@@ -1822,6 +1983,7 @@ impl Client {
         if let Some(m) = self.state.messages.iter_mut().find(|m| m.id == msg.id) {
             m.status = msg.status;
             m.error = msg.error.clone();
+            m.unsealed = msg.unsealed;
         }
         self.save()?;
         Ok(msg)
@@ -1876,6 +2038,7 @@ impl Client {
             location: None,
             reply_to: None,
             error: None,
+            unsealed: false,
             attachment: Some(attachment),
         };
         if self
@@ -2170,6 +2333,7 @@ impl Client {
             location: None,
             reply_to: None,
             error: None,
+            unsealed: false,
             attachment: Some(attachment),
         };
         self.typing.remove(&sender);
@@ -2226,6 +2390,7 @@ impl Client {
             }),
             reply_to: None,
             error: None,
+            unsealed: false,
         };
         if self
             .send_app_with(
@@ -2377,6 +2542,7 @@ impl Client {
             }),
             reply_to: None,
             error: None,
+            unsealed: false,
         };
         self.typing.remove(&sender);
         self.state.messages.push(m.clone());
@@ -3223,6 +3389,7 @@ impl Client {
                     location: None,
                     reply_to: reply,
                     error: None,
+                    unsealed: false,
                 };
                 self.typing.remove(&sender);
                 self.state.messages.push(m.clone());

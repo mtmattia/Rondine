@@ -117,6 +117,8 @@ pub struct Message {
     pub reply_to: Option<String>,
     /// Perché non è partito (stato `Failed`).
     pub error: Option<String>,
+    /// Consegnato senza sigillo (SPEC §6.3): il nodo del contatto ha visto il mio IP.
+    pub unsealed: bool,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -542,6 +544,7 @@ fn message(m: &ChatMessage) -> Message {
         }),
         reply_to: m.reply_to.clone(),
         error: m.error.clone(),
+        unsealed: m.unsealed,
     }
 }
 

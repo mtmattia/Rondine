@@ -73,6 +73,9 @@ pub struct ChatMessage {
     /// Perché non è partito (stato `Failed`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Consegnato al nodo senza sigillo (nessuna staffetta, SPEC §6.3): il nodo ha visto l'IP.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unsealed: bool,
 }
 
 /// Posizione di un messaggio, fissa o in tempo reale (SPEC §7.6).

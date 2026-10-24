@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -169,6 +170,8 @@ data class UiMessage(
     val error: String? = null,
     /** Appena scritto, il client lo sta ancora mandando (freccetta blu). */
     val sending: Boolean = false,
+    /** Consegnato senza sigillo: il nodo del contatto ha visto il mio IP (lucchetto aperto). */
+    val unsealed: Boolean = false,
 )
 
 /** Risposta a un aggiornamento (SPEC §7.10): la citazione mostra l'aggiornamento, finché esiste. */
@@ -180,7 +183,7 @@ private fun statusQuote(id: String): UiMessage? {
 }
 
 private fun Message.ui() =
-    UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null, replyTo, error)
+    UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null, replyTo, error, unsealed = unsealed)
 private fun GroupMessageInfo.ui() =
     UiMessage(id, outgoing, body, ts, read, null, attachment, location, if (outgoing) "io" else senderId, senderName, replyTo)
 
@@ -1316,6 +1319,13 @@ private fun Bubble(
                     val st = m.status
                     if (m.outgoing && st != null) {
                         Spacer(Modifier.width(3.dp))
+                        if (m.unsealed) {
+                            Icon(
+                                Icons.Filled.LockOpen, "Senza sigillo: nessuna staffetta, il nodo ha visto il tuo IP",
+                                Modifier.size(12.dp), tint = colors.bubbleMeta,
+                            )
+                            Spacer(Modifier.width(2.dp))
+                        }
                         MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
                     }
                 }
@@ -1344,6 +1354,13 @@ private fun Bubble(
                     val st = m.status
                     if (m.outgoing && st != null) {
                         Spacer(Modifier.width(3.dp))
+                        if (m.unsealed) {
+                            Icon(
+                                Icons.Filled.LockOpen, "Senza sigillo: nessuna staffetta, il nodo ha visto il tuo IP",
+                                Modifier.size(12.dp), tint = colors.bubbleMeta,
+                            )
+                            Spacer(Modifier.width(2.dp))
+                        }
                         MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
                     }
                 }
@@ -1390,6 +1407,13 @@ private fun Bubble(
                     val st = m.status
                     if (m.outgoing && st != null) {
                         Spacer(Modifier.width(3.dp))
+                        if (m.unsealed) {
+                            Icon(
+                                Icons.Filled.LockOpen, "Senza sigillo: nessuna staffetta, il nodo ha visto il tuo IP",
+                                Modifier.size(12.dp), tint = colors.bubbleMeta,
+                            )
+                            Spacer(Modifier.width(2.dp))
+                        }
                         MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
                     }
                 }

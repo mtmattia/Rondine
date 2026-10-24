@@ -192,6 +192,71 @@ si carica una volta sola **sul nodo di chi lo manda**:
 Il nodo di chi manda vede, oltre alla dimensione, quante volte e da quali indirizzi IP il file
 viene scaricato.
 
+### 6.3 Deposito sigillato (il nodo non vede chi scrive)
+Chi deposita in una casella si collega al nodo di chi riceve: senza altro, quel nodo vedrebbe
+l'indirizzo IP di chi scrive e, collegandolo ad altre richieste, chi scrive a chi. Il deposito
+sigillato segue lo schema di **Oblivious HTTP** (RFC 9458) con **HPKE** (RFC 9180): il deposito
+viaggia cifrato per il nodo di destinazione attraverso un **nodo staffetta**.
+
+- La **staffetta** vede l'IP di chi scrive e verso quale nodo va il plico, non la casella né il
+  contenuto.
+- Il **nodo di destinazione** vede la casella (deve consegnare) e l'IP della staffetta, non quello di
+  chi scrive.
+
+**Chiave di sigillo.** Ogni nodo ha una coppia HPKE (KEM X25519 `0x0020`, KDF HKDF-SHA256
+`0x0001`, AEAD ChaCha20-Poly1305 `0x0003`) derivata dalla propria chiave: `ikm =
+blake3::derive_key("rondine/v1/seal-key", seme del nodo)`, poi `DeriveKeyPair(ikm)`. La pubblica in
+`GET /v1/info`, firmata con la chiave del nodo:
+
+```json
+"seal": { "body": "<b64 di {"v":1,"key_id":0,"kem":32,"kdf":1,"aead":3,"public_key":"<b64>"}>",
+          "signer": "<chiave del nodo>", "sig": "<b64>" }
+```
+
+Contesto della firma: `rondine/v1/seal`. Il client accetta la chiave solo se `signer` è la
+`node_key` del permesso con cui sta per depositare (§5): così una staffetta o chiunque altro non
+può sostituirla.
+
+**Plico (richiesta).** `hdr = key_id (1 byte) || kem (2) || kdf (2) || aead (2)`,
+`info = "rondine/v1/sealed request" || 0x00 || hdr`. Con `SetupBaseS(pk, info)` si ottengono
+`enc` e il contesto; `ct = Seal(aad = "", pt)`, con `pt` il JSON
+`{"inbox", "permit", "blob", "ephemeral", "quiet"}` (come il deposito normale, §11). Il plico è
+`hdr || enc || ct`.
+
+**Risposta.** Come RFC 9458 §4.4: `secret = Export("rondine/v1/sealed response", 32)`,
+`nonce_r` = 32 byte casuali, `prk = HKDF-Extract(enc || nonce_r, secret)`,
+`key = HKDF-Expand(prk, "key", 32)`, `nonce = HKDF-Expand(prk, "nonce", 12)`,
+risposta = `nonce_r || ChaCha20-Poly1305(key, nonce, aad = "", pt)` con `pt` il JSON
+`{"status": <codice HTTP>, "body": <JSON della risposta normale>}`. La staffetta non vede
+nemmeno l'esito.
+
+**Percorso.**
+1. Il client manda `POST /v1/relay` alla staffetta con l'intestazione
+   `Rondine-Target: <URL del nodo di destinazione>` e il plico come corpo
+   (`application/octet-stream`, al massimo 512 KiB).
+2. La staffetta controlla che il destinatario sia un nodo Rondine con il sigillo (`/v1/info`,
+   ricordato per un'ora), che non sia sé stessa né un indirizzo privato, e inoltra il corpo a
+   `POST <destinazione>/v1/sealed`; restituisce la risposta così com'è (o 502 se il destinatario
+   non risponde).
+3. Il nodo di destinazione apre il plico, fa il deposito come in §11 e risponde sigillato. Plico
+   che non si apre → 400.
+
+Nessuno dei due nodi conserva o registra IP, intestazioni o plichi.
+
+**Scelta della staffetta** (sempre diversa dal nodo di destinazione): il proprio nodo; poi le
+staffette suggerite dal proprio nodo (`"relays": [URL]` in `/v1/info`); poi i nodi dei contatti.
+Una staffetta che non risponde si salta.
+
+**Regole del client.**
+- Un nodo **senza** chiave di sigillo valida è scartato: non si può usare come proprio nodo (né
+  crearci un profilo né passarci) e non ci si deposita (il messaggio risulta non inviato, con il
+  motivo).
+- Se il nodo di destinazione ha il sigillo ma **nessuna staffetta** è disponibile, il deposito
+  parte diretto e il messaggio resta segnato "senza sigillo" (scelta di Mattia del 2026-10-24:
+  meglio consegnare che fermarsi, ma l'utente lo vede).
+- Per ora sono sigillati i depositi dei messaggi; key package, file e sveglie restano diretti (vedi
+  ROADMAP).
+
 ## 7. Messaggi applicativi (dentro MLS)
 
 Ciphersuite: `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`. Credenziale `Basic`, con
@@ -552,7 +617,7 @@ finché non passa da SMS, QR o numero di sicurezza.
 
 | Metodo e percorso | Auth | Cosa fa |
 |---|---|---|
-| `GET /v1/info` | — | `{v, node_key, public_url, software}` |
+| `GET /v1/info` | — | `{v, node_key, public_url, software, seal, relays}` (§6.3) |
 | `GET /v1/inboxes/{inbox}/turn` | proprietario | server STUN/TURN e credenziali temporanee (§7.9) |
 | `POST /v1/inboxes` | proprietario | crea o ritrova la casella → `{inbox}` |
 | `POST /v1/inboxes/{inbox}/permits` | proprietario | `{label}` → `Signed<Permit>` |
@@ -570,6 +635,8 @@ finché non passa da SMS, QR o numero di sicurezza.
 | `POST /v1/inboxes/{inbox}/keypackages` | proprietario | `{items: [b64], replace?}`; con `replace` toglie prima quelli vecchi (§7.8) |
 | `POST /v1/inboxes/{inbox}/keypackages/claim` | permesso | `{permit}` → `{keypackage}`; l'ultimo resta e si riusa |
 | `POST /v1/wake` | permesso | `{permit}` |
+| `POST /v1/sealed` | permesso nel plico | plico sigillato → risposta sigillata (§6.3) |
+| `POST /v1/relay` | — | intestazione `Rondine-Target`, plico → risposta del destinatario (§6.3) |
 | `PUT /v1/names/{nome}` | firma nel record | registra o aggiorna `Signed<NameClaim>` |
 | `GET /v1/names/{nome}` | — | `Signed<NameClaim>` |
 | `DELETE /v1/names/{nome}` | proprietario | libera il nome (auth con la chiave dell'identità) |

@@ -46,6 +46,12 @@ if-addrs = "0.15"
 # autofirmati usa e getta.
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+# Deposito sigillato (SPEC §6.3): HPKE (RFC 9180) come in openmls, HKDF per la risposta.
+hpke-rs = { version = "0.7", default-features = false }
+hpke-rs-crypto = "0.7"
+hpke-rs-rust-crypto = "0.7"
+hkdf = "0.12"
+sha2 = "0.10"
 rusqlite = { version = "0.37", features = ["bundled"] }
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"

@@ -1426,6 +1426,9 @@ fn report_sent(m: &rondine_client::ChatMessage) -> anyhow::Result<()> {
             m.id.chars().take(8).collect::<String>()
         ),
         Delivery::Pending => println!("In coda: parte quando è in rete."),
+        _ if m.unsealed => println!(
+            "Inviato, ma senza sigillo: nessuna staffetta disponibile, il nodo ha visto il tuo IP."
+        ),
         _ => println!("Inviato."),
     }
     Ok(())

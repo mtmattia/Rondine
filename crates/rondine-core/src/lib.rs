@@ -13,6 +13,7 @@ pub mod lan;
 pub mod permit;
 pub mod phone;
 pub mod safety;
+pub mod seal;
 pub mod signed;
 pub mod stun;
 pub mod username;

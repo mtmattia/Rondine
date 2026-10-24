@@ -139,6 +139,21 @@ impl Net {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
+    /// Un plico sigillato attraverso la staffetta `relay` verso il nodo `target` (SPEC §6.3).
+    /// Restituisce stato HTTP e corpo, senza interpretarli.
+    pub async fn relay(&self, relay: &str, target: &str, plico: Vec<u8>) -> Result<(u16, Vec<u8>)> {
+        let res = self
+            .http
+            .post(Self::url(relay, "/v1/relay"))
+            .header("rondine-target", target)
+            .header("content-type", "application/octet-stream")
+            .body(plico)
+            .send()
+            .await?;
+        let status = res.status().as_u16();
+        Ok((status, res.bytes().await?.to_vec()))
+    }
+
     /// Richiesta senza autenticazione del proprietario; restituisce i byte della risposta.
     pub async fn call<B: Serialize>(
         &self,

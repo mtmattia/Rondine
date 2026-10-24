@@ -115,6 +115,24 @@ struct Inner {
     ephemeral_ttl: std::sync::atomic::AtomicU64,
     /// Scadenza dei nomi inattivi, in secondi.
     name_ttl: std::sync::atomic::AtomicU64,
+    /// Deposito sigillato (SPEC §6.3): chiave e la sua configurazione firmata per `/v1/info`.
+    seal: rondine_core::seal::SealKey,
+    seal_signed: serde_json::Value,
+    /// Spento solo nei test (come un nodo che non offre il sigillo).
+    seal_off: std::sync::atomic::AtomicBool,
+    /// Staffette suggerite ai client, e destinazioni a cui si inoltra anche se private.
+    relays: Mutex<Vec<String>>,
+    /// Nodi di destinazione verificati per la staffetta: URL → (ha il sigillo, quando).
+    relay_targets: Mutex<HashMap<String, (bool, u64)>>,
+    deposits_direct: std::sync::atomic::AtomicU64,
+    deposits_sealed: std::sync::atomic::AtomicU64,
+}
+
+/// Quanti depositi sono arrivati diretti e quanti sigillati (per i test, SPEC §6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DepositStats {
+    pub direct: u64,
+    pub sealed: u64,
 }
 
 /// Dopo quanto un nome di chi non usa più il nodo torna libero (SPEC §3.2).
@@ -129,7 +147,17 @@ pub struct AppState(Arc<Inner>);
 impl AppState {
     pub fn new(cfg: Config) -> anyhow::Result<Self> {
         let host = node_host(&cfg.public_url)?;
+        let seal = rondine_core::seal::SealKey::from_node_seed(&cfg.node_key.seed())?;
+        let seal_signed =
+            serde_json::to_value(rondine_core::Signed::sign(&cfg.node_key, &seal.config)?)?;
         Ok(Self(Arc::new(Inner {
+            seal,
+            seal_signed,
+            seal_off: std::sync::atomic::AtomicBool::new(false),
+            relays: Mutex::new(Vec::new()),
+            relay_targets: Mutex::new(HashMap::new()),
+            deposits_direct: std::sync::atomic::AtomicU64::new(0),
+            deposits_sealed: std::sync::atomic::AtomicU64::new(0),
             public_url: cfg.public_url.trim_end_matches('/').to_string(),
             host,
             node: cfg.node_key,
@@ -202,6 +230,69 @@ impl AppState {
             .store(secs, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Staffette da suggerire ai client (SPEC §6.3), es. l'altro nodo di casa.
+    pub fn set_relays(&self, urls: Vec<String>) {
+        if let Ok(mut r) = self.0.relays.lock() {
+            *r = urls
+                .into_iter()
+                .map(|u| u.trim_end_matches('/').to_string())
+                .collect();
+        }
+    }
+
+    /// Smette di offrire il sigillo: solo per i test.
+    pub fn disable_seal(&self) {
+        self.0
+            .seal_off
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn seal_on(&self) -> bool {
+        !self.0.seal_off.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn deposit_stats(&self) -> DepositStats {
+        use std::sync::atomic::Ordering::Relaxed;
+        DepositStats {
+            direct: self.0.deposits_direct.load(Relaxed),
+            sealed: self.0.deposits_sealed.load(Relaxed),
+        }
+    }
+
+    /// La destinazione è un nodo Rondine con il sigillo? Ricordato per un'ora.
+    async fn is_sealing_node(&self, target: &str) -> bool {
+        let t = now();
+        if let Ok(c) = self.0.relay_targets.lock()
+            && let Some(&(ok, at)) = c.get(target)
+            && at + 3600 > t
+        {
+            return ok;
+        }
+        let ok = match self.0.http.get(format!("{target}/v1/info")).send().await {
+            Ok(r) if r.status().is_success() => r
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v.get("seal").cloned())
+                .and_then(|seal| {
+                    serde_json::from_value::<rondine_core::Signed<rondine_core::seal::SealConfig>>(
+                        seal,
+                    )
+                    .ok()
+                })
+                .and_then(|signed| signed.verify().ok())
+                .is_some_and(|c| c.supported()),
+            _ => false,
+        };
+        if let Ok(mut c) = self.0.relay_targets.lock() {
+            if c.len() > 1000 {
+                c.clear();
+            }
+            c.insert(target.to_string(), (ok, t));
+        }
+        ok
+    }
+
     /// Cambia la scadenza dei nomi inattivi: serve ai test.
     pub fn set_name_ttl(&self, secs: u64) {
         self.0
@@ -255,6 +346,8 @@ pub fn router(state: AppState) -> Router {
             post(claim_keypackage),
         )
         .route("/v1/wake", post(wake))
+        .route("/v1/sealed", post(sealed_deposit))
+        .route("/v1/relay", post(relay))
         .route(
             "/v1/names/{name}",
             put(put_name).get(get_name).delete(delete_name),
@@ -532,12 +625,17 @@ struct WakeSlot {
 // ---------- gestori ----------
 
 async fn info(State(s): State<AppState>) -> Json<serde_json::Value> {
-    Json(json!({
+    let mut v = json!({
         "v": 1,
         "node_key": s.0.node.public(),
         "public_url": s.0.public_url,
         "software": concat!("rondine-nodo ", env!("CARGO_PKG_VERSION")),
-    }))
+        "relays": s.0.relays.lock().map(|r| r.clone()).unwrap_or_default(),
+    });
+    if s.seal_on() {
+        v["seal"] = s.0.seal_signed.clone();
+    }
+    Json(v)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -685,7 +783,15 @@ async fn deposit(
     Path(inbox): Path<String>,
     Json(req): Json<DepositRequest>,
 ) -> ApiResult<(StatusCode, Json<Deposited>)> {
-    s.check_permit(&req.permit, Some(&inbox), Scope::Deposit)?;
+    s.0.deposits_direct
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let d = store_deposit(&s, &inbox, req)?;
+    Ok((StatusCode::CREATED, Json(d)))
+}
+
+/// Il deposito vero e proprio, diretto o arrivato sigillato (SPEC §6.3).
+fn store_deposit(s: &AppState, inbox: &str, req: DepositRequest) -> ApiResult<Deposited> {
+    s.check_permit(&req.permit, Some(inbox), Scope::Deposit)?;
     let blob = b64::decode(&req.blob)?;
     if blob.len() > MAX_MESSAGE_BYTES {
         return Err(ApiError::new(
@@ -697,10 +803,10 @@ async fn deposit(
     let id = random_id();
     {
         let db = s.db()?;
-        if db.inbox_owner(&inbox)?.is_none() {
+        if db.inbox_owner(inbox)?.is_none() {
             return Err(ApiError::not_found("casella sconosciuta"));
         }
-        if db.count_messages(&inbox)? >= MAX_QUEUED_MESSAGES {
+        if db.count_messages(inbox)? >= MAX_QUEUED_MESSAGES {
             return Err(ApiError::new(
                 StatusCode::INSUFFICIENT_STORAGE,
                 "inbox_full",
@@ -710,12 +816,137 @@ async fn deposit(
         let expires_at = req
             .ephemeral
             .then(|| now() + s.0.ephemeral_ttl.load(std::sync::atomic::Ordering::Relaxed));
-        db.put_message(&id, &inbox, &blob, now(), expires_at)?;
+        db.put_message(&id, inbox, &blob, now(), expires_at)?;
     }
     if !req.ephemeral && !req.quiet {
-        s.schedule_wake(&inbox)?;
+        s.schedule_wake(inbox)?;
     }
-    Ok((StatusCode::CREATED, Json(Deposited { id })))
+    Ok(Deposited { id })
+}
+
+/// Deposito sigillato aperto dal nodo: come `DepositRequest`, con la casella dentro.
+#[derive(Serialize, Deserialize)]
+pub struct SealedDeposit {
+    pub inbox: String,
+    #[serde(flatten)]
+    pub req: DepositRequest,
+}
+
+/// Plico più grande accettato (SPEC §6.3).
+const MAX_SEALED_BYTES: usize = 512 * 1024;
+
+/// `POST /v1/sealed`: apre il plico, deposita e risponde sigillato (SPEC §6.3).
+async fn sealed_deposit(State(s): State<AppState>, body: Bytes) -> Response {
+    if !s.seal_on() {
+        return ApiError::not_found("questo nodo non offre il deposito sigillato").into_response();
+    }
+    if body.len() > MAX_SEALED_BYTES {
+        return ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_large",
+            "plico troppo grande",
+        )
+        .into_response();
+    }
+    let Ok((pt, ctx)) = s.0.seal.open_request(&body) else {
+        return ApiError::bad("plico non valido").into_response();
+    };
+    s.0.deposits_sealed
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (status, out) = match serde_json::from_slice::<SealedDeposit>(&pt) {
+        Ok(d) => match store_deposit(&s, &d.inbox, d.req) {
+            Ok(dep) => (StatusCode::CREATED, json!(dep)),
+            Err(e) => (e.status, json!({ "error": e.code, "message": e.message })),
+        },
+        Err(_) => (
+            StatusCode::BAD_REQUEST,
+            json!({ "error": "bad_request", "message": "deposito sigillato non valido" }),
+        ),
+    };
+    let inner = json!({ "status": status.as_u16(), "body": out });
+    match serde_json::to_vec(&inner)
+        .ok()
+        .and_then(|b| ctx.seal_response(&b).ok())
+    {
+        Some(sealed) => (
+            StatusCode::OK,
+            [("content-type", "application/octet-stream")],
+            sealed,
+        )
+            .into_response(),
+        None => ApiError::internal().into_response(),
+    }
+}
+
+/// `POST /v1/relay`: inoltra un plico a un altro nodo senza aprirlo (SPEC §6.3). Non registra né
+/// IP né destinazioni.
+async fn relay(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    match relay_inner(&s, &headers, body).await {
+        Ok(r) => r,
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn relay_inner(s: &AppState, headers: &HeaderMap, body: Bytes) -> ApiResult<Response> {
+    if body.len() > MAX_SEALED_BYTES {
+        return Err(ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_large",
+            "plico troppo grande",
+        ));
+    }
+    let target = headers
+        .get("rondine-target")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| ApiError::bad("manca Rondine-Target"))?
+        .trim_end_matches('/')
+        .to_string();
+    if target == s.0.public_url {
+        return Err(ApiError::bad("la staffetta non inoltra a sé stessa"));
+    }
+    // Indirizzi privati solo verso le staffette di casa (es. il Mac sulla tailnet) o nei test.
+    let trusted =
+        s.0.relays
+            .lock()
+            .map(|r| r.contains(&target))
+            .unwrap_or(false);
+    if !trusted {
+        s.0.pusher
+            .check_endpoint(&target)
+            .await
+            .map_err(ApiError::bad)?;
+    } else if !(target.starts_with("https://") || target.starts_with("http://")) {
+        return Err(ApiError::bad("destinazione non valida"));
+    }
+    if !s.is_sealing_node(&target).await {
+        return Err(ApiError::bad(
+            "la destinazione non è un nodo Rondine con il sigillo",
+        ));
+    }
+    let res =
+        s.0.http
+            .post(format!("{target}/v1/sealed"))
+            .header("content-type", "application/octet-stream")
+            .body(body)
+            .send()
+            .await;
+    let Ok(res) = res else {
+        return Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "unreachable",
+            "il nodo di destinazione non risponde",
+        ));
+    };
+    let status = res.status();
+    let bytes = res.bytes().await.map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "unreachable",
+            "il nodo di destinazione non risponde",
+        )
+    })?;
+    let code = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    Ok((code, [("content-type", "application/octet-stream")], bytes).into_response())
 }
 
 #[derive(Serialize, Deserialize)]

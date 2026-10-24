@@ -441,3 +441,9 @@ Una riga per modifica: data, cosa è cambiato.
   dell'ultima attività di una casella (`GET /v1/inboxes/{inbox}/seen`); la rubrica scarta i
   profili fermi da più di 3 giorni e preferisce il più attivo. Test
   `rubrica_non_aggancia_i_profili_abbandonati`.
+- 2026-10-24 — Annullato l'elenco pubblico dei numeri verificati (Mattia non vuole che chi ha un
+  numero possa cercarlo). Scritta in SPEC §14 la proposta "nodo senza memoria": il numero lo vede
+  solo il gateway SMS (impronta con segreto, ricevuta e timbro nei biglietti a coppie), avviso di
+  giacenza al posto del deposito, tubo senza memoria, permessi anonimi. Ogni messaggio ricorda da
+  dove è passato (`via`: diretto o nodo) e l'app lo mostra con un'icona accanto all'ora (frecce o
+  cassetta). Test `ogni_messaggio_sa_da_dove_e_passato`.

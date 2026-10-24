@@ -38,7 +38,7 @@ pub use rubrica::AddressBookMatch;
 pub use scheduled::{ScheduledMessage, ScheduledTarget};
 pub use state::{
     Attachment, CallRecord, CallStatus, ChatMessage, Contact, Delivery, GroupChat, GroupMember,
-    GroupMessage, GroupRef, Location, Outgoing, Source, State, Trust,
+    GroupMessage, GroupRef, Location, Outgoing, Source, State, Trust, Via,
 };
 pub use status::StatusPost;
 
@@ -339,6 +339,11 @@ fn apply_route(msg: &mut ChatMessage, res: Result<Route>) {
             msg.status = Delivery::Sent;
             msg.error = None;
             msg.unsealed = route == Route::NodeUnsealed;
+            msg.via = match route {
+                Route::Direct => Some(Via::Direct),
+                Route::Node | Route::NodeUnsealed => Some(Via::Node),
+                Route::Queued | Route::Dropped => None,
+            };
         }
         Err(e) => {
             msg.status = Delivery::Failed;
@@ -2025,6 +2030,7 @@ impl Client {
             reply_to: reply_to.map(str::to_string),
             error: None,
             unsealed: false,
+            via: None,
         };
         let app = AppMessage::Text {
             v: 1,
@@ -2077,6 +2083,7 @@ impl Client {
             m.status = msg.status;
             m.error = msg.error.clone();
             m.unsealed = msg.unsealed;
+            m.via = msg.via;
         }
         self.save()?;
         Ok(msg)
@@ -2218,6 +2225,7 @@ impl Client {
             reply_to: None,
             error: None,
             unsealed: false,
+            via: None,
             attachment: Some(attachment),
         };
         if self
@@ -2513,6 +2521,7 @@ impl Client {
             reply_to: None,
             error: None,
             unsealed: false,
+            via: None,
             attachment: Some(attachment),
         };
         self.typing.remove(&sender);
@@ -2570,6 +2579,7 @@ impl Client {
             reply_to: None,
             error: None,
             unsealed: false,
+            via: None,
         };
         if self
             .send_app_with(
@@ -2722,6 +2732,7 @@ impl Client {
             reply_to: None,
             error: None,
             unsealed: false,
+            via: None,
         };
         self.typing.remove(&sender);
         self.state.messages.push(m.clone());
@@ -3241,7 +3252,7 @@ impl Client {
                     continue;
                 };
                 ids.push(id.to_string());
-                blobs.push(blob.to_string());
+                blobs.push((blob.to_string(), Via::Node));
             }
         }
         // Vecchie caselle (SPEC §12.7): chi ha il biglietto vecchio consegna ancora lì.
@@ -3262,23 +3273,29 @@ impl Client {
             for item in items {
                 if let (Some(id), Some(blob)) = (item["id"].as_str(), item["blob"].as_str()) {
                     rids.push(id.to_string());
-                    blobs.push(blob.to_string());
+                    blobs.push((blob.to_string(), Via::Node));
                 }
             }
             if !rids.is_empty() {
                 retired_acks.push((r.node, format!("{rpath}/ack"), rids));
             }
         }
-        blobs.extend(self.punch.inbox().take());
+        blobs.extend(
+            self.punch
+                .inbox()
+                .take()
+                .into_iter()
+                .map(|b| (b, Via::Direct)),
+        );
         let online_before = self.online_marker();
-        for blob in blobs {
-            self.process_blob(&blob, &mut events);
+        for (blob, via) in blobs {
+            self.process_blob(&blob, via, &mut events);
         }
         // Lavori della mesh: consegne per i miei contatti, passaggi, buste per me.
         while !self.relay_jobs.is_empty() {
             for job in std::mem::take(&mut self.relay_jobs) {
                 match job {
-                    RelayJob::Local(blob) => self.process_blob(&blob, &mut events),
+                    RelayJob::Local(blob) => self.process_blob(&blob, Via::Direct, &mut events),
                     RelayJob::Forward { relay, from } => self.send_relay(relay, &[from]).await,
                     RelayJob::Deliver { to, blob } => {
                         let card = self
@@ -3404,14 +3421,26 @@ impl Client {
     }
 
     /// Elabora una busta una volta sola: i doppioni (da altre vie) si scartano in silenzio.
-    fn process_blob(&mut self, blob: &str, events: &mut Vec<Event>) {
+    fn process_blob(&mut self, blob: &str, via: Via, events: &mut Vec<Event>) {
         let hash = b64::encode(&blake3::hash(blob.as_bytes()).as_bytes()[..16]);
         if self.state.seen_blobs.contains(&hash) {
             return;
         }
         remember(&mut self.state.seen_blobs, hash);
         match self.handle_blob(blob) {
-            Ok(mut evs) => events.append(&mut evs),
+            Ok(mut evs) => {
+                // Da dove è arrivato, per l'icona nella chat (SPEC §14.5).
+                for e in &mut evs {
+                    if let Event::Message(m) = e {
+                        m.via = Some(via);
+                        if let Some(stored) = self.state.messages.iter_mut().find(|x| x.id == m.id)
+                        {
+                            stored.via = Some(via);
+                        }
+                    }
+                }
+                events.append(&mut evs)
+            }
             Err(e) => events.push(Event::Rejected(e.to_string())),
         }
     }
@@ -3590,6 +3619,7 @@ impl Client {
                     reply_to: reply,
                     error: None,
                     unsealed: false,
+                    via: None,
                 };
                 self.typing.remove(&sender);
                 self.state.messages.push(m.clone());

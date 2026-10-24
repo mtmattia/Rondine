@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.outlined.MoveToInbox
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -172,6 +174,8 @@ data class UiMessage(
     val sending: Boolean = false,
     /** Consegnato senza sigillo: il nodo del contatto ha visto il mio IP (lucchetto aperto). */
     val unsealed: Boolean = false,
+    /** Da dove è passato: "diretto", "nodo" o "" (SPEC §14.5). */
+    val via: String = "",
 )
 
 /** Risposta a un aggiornamento (SPEC §7.10): la citazione mostra l'aggiornamento, finché esiste. */
@@ -183,7 +187,7 @@ private fun statusQuote(id: String): UiMessage? {
 }
 
 private fun Message.ui() =
-    UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null, replyTo, error, unsealed = unsealed)
+    UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null, replyTo, error, unsealed = unsealed, via = via)
 private fun GroupMessageInfo.ui() =
     UiMessage(id, outgoing, body, ts, read, null, attachment, location, if (outgoing) "io" else senderId, senderName, replyTo)
 
@@ -1362,6 +1366,7 @@ private fun Bubble(
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    RouteIcon(m.via, colors.bubbleMeta)
                     Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
                     val st = m.status
                     if (m.outgoing && st != null) {
@@ -1397,6 +1402,7 @@ private fun Bubble(
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    RouteIcon(m.via, colors.bubbleMeta)
                     Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
                     val st = m.status
                     if (m.outgoing && st != null) {
@@ -1450,6 +1456,7 @@ private fun Bubble(
                     if (m.body.isNotBlank()) Spacer(Modifier.size(4.dp))
                 }
                 val meta: @Composable () -> Unit = {
+                    RouteIcon(m.via, colors.bubbleMeta)
                     Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
                     val st = m.status
                     if (m.outgoing && st != null) {
@@ -1791,4 +1798,19 @@ private suspend fun forward(messages: List<UiMessage>, target: ChatTarget) {
             }
         }
     }
+}
+
+/**
+ * Da dove è passato il messaggio (SPEC §14.5): frecce per il diretto (telefono-telefono, il nodo
+ * non l'ha visto), cassetta per il nodo.
+ */
+@Composable
+private fun RouteIcon(via: String, tint: Color) {
+    val (icon, label) = when (via) {
+        "diretto" -> Icons.Filled.SwapHoriz to "Diretto, da telefono a telefono: il nodo non l'ha visto"
+        "nodo" -> Icons.Outlined.MoveToInbox to "Passato dal nodo"
+        else -> return
+    }
+    Icon(icon, label, Modifier.size(12.dp), tint = tint)
+    Spacer(Modifier.width(3.dp))
 }

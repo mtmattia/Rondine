@@ -959,3 +959,92 @@ spedirli (per sviluppo e test).
 Limite noto: chi gestisce un nodo vede i numeri che verifica e potrebbe provare tutti i numeri
 contro il proprio elenco; l'Argon2id lo rallenta, non lo impedisce.
 
+
+## 14. Proposta: un nodo che non conserva né messaggi né numeri
+
+> **Stato: proposta, non implementata.** Decisa con Mattia il 2026-10-24 come direzione; i
+> dettagli qui sotto vanno confermati prima del codice. Cambia il protocollo: sarà `v: 2` dove
+> serve, e i nodi accetteranno le due versioni finché le app vecchie non spariscono.
+
+Obiettivo: chi gestisce un nodo non vede **chi scrive a chi**, **quanto** si scrivono, né **i numeri
+di telefono**. Oggi (§6, §9, §13) vede la quantità e la dimensione dei messaggi depositati, il
+permesso di ogni mittente, gli IP e, verificando, il numero in chiaro.
+
+### 14.1 Il numero lo vede solo il gateway SMS
+
+Tre parti diverse, nessuna delle quali sa tutto:
+
+| Chi | Sa | Non sa |
+|---|---|---|
+| **gateway SMS** | il numero, e che è su Rondine | la chiave, il nodo, i contatti |
+| **nodo** | che una chiave ha un numero confermato | quale numero |
+| **chi ti ha in rubrica** | il tuo numero (lo aveva già) e la tua chiave | niente di più |
+
+1. Il gateway è un servizio a sé, con una sua chiave HPKE pubblicata (come la chiave di sigillo,
+   §6.3), che comanda il telefono che spedisce gli SMS (§13.4). Ha senso quando lo gestisce
+   qualcuno diverso da chi gestisce il nodo: se è la stessa persona, unisce le due metà.
+2. Il client sceglie un segreto casuale `r` (32 byte) e calcola l'**impronta**
+   `c = blake3("rondine v2 numero" || numero || r)`. Chiude `{numero, r}` per il gateway (HPKE) e
+   manda al proprio nodo la busta chiusa e `c`. Il nodo la inoltra senza poterla aprire.
+3. Il gateway apre la busta, controlla che `c` torni, manda l'SMS con il codice, e alla conferma
+   del codice (che passa ancora chiuso attraverso il nodo) firma la **ricevuta**
+   `{c, issued_at}`. Il gateway tiene per ogni numero solo l'ultima `c` confermata.
+4. Il nodo lega la ricevuta alla chiave: firma il **timbro** `{c, identity, issued_at}` e lo tiene
+   nel suo registro (`c` → chiave). Non conosce né il numero né `r`: non può provare tutti i
+   numeri, perché senza `r` l'impronta non si ricalcola.
+5. **Stesso numero confermato di nuovo** (telefono nuovo, SIM rubata): il gateway lo riconosce e
+   dice al nodo "`c'` sostituisce `c`". Il nodo applica la password (§3.4: `409 phone_locked`
+   senza la prova) e, se passa, segna `c` come **non più valido**.
+6. Il client mette nel biglietto della bacheca (§9) il timbro, la ricevuta e `r`. Chi apre il
+   biglietto (cioè chi conosce i due numeri) ricalcola `c` dal numero che ha in rubrica e da `r`,
+   controlla le firme di gateway e nodo, e chiede al nodo, senza dire chi è:
+   `POST /v1/stamps/check {c, identity}` → `{valid}`. Un timbro sostituito o di un profilo
+   abbandonato (§9, fermo da più di 3 giorni) non vale: il biglietto si scarta.
+
+Risultato: in rubrica si trova solo chi ha confermato il **suo** numero, nessuno può appendere un
+biglietto con un numero non suo, e i biglietti dei profili abbandonati non agganciano più. Non
+c'è un elenco interrogabile per numero: ci si trova solo **in due**, se ci si ha a vicenda in
+rubrica. Limite: chi conosce entrambi i numeri può aprire il biglietto della coppia e vedere che
+quelle due persone si conoscono (non legge le chat, e non può impersonarle).
+
+### 14.2 Avviso di giacenza al posto del deposito
+
+Come la posta quando non ti trovano: il messaggio **resta sul telefono di chi scrive**, al nodo
+va solo un avviso.
+
+1. Si tenta il diretto (rete locale, buco nel NAT, §12). Se non riesce, il mittente lascia sulla
+   casella del destinatario un **avviso**: un pacchetto di dimensione fissa, cifrato per il
+   destinatario, che dice solo "cercami" e come (gli indirizzi del mittente, il suo nodo).
+   Nessun contenuto, nessuna dimensione del messaggio. Il nodo sveglia il destinatario (§8).
+2. Il destinatario, sveglio, cerca il mittente in diretto. Se il mittente dorme, gli lascia a sua
+   volta un avviso "ti cerco" sul **suo** nodo, che lo sveglia.
+3. I due telefoni si collegano e il messaggio passa in diretto. Il nodo non l'ha mai avuto.
+4. Se il diretto non riesce (alcune reti mobili e aziendali), il nodo fa da **tubo** (§14.3).
+5. I messaggi restano in coda sul telefono (🕓, §12.4) finché non passano. Prezzo: con il
+   mittente spento il messaggio aspetta che si riaccenda.
+
+Il nodo vede solo "un avviso per questa casella a quest'ora". Gli avvisi hanno tutti la stessa
+dimensione e non dicono da chi vengono (sigillo, §6.3).
+
+### 14.3 Tubo: passaggio senza memoria
+
+Quando i due telefoni sono accesi ma non riescono a collegarsi direttamente, il nodo li unisce in
+tempo reale: apre un canale tra i due, che si presentano con un gettone monouso scambiato
+nell'avviso, e passa i byte dall'uno all'altro **senza scriverli da nessuna parte**. Il traffico
+è cifrato tra i due telefoni come il diretto, e viaggia in pacchetti di **dimensione fissa** (con
+riempimento), così il nodo non capisce quanto sono lunghi i messaggi. Si chiude appena la coda è
+vuota.
+
+### 14.4 Permessi anonimi
+
+Oggi ogni contatto deposita con il suo permesso (§5), e il nodo può contare quanti contatti ti
+scrivono e quanto. Con gli avvisi a dimensione fissa e un permesso che non distingue i mittenti
+(gettoni a firma cieca, da definire: si usa una libreria verificata, regola 1) il nodo vede solo
+quanti avvisi arrivano, non da quante persone.
+
+### 14.5 Nell'app
+
+Ogni messaggio mostra da dove è passato:
+- **diretto** (icona "P2P"): rete locale o internet, il nodo non l'ha visto;
+- **nodo** (icona "cassetta"): depositato nel nodo, come oggi; con questa proposta diventa
+  **tubo** (icona "tubo"): passato dal nodo in tempo reale, senza essere conservato.

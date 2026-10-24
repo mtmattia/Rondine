@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rondine_client::{
     CallOp, CallStatus, ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent,
-    GroupMessage, NewFile, Source, Trust,
+    GroupMessage, NewFile, Source, Trust, Via,
 };
 use rondine_core::PublicKey;
 use tokio::sync::Mutex;
@@ -123,6 +123,8 @@ pub struct Message {
     pub error: Option<String>,
     /// Consegnato senza sigillo (SPEC §6.3): il nodo del contatto ha visto il mio IP.
     pub unsealed: bool,
+    /// Da dove è passato (SPEC §14.5): "diretto", "nodo" o "" se non si sa.
+    pub via: String,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -561,6 +563,12 @@ fn message(m: &ChatMessage) -> Message {
         reply_to: m.reply_to.clone(),
         error: m.error.clone(),
         unsealed: m.unsealed,
+        via: match m.via {
+            Some(Via::Direct) => "diretto",
+            Some(Via::Node) => "nodo",
+            None => "",
+        }
+        .into(),
     }
 }
 

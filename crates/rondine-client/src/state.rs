@@ -113,6 +113,19 @@ pub struct ChatMessage {
     /// Consegnato al nodo senza sigillo (nessuna staffetta, SPEC §6.3): il nodo ha visto l'IP.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unsealed: bool,
+    /// Da dove è passato (SPEC §14.5); assente se non si sa (in coda, o messaggi di prima).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<Via>,
+}
+
+/// Strada di un messaggio, per l'icona nella chat (SPEC §14.5).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Via {
+    /// Rete locale o internet, da telefono a telefono: il nodo non l'ha visto.
+    Direct,
+    /// Depositato nel nodo.
+    Node,
 }
 
 /// Posizione di un messaggio, fissa o in tempo reale (SPEC §7.6).

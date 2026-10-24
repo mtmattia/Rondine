@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use rondine_client::{Client, Delivery, Event, NewFile, Source, Trust};
+use rondine_client::{Client, Delivery, Event, NewFile, Source, Trust, Via};
 use rondine_core::Identity;
 use rondine_nodo::{AppState, Config, Store, WAKE_BODY};
 use tempfile::TempDir;
@@ -961,6 +961,36 @@ async fn mesh_al_massimo_quattro_passaggi() -> R {
         }
     }
     assert!(texts(&silvia.sync().await?).is_empty());
+    Ok(())
+}
+
+/// Ogni messaggio ricorda da dove è passato (SPEC §14.5): diretto o nodo, per chi lo manda e per
+/// chi lo riceve. L'app lo mostra con un'icona.
+#[tokio::test]
+async fn ogni_messaggio_sa_da_dove_e_passato() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut anna, mut bruno, _, _) = local_pair(&tmp).await?;
+    befriend(&mut anna, &mut bruno).await?;
+    let m = bruno.send_text(&anna.identity(), "in diretto").await?;
+    assert_eq!(m.via, Some(Via::Direct));
+    anna.sync().await?;
+    let got = anna.messages_with(&bruno.identity());
+    assert_eq!(got.last().and_then(|m| m.via), Some(Via::Direct));
+
+    // Anna prende un nodo e Bruno non la vede più in rete locale: passa dal nodo.
+    anna.set_node(&node).await?;
+    bruno.sync().await?;
+    bruno.forget_lan_peer(&anna.identity());
+    let m = bruno.send_text(&anna.identity(), "dal nodo").await?;
+    assert_eq!(m.via, Some(Via::Node));
+    anna.forget_lan_peer(&bruno.identity());
+    anna.sync().await?;
+    let got = anna.messages_with(&bruno.identity());
+    assert_eq!(
+        got.last().map(|m| (m.body.as_str(), m.via)),
+        Some(("dal nodo", Some(Via::Node)))
+    );
     Ok(())
 }
 

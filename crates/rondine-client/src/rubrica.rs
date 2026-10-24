@@ -237,6 +237,7 @@ impl Client {
                 });
             }
         }
+        self.resend_after_key_change().await;
         self.save()?;
         Ok(out)
     }

@@ -127,6 +127,8 @@ pub(crate) const KEYPACKAGE_BATCH: usize = 20;
 /// Key package offerti in rete locale a chi avvia una chat (SPEC §12.2).
 const LAN_KEYPACKAGES: usize = 5;
 /// Durata delle voci in bacheca: si ripubblicano prima che scadano.
+/// Motivo dei messaggi rimasti alla chiave vecchia di un contatto (SPEC §10).
+const KEY_CHANGED: &str = "non consegnato: il contatto ha cambiato chiave";
 pub(crate) const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 
 /// Dove mettere un file troppo grande per stare nel messaggio (SPEC §7.5).
@@ -1525,6 +1527,7 @@ impl Client {
         }
         self.note_key_change(&info.identity);
         self.start_chat(&info.identity).await?;
+        self.resend_after_key_change().await;
         self.save()?;
         // Chat nuova: il contatto deve sapere dove trovarmi, anche se ero già acceso.
         self.send_online_to(&info.identity).await;
@@ -2076,13 +2079,16 @@ impl Client {
     }
 
     /// Un contatto nuovo ha lo stesso nome utente o numero di un altro con un'altra chiave?
-    /// Allora il codice di sicurezza è cambiato: lo si ricorda per avvisare (SPEC §10).
+    /// Allora il codice di sicurezza è cambiato: lo si ricorda per avvisare e, se la chiave
+    /// vecchia non era verificata di persona, la chat di prima continua con la nuova (SPEC §10).
     pub(crate) fn note_key_change(&mut self, id: &PublicKey) {
         let Some(new) = self.state.contacts.iter().find(|c| &c.identity == id) else {
             return;
         };
         let (username, phone) = (new.username.clone(), new.phone.clone());
-        let old = self
+        let issued = |c: &Contact| verify_card(&c.card).map(|i| i.issued_at).unwrap_or(0);
+        let new_issued = issued(new);
+        let Some(old) = self
             .state
             .contacts
             .iter()
@@ -2091,12 +2097,68 @@ impl Client {
                 (username.is_some() && c.username == username)
                     || (phone.is_some() && c.phone == phone)
             })
-            .map(|c| c.identity);
-        if let Some(old) = old
-            && let Some(c) = self.contact_mut(id)
-        {
-            c.previous_key = Some(old);
+            .cloned()
+        else {
+            return;
+        };
+        if let Some(c) = self.contact_mut(id) {
+            c.previous_key = Some(old.identity);
         }
+        // Solo verso la chiave più recente: un messaggio tardivo della vecchia non torna indietro.
+        if !old.verified && new_issued >= issued(&old) {
+            self.merge_contact(&old, id);
+        }
+    }
+
+    /// Rimanda alla chiave nuova i messaggi che la vecchia non aveva ricevuto (SPEC §10).
+    pub(crate) async fn resend_after_key_change(&mut self) {
+        let ids: Vec<String> = self
+            .state
+            .messages
+            .iter()
+            .filter(|m| m.status == Delivery::Failed && m.error.as_deref() == Some(KEY_CHANGED))
+            .filter(|m| m.attachment.is_none() && m.location.is_none())
+            .map(|m| m.id.clone())
+            .collect();
+        for id in ids {
+            // Se non parte resta "non inviato", con Riprova.
+            let _ = self.retry_message(&id).await;
+        }
+    }
+
+    /// Sposta sulla chiave `to` la chat con il contatto `old` e lo toglie dai contatti.
+    fn merge_contact(&mut self, old: &Contact, to: &PublicKey) {
+        let from = old.identity;
+        if let Some(c) = self.contact_mut(to) {
+            c.favorite |= old.favorite;
+            c.muted |= old.muted;
+            // Chi era bloccato non si sblocca reinstallando.
+            c.blocked |= old.blocked;
+        }
+        // La chiave vecchia non leggerà più niente: ciò che non le è arrivato (in coda o con una
+        // spunta sola) si rimanda alla chiave nuova (`resend_after_key_change`).
+        for m in self.state.messages.iter_mut().filter(|m| {
+            m.contact == from
+                && m.outgoing
+                && matches!(m.status, Delivery::Pending | Delivery::Sent)
+        }) {
+            m.status = Delivery::Failed;
+            m.error = Some(KEY_CHANGED.into());
+        }
+        for m in self.state.messages.iter_mut().filter(|m| m.contact == from) {
+            m.contact = *to;
+        }
+        for c in self.state.calls.iter_mut().filter(|c| c.contact == from) {
+            c.contact = *to;
+        }
+        for s in &mut self.state.scheduled {
+            if s.target == ScheduledTarget::Contact(from) {
+                s.target = ScheduledTarget::Contact(*to);
+            }
+        }
+        self.state.outbox.retain(|o| o.to != from);
+        self.state.unconfirmed.retain(|o| o.to != from);
+        self.state.contacts.retain(|c| c.identity != from);
     }
 
     /// Il contatto a cui scrivere, con la chat già avviata.
@@ -3131,6 +3193,7 @@ impl Client {
         self.expire_calls();
         self.expire_statuses();
         self.send_due_scheduled().await;
+        self.resend_after_key_change().await;
         let mut events = self.flush_outbox().await;
         let path = format!("/v1/inboxes/{}/messages", self.state.inbox);
         let mut ids = Vec::new();

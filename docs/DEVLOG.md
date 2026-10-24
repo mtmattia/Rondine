@@ -419,3 +419,9 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-24 — Bug: la rubrica prendeva la prima voce valida della bacheca, che poteva essere il
   profilo abbandonato di chi aveva reinstallato senza backup: si scriveva a una casella che nessuno
   legge. Ora vale il biglietto più recente. Test `rubrica_sceglie_il_profilo_piu_recente`.
+- 2026-10-24 — Chiave nuova, stessa chat: quando un contatto ricompare con lo stesso nome utente o
+  numero e una chiave più recente (app reinstallata senza backup), la chat di prima passa alla
+  chiave nuova con l'avviso "codice di sicurezza cambiato", invece di restare a scrivere a un
+  profilo abbandonato; i messaggi rimasti con una spunta sola ripartono da soli verso la chiave
+  nuova. Non vale per chi era verificato di persona. Test
+  `chiave_nuova_continua_la_stessa_chat` e `contatto_verificato_non_si_sostituisce`.

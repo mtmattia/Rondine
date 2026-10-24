@@ -2308,6 +2308,72 @@ async fn codice_di_sicurezza_cambiato_si_nota() -> R {
     Ok(())
 }
 
+/// Stessa persona con una chiave nuova (app reinstallata senza backup): niente seconda chat,
+/// quella di prima passa alla chiave nuova con l'avviso del codice cambiato (SPEC §10).
+#[tokio::test]
+async fn chiave_nuova_continua_la_stessa_chat() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let host = rondine_core::username::node_host(&node)?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    mattia.claim_username("mattia").await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let vecchio = silvia.add(&format!("mattia@{host}")).await?;
+    silvia.set_favorite(&vecchio.identity, true)?;
+    silvia.send_text(&vecchio.identity, "ci sei?").await?;
+
+    // Mattia reinstalla senza backup e si riprende il nome col numero verificato.
+    verify_phone(&mut mattia, &state, "340 111 2233").await?;
+    let mut nuovo = profile(&tmp, "Mattia2", &node).await?;
+    verify_phone(&mut nuovo, &state, "340 111 2233").await?;
+    nuovo.claim_username("mattia").await?;
+    let c = silvia.add(&format!("mattia@{host}")).await?;
+    assert_eq!(c.identity, nuovo.identity());
+    assert_eq!(c.previous_key, Some(mattia.identity()));
+    assert!(c.favorite);
+
+    // Una sola chat, con i messaggi di prima.
+    let chats = silvia.chats();
+    assert_eq!(chats.len(), 1);
+    assert_eq!(chats[0].contact.identity, nuovo.identity());
+    let bodies: Vec<String> = silvia
+        .messages_with(&nuovo.identity())
+        .iter()
+        .map(|m| m.body.clone())
+        .collect();
+    assert_eq!(bodies, ["ci sei?"]);
+    // "ci sei?" era rimasto con una spunta sola: la chiave vecchia non lo leggerà più, quindi
+    // riparte da solo verso la chiave nuova.
+    let m = silvia.messages_with(&nuovo.identity())[0].clone();
+    assert_eq!(m.status, Delivery::Sent);
+    assert!(m.error.is_none());
+    silvia.send_text(&nuovo.identity(), "eccoti").await?;
+    assert_eq!(texts(&nuovo.sync().await?), ["ci sei?", "eccoti"]);
+    Ok(())
+}
+
+/// Un contatto verificato di persona non si sostituisce da solo: restano due chat e l'avviso.
+#[tokio::test]
+async fn contatto_verificato_non_si_sostituisce() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let host = rondine_core::username::node_host(&node)?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    verify_phone(&mut mattia, &state, "340 111 2233").await?;
+    mattia.claim_username("mattia").await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let vecchio = silvia.add(&format!("mattia@{host}")).await?;
+    silvia.mark_verified(&vecchio.identity)?;
+
+    let mut nuovo = profile(&tmp, "Mattia2", &node).await?;
+    verify_phone(&mut nuovo, &state, "340 111 2233").await?;
+    nuovo.claim_username("mattia").await?;
+    let c = silvia.add(&format!("mattia@{host}")).await?;
+    assert_eq!(c.previous_key, Some(mattia.identity()));
+    assert_eq!(silvia.chats().len(), 2);
+    Ok(())
+}
+
 #[tokio::test]
 async fn tre_gradi_di_fiducia() -> R {
     let (node, state) = start_node_with_state().await?;

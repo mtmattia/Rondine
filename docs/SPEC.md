@@ -659,6 +659,13 @@ che quel nodo ha dato: finché non si confronta il numero di sicurezza l'app lo 
 nuovo ha lo stesso nome utente o numero di un contatto già noto con un'altra chiave, il client
 ricorda la chiave vecchia (`previous_key`) e l'app avvisa che il codice di sicurezza è cambiato,
 come quando qualcuno reinstalla l'app, o come farebbe un nodo che prova a mettersi in mezzo.
+Come su WhatsApp non nasce una seconda chat: se il biglietto nuovo è più recente di quello vecchio
+e la chiave vecchia non era verificata di persona, la chat di prima (messaggi, chiamate, messaggi
+programmati, preferito, silenzioso, bloccato) passa alla chiave nuova e il contatto vecchio si
+toglie. I messaggi che la chiave vecchia non ha confermato (in coda o con una spunta sola) non li
+leggerà più nessuno: le buste in coda per la chiave vecchia si scartano e i messaggi di testo
+ripartono da soli verso la nuova (allegati e posizioni restano "non inviati", con Riprova). Una chiave verificata di persona non si sostituisce da
+sola: restano due chat e l'avviso.
 
 **Gradi di fiducia.** Ogni contatto ne ha uno, mostrato dall'app (icona e testo) e dalla CLI:
 1. **verificato di persona**: codice di sicurezza confrontato (QR o 60 cifre). Non ci si fida di

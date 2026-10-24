@@ -794,8 +794,8 @@ saprebbe mai dove trovare un contatto senza nodo che l'ha aggiunto dopo essersi 
    prima dal nodo.
 2. Deposito nel nodo del contatto (se il suo biglietto ne ha uno).
 3. Se il nodo non risponde: consegna diretta agli indirizzi dell'ultimo "sono collegato".
-4. Se neanche quella va: il messaggio resta in coda sul telefono (spunta "in attesa") **e** parte
-   nella mesh (§12.5).
+4. Se neanche quella va: il messaggio resta in coda sul telefono (spunta "in attesa") e, se la
+   mesh è accesa, parte anche lì (§12.5).
 5. Un testo consegnato per una via diretta (rete locale o buco nel NAT) aspetta la conferma di
    consegna (§7.2) per 2 minuti; se non arriva, la stessa busta riparte dal nodo, una volta (chi la
    riceve due volte la scarta, §12.6). Una via diretta può rispondere "ok" e non consegnare: un
@@ -814,7 +814,10 @@ recupera dalla coda finché non arriva la conferma di consegna (§7.2).
 I depositi effimeri (§7.3) e i "sono collegato" (§12.3) non vanno in coda né nella mesh.
 
 ### 12.5 Mesh tra utenti
-Chi non riesce a consegnare affida la busta ad altri: fino a 3 suoi contatti (non il
+**Facoltativa, spenta di base** (impostazione "Aiuto dagli amici"; CLI `rondine mesh si|no`). Chi
+la tiene spenta non affida i suoi messaggi ai contatti (restano in coda sul telefono) e non passa
+quelli degli altri; riceve comunque le buste per sé. Con la mesh accesa, chi non riesce a
+consegnare affida la busta ad altri: fino a 3 suoi contatti (non il
 destinatario), scelti a caso, con il messaggio MLS:
 
 ```json

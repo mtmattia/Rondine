@@ -199,6 +199,9 @@ enum Cmd {
     Blocca { contatto: String },
     /// Elimina la chat con un contatto (messaggi compresi), solo qui; il contatto resta.
     EliminaChat { contatto: String },
+    /// Mesh tra amici (SPEC §12.5): `si` per affidare ai contatti ciò che non parte e passare ciò
+    /// che affidano loro, `no` per spegnerla. Senza argomento dice com'è.
+    Mesh { stato: Option<String> },
     /// Riprova un messaggio non inviato (✗), con l'inizio del suo id come lo mostra `leggi`.
     Riprova { messaggio: String },
     /// Apre un collegamento diretto via internet con un contatto, anche dietro NAT (SPEC §12.8),
@@ -1373,6 +1376,18 @@ async fn main() -> anyhow::Result<()> {
             let id = c.find_contact(&contatto)?.identity;
             c.mark_verified(&id)?;
             println!("Contatto verificato.");
+        }
+        Cmd::Mesh { stato } => {
+            match stato.as_deref() {
+                Some("si" | "sì") => c.set_mesh(true)?,
+                Some("no") => c.set_mesh(false)?,
+                Some(other) => anyhow::bail!("scrivi `si` o `no`, non `{other}`"),
+                None => {}
+            }
+            println!(
+                "Mesh tra amici: {}",
+                if c.state().mesh { "accesa" } else { "spenta" }
+            );
         }
         Cmd::EliminaChat { contatto } => {
             let id = c.find_contact(&contatto)?.identity;

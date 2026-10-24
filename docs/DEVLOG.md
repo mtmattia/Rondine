@@ -447,3 +447,6 @@ Una riga per modifica: data, cosa è cambiato.
   giacenza al posto del deposito, tubo senza memoria, permessi anonimi. Ogni messaggio ricorda da
   dove è passato (`via`: diretto o nodo) e l'app lo mostra con un'icona accanto all'ora (frecce o
   cassetta). Test `ogni_messaggio_sa_da_dove_e_passato`.
+- 2026-10-24 — Mesh tra amici facoltativa e spenta di base (Impostazioni → Privacy → "Aiuto dagli
+  amici", CLI `rondine mesh si|no`): spenta, i messaggi che non partono aspettano sul telefono e
+  non si fa da postino per gli altri. Test `mesh_spenta_di_base`.

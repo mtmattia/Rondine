@@ -433,6 +433,7 @@ impl Client {
                 scheduled: Vec::new(),
                 my_statuses: Vec::new(),
                 statuses: Vec::new(),
+                mesh: false,
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -502,6 +503,7 @@ impl Client {
                 scheduled: Vec::new(),
                 my_statuses: Vec::new(),
                 statuses: Vec::new(),
+                mesh: false,
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -1909,6 +1911,9 @@ impl Client {
             next_try: t + RETRY_SECS,
         });
         self.save()?;
+        if !self.state.mesh {
+            return Ok(Route::Queued);
+        }
         let nonce = rondine_core::random_id();
         let relay = RelayMsg {
             id: rondine_core::random_id(),
@@ -1919,6 +1924,12 @@ impl Client {
         };
         self.send_relay(relay, &[info.identity]).await;
         Ok(Route::Queued)
+    }
+
+    /// Accende o spegne la mesh tra amici (SPEC §12.5).
+    pub fn set_mesh(&mut self, on: bool) -> Result<()> {
+        self.state.mesh = on;
+        self.save()
     }
 
     /// Affida una busta a fino a 3 contatti (SPEC §12.5), tranne quelli in `exclude`. La scelta è
@@ -3713,6 +3724,10 @@ impl Client {
                 let n = b64::decode(&nonce)?;
                 if rondine_core::lan::mesh_tag(&self.identity.public(), &n) == tag {
                     self.relay_jobs.push(RelayJob::Local(blob));
+                    return Ok(Vec::new());
+                }
+                // Mesh spenta: non faccio da postino per gli altri.
+                if !self.state.mesh {
                     return Ok(Vec::new());
                 }
                 let target = self

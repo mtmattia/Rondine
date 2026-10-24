@@ -342,6 +342,10 @@ pub struct State {
     /// Gli aggiornamenti dei contatti ancora validi.
     #[serde(default)]
     pub statuses: Vec<crate::StatusPost>,
+    /// Mesh tra amici (SPEC §12.5): affidare ai contatti ciò che non parte, e passare ciò che
+    /// affidano loro. Spenta finché non la si accende.
+    #[serde(default)]
+    pub mesh: bool,
 }
 
 /// Una chiamata nel registro (SPEC §7.9).

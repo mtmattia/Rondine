@@ -72,6 +72,8 @@ pub struct Profile {
     pub photo: Option<String>,
     /// Il mio numero è verificato via SMS (SPEC §13).
     pub phone_verified: bool,
+    /// Mesh tra amici accesa (SPEC §12.5).
+    pub mesh: bool,
     /// Le mie "Info" attive e fino a quando (SPEC §7.7).
     pub about: Option<String>,
     pub about_until: Option<u64>,
@@ -738,6 +740,7 @@ fn view_of(c: &Client) -> View {
             has_node: c.has_node(),
             photo: c.my_photo().map(|p| p.to_string_lossy().into_owned()),
             phone_verified: s.phone_verified,
+            mesh: s.mesh,
             about: c.my_about().map(|a| a.text),
             about_until: c.my_about().and_then(|a| a.until),
         })
@@ -1513,6 +1516,11 @@ impl Rondine {
     pub async fn delete_chat(&self, contact_id: String) -> Result<()> {
         let k = key(&contact_id)?;
         Ok(self.with(move |c| c.delete_chat(&k)).await?)
+    }
+
+    /// Accende o spegne la mesh tra amici (SPEC §12.5).
+    pub async fn set_mesh(&self, on: bool) -> Result<()> {
+        Ok(self.with(move |c| c.set_mesh(on)).await?)
     }
 
     /// Silenzia o riattiva le notifiche di una chat (1:1 o gruppo).

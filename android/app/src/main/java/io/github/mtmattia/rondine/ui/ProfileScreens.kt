@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Notifications
@@ -615,6 +616,22 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 ) {
                     maps = !maps
                     MapTiles.setEnabled(context, maps)
+                }
+                var mesh by remember { mutableStateOf(p.mesh) }
+                SettingRow(
+                    Icons.Filled.Hub,
+                    "Aiuto dagli amici (mesh)",
+                    if (mesh) {
+                        "Accesa: se un messaggio non parte lo affidi, chiuso, a qualche amico; e tu passi i loro"
+                    } else {
+                        "Spenta: i messaggi che non partono aspettano sul telefono, e non passi quelli degli altri"
+                    },
+                ) {
+                    mesh = !mesh
+                    scope.launch {
+                        Repo.client().setMesh(mesh)
+                        Repo.refresh()
+                    }
                 }
                 SettingRow(Icons.Filled.PrivacyTip, "Cosa vede il nodo", "Cosa resta sul telefono e cosa passa dal nodo") {
                     open("https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md")

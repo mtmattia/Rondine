@@ -853,6 +853,9 @@ async fn mesh_tramite_un_contatto_in_comune() -> R {
     befriend(&mut silvia, &mut pino).await?;
     befriend(&mut silvia, &mut mario).await?;
     befriend(&mut pino, &mut mario).await?;
+    for c in [&mut silvia, &mut pino, &mut mario] {
+        c.set_mesh(true)?;
+    }
     // Silvia è dietro un NAT: Pino non la raggiunge direttamente.
     pino.forget_addrs(&silvia.identity())?;
     // Mario è vicino a Silvia (stessa rete); Pino no.
@@ -893,6 +896,47 @@ async fn mesh_tramite_un_contatto_in_comune() -> R {
     Ok(())
 }
 
+/// La mesh è un'opzione, spenta di base: nessuno affida i suoi messaggi agli amici, e nessuno fa
+/// da postino per gli altri, finché non la accende.
+#[tokio::test]
+async fn mesh_spenta_di_base() -> R {
+    let (ns, killer) = start_node_killable().await?;
+    let np = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut silvia = profile(&tmp, "Silvia", &ns).await?;
+    let mut pino = profile(&tmp, "Pino", &np).await?;
+    let mut mario = profile(&tmp, "Mario", &np).await?;
+    let s = silvia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    befriend(&mut silvia, &mut pino).await?;
+    befriend(&mut silvia, &mut mario).await?;
+    befriend(&mut pino, &mut mario).await?;
+    pino.forget_addrs(&silvia.identity())?;
+    mario.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mario.add_lan_peer(silvia.identity(), s);
+    assert!(!pino.state().mesh);
+
+    killer.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // Pino ha la mesh spenta: il messaggio resta in coda sul suo telefono.
+    let m = pino.send_text(&silvia.identity(), "aspetto").await?;
+    assert_eq!(m.status, Delivery::Pending);
+    mario.sync().await?;
+    assert!(texts(&silvia.sync().await?).is_empty());
+
+    // Pino la accende, Mario no: Mario non fa da postino.
+    pino.set_mesh(true)?;
+    pino.send_text(&silvia.identity(), "ancora").await?;
+    mario.sync().await?;
+    assert!(texts(&silvia.sync().await?).is_empty());
+
+    // Accesa anche da Mario: passa.
+    mario.set_mesh(true)?;
+    pino.send_text(&silvia.identity(), "ora sì").await?;
+    mario.sync().await?;
+    assert_eq!(texts(&silvia.sync().await?), ["ora sì"]);
+    Ok(())
+}
+
 #[tokio::test]
 async fn doppioni_dalla_mesh_scartati_in_silenzio() -> R {
     let (ns, killer) = start_node_killable().await?;
@@ -908,6 +952,9 @@ async fn doppioni_dalla_mesh_scartati_in_silenzio() -> R {
     }
     befriend(&mut pino, &mut mario).await?;
     befriend(&mut pino, &mut stefania).await?;
+    for c in [&mut silvia, &mut pino, &mut mario, &mut stefania] {
+        c.set_mesh(true)?;
+    }
     for p in [&mut mario, &mut stefania] {
         p.start_lan("127.0.0.1:0".parse()?, false).await?;
         p.add_lan_peer(silvia.identity(), s);
@@ -946,6 +993,9 @@ async fn mesh_al_massimo_quattro_passaggi() -> R {
     }
     befriend(&mut silvia, &mut chain[0]).await?;
     befriend(&mut silvia, &mut chain[5]).await?;
+    for c in chain.iter_mut() {
+        c.set_mesh(true)?;
+    }
     chain[5].start_lan("127.0.0.1:0".parse()?, false).await?;
     chain[5].add_lan_peer(silvia.identity(), s);
 

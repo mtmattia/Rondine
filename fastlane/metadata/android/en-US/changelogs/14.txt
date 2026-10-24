@@ -1,0 +1,1 @@
+Direct connection: while the app is open, messages go phone to phone over the internet too, without passing through the node, when the network allows it. Settings redesigned: Profile page, editable name and an About text with expiry and suggestions, shown to your contacts.

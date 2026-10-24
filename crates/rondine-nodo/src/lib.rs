@@ -5,7 +5,6 @@ mod files;
 mod phone;
 mod push;
 mod store;
-mod vault;
 mod web;
 
 use std::collections::HashMap;
@@ -116,7 +115,6 @@ struct Inner {
     ephemeral_ttl: std::sync::atomic::AtomicU64,
     /// Scadenza dei nomi inattivi, in secondi.
     name_ttl: std::sync::atomic::AtomicU64,
-    vault_lock: std::sync::atomic::AtomicU64,
     /// Deposito sigillato (SPEC §6.3): chiave e la sua configurazione firmata per `/v1/info`.
     seal: rondine_core::seal::SealKey,
     seal_signed: serde_json::Value,
@@ -139,8 +137,6 @@ pub struct DepositStats {
 
 /// Dopo quanto un nome di chi non usa più il nodo torna libero (SPEC §3.2).
 pub const NAME_TTL_SECS: u64 = 180 * 24 * 3600;
-/// Chi ha una cassaforte e ha usato il nodo negli ultimi 7 giorni tiene nome e numero (SPEC §7.8).
-pub const VAULT_LOCK_SECS: u64 = 7 * 24 * 3600;
 
 /// Quanto resta un deposito effimero se nessuno lo ritira (SPEC §6).
 pub const EPHEMERAL_TTL_SECS: u64 = 30;
@@ -178,7 +174,6 @@ impl AppState {
             last_wake: Mutex::new(HashMap::new()),
             ephemeral_ttl: std::sync::atomic::AtomicU64::new(EPHEMERAL_TTL_SECS),
             name_ttl: std::sync::atomic::AtomicU64::new(NAME_TTL_SECS),
-            vault_lock: std::sync::atomic::AtomicU64::new(VAULT_LOCK_SECS),
             sms: Mutex::new(Vec::new()),
         })))
     }
@@ -309,17 +304,6 @@ impl AppState {
         self.0.name_ttl.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Cambia per quanto chi ha una cassaforte tiene nome e numero da fermo: serve ai test.
-    pub fn set_vault_lock(&self, secs: u64) {
-        self.0
-            .vault_lock
-            .store(secs, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    fn vault_lock(&self) -> u64 {
-        self.0.vault_lock.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
     fn db(&self) -> Result<MutexGuard<'_, Store>, ApiError> {
         self.0.store.lock().map_err(|_| ApiError::internal())
     }
@@ -378,16 +362,6 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/inboxes/{inbox}/phone/confirm", post(phone::confirm))
         .route("/v1/phone/{phone_hash}", get(phone::lookup))
-        .route(
-            "/v1/inboxes/{inbox}/vault",
-            put(vault::put)
-                .delete(vault::delete)
-                .layer(DefaultBodyLimit::max(
-                    rondine_core::vault::MAX_VAULT_BYTES * 2,
-                )),
-        )
-        .route("/v1/vault/find", post(vault::find))
-        .route("/v1/vault/open", post(vault::open))
         .route("/v1/fcm/{token}", post(fcm::relay))
         .route("/invito", get(web::invite_page))
         .route("/{at_name}", get(web::name_page))
@@ -1178,10 +1152,7 @@ async fn put_name(
             .unwrap_or(0)
             .max(row.updated_at);
         let expired = last + s.name_ttl() < t;
-        // Con una cassaforte il numero da solo non basta (SPEC §7.8).
-        let same_phone = row.phone_hash.is_some()
-            && row.phone_hash == my_phone
-            && !s.vault_locked(&db, &row.identity)?;
+        let same_phone = row.phone_hash.is_some() && row.phone_hash == my_phone;
         if !expired && !same_phone {
             return Err(ApiError::new(
                 StatusCode::CONFLICT,

@@ -163,18 +163,6 @@ pub async fn confirm(
     })
     .map_err(|_| ApiError::internal())?;
     let db = s.db()?;
-    // Il numero di chi ha una cassaforte ed è attivo non passa con un SMS (SPEC §7.8).
-    if let Some(other) = db.identity_of_phone(&p.phone_hash)?
-        && other != owner.to_b64()
-        && s.vault_locked(&db, &other)?
-    {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "phone_locked",
-            "questo numero è protetto da una password: ripristina il profilo con la password, \
-             oppure riprova tra 7 giorni",
-        ));
-    }
     // Un numero sta in una casella sola: se questa ne aveva un altro, lo lascia.
     db.delete_phone_dir(&inbox)?;
     db.put_phone_dir(&p.phone_hash, &inbox, &entry)?;

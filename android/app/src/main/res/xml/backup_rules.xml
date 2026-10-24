@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Android fino alla 11: nel backup di sistema va solo il promemoria (SPEC §7.8). -->
-<full-backup-content>
-    <include domain="sharedpref" path="ricordo.xml" />
-</full-backup-content>

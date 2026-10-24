@@ -298,12 +298,6 @@ pub struct State {
     /// Segreti già calcolati dei numeri della rubrica (SPEC §9, §13.1): l'Argon2 non si rifà.
     #[serde(default)]
     pub discovery_cache: Vec<DiscoverySecret>,
-    /// Chiavi della cassaforte sul nodo, ricavate dalla password (SPEC §7.8).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vault: Option<rondine_core::vault::VaultKeys>,
-    /// Ultima copia riuscita nella cassaforte; 0 se mai.
-    #[serde(default)]
-    pub vault_at: u64,
     /// Ripristinato da un backup e non ancora ricollegato (SPEC §7.8).
     #[serde(default)]
     pub pending_restore: bool,

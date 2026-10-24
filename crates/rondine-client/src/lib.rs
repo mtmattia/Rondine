@@ -258,8 +258,6 @@ pub struct Client {
     seal_cache: std::sync::Mutex<SealCache>,
     /// Quanto aspettare la conferma di un testo consegnato direttamente (SPEC §12.4).
     confirm_wait: u64,
-    /// Ogni quanto rifare la cassaforte sul nodo (SPEC §7.8).
-    vault_every: u64,
     /// Lavori della mesh raccolti durante l'elaborazione, eseguiti alla fine di `sync`.
     relay_jobs: Vec<RelayJob>,
     /// Eventi e azioni dei gruppi raccolti durante l'elaborazione (SPEC §7.4).
@@ -421,8 +419,6 @@ impl Client {
                 my_about: None,
                 photos: Vec::new(),
                 discovery_cache: Vec::new(),
-                vault: None,
-                vault_at: 0,
                 pending_restore: false,
                 rejoin_groups: Vec::new(),
                 calls: Vec::new(),
@@ -449,7 +445,6 @@ impl Client {
             slow_lan: Default::default(),
             seal_cache: Default::default(),
             confirm_wait: CONFIRM_WAIT_SECS,
-            vault_every: backup::VAULT_EVERY_SECS,
             relay_jobs: Vec::new(),
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
@@ -492,8 +487,6 @@ impl Client {
                 my_about: None,
                 photos: Vec::new(),
                 discovery_cache: Vec::new(),
-                vault: None,
-                vault_at: 0,
                 pending_restore: false,
                 rejoin_groups: Vec::new(),
                 calls: Vec::new(),
@@ -520,7 +513,6 @@ impl Client {
             slow_lan: Default::default(),
             seal_cache: Default::default(),
             confirm_wait: CONFIRM_WAIT_SECS,
-            vault_every: backup::VAULT_EVERY_SECS,
             relay_jobs: Vec::new(),
         };
         client.save()?;
@@ -1061,7 +1053,6 @@ impl Client {
             slow_lan: Default::default(),
             seal_cache: Default::default(),
             confirm_wait: CONFIRM_WAIT_SECS,
-            vault_every: backup::VAULT_EVERY_SECS,
             relay_jobs: Vec::new(),
         })
     }
@@ -3118,8 +3109,6 @@ impl Client {
         self.batch = Batch::default();
         // Appena ripristinato da un backup: chat da riaprire e gruppi da cui rientrare (§7.8).
         self.finish_restore().await;
-        // Copia nella cassaforte se è passato abbastanza tempo; riprova alla prossima.
-        let _ = self.vault_if_due().await;
         self.expire_calls();
         self.expire_statuses();
         self.send_due_scheduled().await;

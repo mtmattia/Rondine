@@ -173,13 +173,6 @@ impl From<Delivery> for MessageStatus {
     }
 }
 
-/// Cassaforte sul nodo (SPEC §7.8).
-#[derive(uniffi::Record)]
-pub struct VaultStatus {
-    pub enabled: bool,
-    pub last_at: u64,
-}
-
 /// Un backup appena fatto: il file e il codice per aprirlo.
 #[derive(uniffi::Record)]
 pub struct BackupFile {
@@ -644,28 +637,6 @@ pub async fn restore_profile(dir: String, backup: Vec<u8>, code: String) -> Resu
     })
     .await?;
     Ok(Rondine::new(client))
-}
-
-/// Ripristina il profilo dalla cassaforte del nodo (SPEC §7.8), con nome utente o numero
-/// verificato e la password. La cartella deve essere vuota.
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn restore_from_vault(
-    dir: String,
-    node: String,
-    who: String,
-    password: String,
-) -> Result<Arc<Rondine>> {
-    let client = on_runtime(async move {
-        Ok(Client::restore_from_vault(&PathBuf::from(dir), &node, &who, &password).await?)
-    })
-    .await?;
-    Ok(Rondine::new(client))
-}
-
-/// Sul nodo c'è una cassaforte per questo nome utente o numero?
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn vault_exists(node: String, who: String) -> Result<bool> {
-    on_runtime(async move { Ok(Client::vault_exists(&node, &who).await?) }).await
 }
 
 /// Apre il profilo nella cartella, se esiste.
@@ -1525,30 +1496,6 @@ impl Rondine {
     }
 
     /// Backup cifrato del profilo e codice di 30 cifre per aprirlo (SPEC §7.8).
-    /// Sceglie o cambia la password della cassaforte e copia subito il profilo (SPEC §7.8).
-    pub async fn set_vault_password(&self, password: String) -> Result<()> {
-        self.run(move |c| Box::pin(async move { Ok(c.set_vault_password(&password).await?) }))
-            .await
-    }
-
-    /// Copia adesso il profilo nella cassaforte.
-    pub async fn backup_to_vault(&self) -> Result<()> {
-        self.run(|c| Box::pin(async move { Ok(c.backup_to_vault().await?) }))
-            .await
-    }
-
-    pub async fn remove_vault(&self) -> Result<()> {
-        self.run(|c| Box::pin(async move { Ok(c.remove_vault().await?) }))
-            .await
-    }
-
-    /// La cassaforte c'è, e l'ultima copia (secondi dal 1970, 0 se mai).
-    pub async fn vault_status(&self) -> VaultStatus {
-        let c = self.client.lock().await;
-        let (enabled, last_at) = c.vault_status();
-        VaultStatus { enabled, last_at }
-    }
-
     pub async fn export_backup(&self) -> Result<BackupFile> {
         let c = self.client.lock().await;
         let (data, code) = c.export_backup()?;

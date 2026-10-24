@@ -99,27 +99,7 @@ CREATE TABLE IF NOT EXISTS board (
     sig TEXT NOT NULL,
     PRIMARY KEY (loc, owner)
 );
-CREATE TABLE IF NOT EXISTS vaults (
-    identity TEXT PRIMARY KEY,
-    salt TEXT NOT NULL,
-    verifier TEXT NOT NULL,
-    blob BLOB NOT NULL,
-    updated_at INTEGER NOT NULL,
-    failures INTEGER NOT NULL DEFAULT 0,
-    fail_day INTEGER NOT NULL DEFAULT 0
-);
 ";
-
-/// Cassaforte di un'identità (SPEC §7.8): solo dati cifrati e la verifica della password.
-pub struct VaultRow {
-    pub salt: String,
-    pub verifier: String,
-    pub blob: Vec<u8>,
-    pub updated_at: u64,
-    /// Tentativi sbagliati nel giorno `fail_day`.
-    pub failures: u32,
-    pub fail_day: u64,
-}
 
 fn to_i64(n: u64) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
@@ -212,79 +192,6 @@ impl Store {
                 |r| r.get(0),
             )
             .optional()
-    }
-
-    /// Proprietario della casella che ha verificato questo numero.
-    pub fn identity_of_phone(&self, phone_hash: &str) -> Result<Option<String>> {
-        self.conn
-            .query_row(
-                "SELECT i.owner FROM phone_dir p JOIN inboxes i ON p.inbox = i.inbox
-                 WHERE p.phone_hash = ?1",
-                [phone_hash],
-                |r| r.get(0),
-            )
-            .optional()
-    }
-
-    // --- cassaforte (SPEC §7.8) ---
-
-    pub fn put_vault(
-        &self,
-        identity: &str,
-        salt: &str,
-        verifier: &str,
-        blob: &[u8],
-        now: u64,
-    ) -> Result<()> {
-        // Cambiare la cassaforte non azzera i tentativi sbagliati di oggi.
-        self.conn.execute(
-            "INSERT INTO vaults (identity, salt, verifier, blob, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(identity) DO UPDATE SET salt = ?2, verifier = ?3, blob = ?4, updated_at = ?5",
-            params![identity, salt, verifier, blob, to_i64(now)],
-        )?;
-        Ok(())
-    }
-
-    pub fn delete_vault(&self, identity: &str) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM vaults WHERE identity = ?1", [identity])?;
-        Ok(())
-    }
-
-    pub fn vault(&self, identity: &str) -> Result<Option<VaultRow>> {
-        self.conn
-            .query_row(
-                "SELECT salt, verifier, blob, updated_at, failures, fail_day FROM vaults
-                 WHERE identity = ?1",
-                [identity],
-                |r| {
-                    Ok(VaultRow {
-                        salt: r.get(0)?,
-                        verifier: r.get(1)?,
-                        blob: r.get(2)?,
-                        updated_at: to_u64(r.get(3)?),
-                        failures: r.get(4)?,
-                        fail_day: to_u64(r.get(5)?),
-                    })
-                },
-            )
-            .optional()
-    }
-
-    pub fn has_vault(&self, identity: &str) -> Result<bool> {
-        self.conn
-            .prepare("SELECT 1 FROM vaults WHERE identity = ?1")?
-            .exists([identity])
-    }
-
-    /// Un tentativo sbagliato oggi (`day` = giorni dal 1970).
-    pub fn vault_failure(&self, identity: &str, day: u64) -> Result<()> {
-        self.conn.execute(
-            "UPDATE vaults SET failures = CASE WHEN fail_day = ?2 THEN failures + 1 ELSE 1 END,
-             fail_day = ?2 WHERE identity = ?1",
-            params![identity, to_i64(day)],
-        )?;
-        Ok(())
     }
 
     // --- numeri verificati (SPEC §13) ---

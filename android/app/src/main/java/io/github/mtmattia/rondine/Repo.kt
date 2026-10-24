@@ -142,61 +142,6 @@ object Repo {
         get() = prefs().getLong("chiamate_viste", 0)
         set(v) { prefs().edit().putLong("chiamate_viste", v).apply() }
 
-    /** Profilo dalla cassaforte del nodo (SPEC §7.8): nome utente o numero e password. */
-    suspend fun restoreFromVault(node: String, who: String, password: String) {
-        val r = uniffi.rondine_ffi.restoreFromVault(profileDir, node, who, password)
-        rondine = r
-        loaded.complete(Unit)
-        startLan()
-        refresh()
-        ready.value = true
-    }
-
-    /** Cassaforte sul nodo: c'è e quando è stata copiata (aggiornato a ogni refresh). */
-    val vault = MutableStateFlow<uniffi.rondine_ffi.VaultStatus?>(null)
-
-    /** Profilo trovato nel promemoria dopo una reinstallazione: chi cercare e su quale nodo. */
-    data class OldSession(val who: String, val node: String, val label: String)
-
-    /**
-     * Promemoria per ritrovare il profilo se l'app viene cancellata (SPEC §7.8): nome utente o
-     * numero e nodo, mai chiavi o messaggi. È l'unico file che finisce nel backup di Android
-     * (res/xml/backup_rules.xml, data_extraction_rules.xml).
-     */
-    private fun hint() = app.getSharedPreferences("ricordo", Context.MODE_PRIVATE)
-
-    fun oldSession(): OldSession? {
-        val h = hint()
-        val who = h.getString("chi", null) ?: return null
-        val node = h.getString("nodo", null) ?: return null
-        return OldSession(who, node, h.getString("etichetta", null) ?: who)
-    }
-
-    fun forgetOldSession() {
-        hint().edit().clear().apply()
-    }
-
-    private fun saveHint(p: uniffi.rondine_ffi.Profile, v: uniffi.rondine_ffi.VaultStatus) {
-        val who = p.username?.substringBefore('@') ?: p.phone?.takeIf { p.phoneVerified }
-        val h = hint()
-        if (!v.enabled || who == null || !p.hasNode) {
-            if (h.contains("chi")) {
-                h.edit().clear().apply()
-                android.app.backup.BackupManager(app).dataChanged()
-            }
-            return
-        }
-        val label = p.username?.let { "@${it.substringBefore('@')}" } ?: who
-        if (h.getString("chi", null) == who && h.getString("nodo", null) == p.node) return
-        h.edit().putString("chi", who).putString("nodo", p.node).putString("etichetta", label).apply()
-        android.app.backup.BackupManager(app).dataChanged()
-    }
-
-    /** Quando ho chiesto l'ultima volta di scegliere la password (millisecondi). */
-    var vaultAskedAt: Long
-        get() = prefs().getLong("cassaforte_chiesta", 0)
-        set(v) { prefs().edit().putLong("cassaforte_chiesta", v).apply() }
-
     /** Quando è stato fatto l'ultimo backup (millisecondi), 0 se mai. */
     var lastBackup: Long
         get() = prefs().getLong("ultimo_backup", 0)
@@ -262,9 +207,6 @@ object Repo {
     suspend fun refresh() {
         val r = rondine ?: return
         profile.value = r.profile()
-        val v = r.vaultStatus()
-        vault.value = v
-        profile.value?.let { saveHint(it, v) }
         chats.value = r.chats()
         groups.value = r.groups()
         calls.value = r.calls()

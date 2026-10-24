@@ -20,10 +20,7 @@ come descritto qui.
 - La tua identità (chiave privata), i contatti, i messaggi, le foto, i documenti, i vocali e le
   posizioni, salvati nella memoria privata dell'app.
 - Il tuo numero di telefono e la rubrica: non escono mai in chiaro (vedi "Rubrica").
-- Nel backup di Android (Google o Seedvault, cifrato con il blocco schermo) va **solo** un
-  promemoria con il tuo nome utente o numero e l'indirizzo del nodo, se hai attivato la
-  cassaforte: serve a proporti il ripristino se reinstalli l'app. Chiavi, contatti e messaggi non
-  ci vanno mai.
+- Il backup automatico di Android è disattivato. Disinstallando l'app tutto viene cancellato.
 
 ## Cosa vede il nodo
 
@@ -53,13 +50,6 @@ le sveglie vanno ancora diretti.
 
 I messaggi restano sul nodo finché il telefono non li ritira, al massimo 30 giorni; poi vengono
 cancellati.
-
-**Cassaforte (facoltativa).** Se scegli una password, il tuo nodo conserva una copia del tuo
-profilo (identità, contatti, messaggi, gruppi) **cifrata con una chiave che si ricava solo dalla
-password** (Argon2id), aggiornata al massimo ogni 6 ore. Il nodo non può aprirla; la restituisce
-solo a chi dimostra di conoscere la password, al massimo 10 tentativi sbagliati al giorno. Chi
-gestisce il nodo potrebbe però provare a indovinare la password per conto suo: per questo conviene
-una frase lunga. La puoi togliere quando vuoi da Impostazioni → Chat → Cassaforte sul nodo.
 
 ## Rubrica
 
@@ -149,9 +139,7 @@ by the author and behaves as described here.
 
 **On your phone only:** your identity (private key), contacts, messages, photos, documents, voice
 messages and locations, in the app's private storage; your phone number and address book never
-leave the phone in clear. Only a reminder with your username or number and your node goes into
-Android backup (Google or Seedvault, encrypted with the screen lock), if you enable the vault, to
-offer a restore after reinstalling; keys, contacts and messages never do.
+leave the phone in clear. Android backup is disabled; uninstalling deletes everything.
 
 **What the node sees:** everything it stores or forwards is **end-to-end encrypted** (MLS,
 RFC 9420) or an opaque identifier. It cannot read messages, media, locations, contact names or
@@ -162,11 +150,6 @@ content), and your username if you choose one (public by choice, can be released
 **One exception, only if you ask for it:** to verify your number by SMS your own node sees the
 number once to send the code, then keeps only a slow hash (Argon2id). Messages stay on the node
 until your phone fetches them, at most 30 days.
-
-**Vault (optional):** if you choose a password, your node keeps a copy of your profile encrypted
-with a key derived only from the password (Argon2id), refreshed at most every 6 hours. The node
-cannot open it and returns it only to whoever proves to know the password (10 wrong attempts per
-day). The node operator could still try to guess the password offline: use a long passphrase.
 
 **Address book:** if you allow it, numbers are read to find who uses Rondine. They are not
 uploaded: for each pair of numbers the phone derives an address and a key (Argon2id) and

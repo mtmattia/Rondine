@@ -393,3 +393,6 @@ Una riga per modifica: data, cosa è cambiato.
   scaricato (plist in `~/rondine-nodo/it.rondinenodo.plist.spento`), `tailscale serve` spento,
   `RONDINE_STAFFETTE` tolto dal servizio del PC. Senza staffetta i depositi sul nodo del PC partono
   con il lucchetto aperto (SPEC §6.3).
+- 2026-10-24 — Cassaforte sul nodo tolta (revert), scelta di Mattia: la rubrica è del telefono e i
+  contatti tornano da soli; non vuole copie del profilo sul nodo, nemmeno cifrate. Resta il backup
+  su file con il codice di 30 cifre. Tenuta solo l'ottimizzazione di Argon2 nei test.

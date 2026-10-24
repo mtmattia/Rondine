@@ -17,7 +17,6 @@ pub mod seal;
 pub mod signed;
 pub mod stun;
 pub mod username;
-pub mod vault;
 
 pub use card::{Card, SignedCard};
 pub use error::{Error, Result};

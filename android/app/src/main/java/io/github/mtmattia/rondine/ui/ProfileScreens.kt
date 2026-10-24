@@ -314,46 +314,6 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
     var photoMenu by remember { mutableStateOf(false) }
     // Backup (SPEC §7.8): prima il file, salvato dove vuole la persona, poi il codice da annotare.
     var backupAsk by remember { mutableStateOf(false) }
-    val vault by Repo.vault.collectAsState()
-    var vaultMenu by remember { mutableStateOf(false) }
-    var vaultPassword by remember { mutableStateOf(false) }
-    if (vaultPassword) {
-        VaultPasswordDialog(change = vault?.enabled == true, onDismiss = { vaultPassword = false }) {
-            vaultPassword = false
-            scope.launch { snackbar.showSnackbar("Profilo copiato nella cassaforte") }
-        }
-    }
-    if (vaultMenu) {
-        AlertDialog(
-            onDismissRequest = { vaultMenu = false },
-            title = { Text("Cassaforte sul nodo") },
-            text = {
-                Text(
-                    "Ogni 6 ore Rondine copia chat e contatti sul tuo nodo, cifrati con la tua password. Se cancelli " +
-                        "l'app o cambi telefono li ritrovi con il nome utente (o il numero) e la password. Con la " +
-                        "cassaforte, nome e numero non passano a nessun altro con un semplice SMS.",
-                )
-            },
-            confirmButton = {
-                Column(horizontalAlignment = Alignment.End) {
-                    if (vault?.enabled == true) {
-                        TextButton(onClick = {
-                            vaultMenu = false
-                            run { Repo.client().backupToVault(); Repo.refresh(); "Profilo copiato nella cassaforte" }
-                        }) { Text("Copia adesso") }
-                        TextButton(onClick = { vaultMenu = false; vaultPassword = true }) { Text("Cambia password") }
-                        TextButton(onClick = {
-                            vaultMenu = false
-                            run { Repo.client().removeVault(); Repo.refresh(); "Cassaforte tolta dal nodo" }
-                        }) { Text("Togli la cassaforte", color = MaterialTheme.colorScheme.error) }
-                    } else {
-                        TextButton(onClick = { vaultMenu = false; vaultPassword = true }) { Text("Scegli la password") }
-                    }
-                    TextButton(onClick = { vaultMenu = false }) { Text("Chiudi") }
-                }
-            },
-        )
-    }
     var pendingBackup by remember { mutableStateOf<uniffi.rondine_ffi.BackupFile?>(null) }
     var showCode by remember { mutableStateOf<String?>(null) }
     var lastBackup by remember { mutableStateOf(Repo.lastBackup) }
@@ -599,17 +559,6 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
         }
         SettingsPage.Chat -> BackScaffold("Chat", back, snackbar) { m ->
             Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
-                SettingRow(
-                    Icons.Filled.Lock,
-                    "Cassaforte sul nodo",
-                    when {
-                        !p.hasNode -> "Serve un nodo"
-                        vault?.enabled != true -> "Spenta: tocca per scegliere una password"
-                        else -> "Copia automatica, ultima " + java.text.DateFormat
-                            .getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
-                            .format(java.util.Date((vault?.lastAt ?: 0uL).toLong() * 1000))
-                    },
-                ) { if (p.hasNode) vaultMenu = true }
                 SettingRow(
                     Icons.Filled.Backup,
                     "Backup delle chat",

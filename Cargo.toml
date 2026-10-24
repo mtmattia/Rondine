@@ -76,7 +76,7 @@ strip = true
 opt-level = 3
 [profile.dev.package.tract-core]
 opt-level = 3
-# Argon2 (backup, cassaforte, numeri) senza ottimizzazioni è lento anche nei test.
+# Argon2 (backup, numeri) senza ottimizzazioni è lento anche nei test.
 [profile.dev.package.argon2]
 opt-level = 3
 [profile.dev.package.blake2]

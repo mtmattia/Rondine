@@ -28,6 +28,9 @@ struct PhoneRequest {
 struct PhoneConfirm {
     code: String,
     card: SignedCard,
+    /// Prova della password di chi aveva il numero (SPEC §3.4): lo sblocca subito.
+    #[serde(default)]
+    name_auth: Option<String>,
 }
 
 /// Voce dell'elenco dei numeri: il biglietto e l'attestazione del nodo.
@@ -163,6 +166,13 @@ pub async fn confirm(
     })
     .map_err(|_| ApiError::internal())?;
     let db = s.db()?;
+    // Il numero di chi ha la password del nome ed è attivo non passa con un SMS (SPEC §3.4).
+    if let Some(other) = db.identity_of_phone(&p.phone_hash)?
+        && other != owner.to_b64()
+        && s.password_locked(&db, &other)?
+    {
+        s.check_name_auth(&db, &other, req.name_auth.as_deref(), "phone_locked")?;
+    }
     // Un numero sta in una casella sola: se questa ne aveva un altro, lo lascia.
     db.delete_phone_dir(&inbox)?;
     db.put_phone_dir(&p.phone_hash, &inbox, &entry)?;

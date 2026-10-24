@@ -419,6 +419,7 @@ impl Client {
                 my_about: None,
                 photos: Vec::new(),
                 discovery_cache: Vec::new(),
+                password: None,
                 pending_restore: false,
                 rejoin_groups: Vec::new(),
                 calls: Vec::new(),
@@ -487,6 +488,7 @@ impl Client {
                 my_about: None,
                 photos: Vec::new(),
                 discovery_cache: Vec::new(),
+                password: None,
                 pending_restore: false,
                 rejoin_groups: Vec::new(),
                 calls: Vec::new(),
@@ -1194,6 +1196,16 @@ impl Client {
 
     /// Registra `nome@mio-nodo` (SPEC §3.2).
     pub async fn claim_username(&mut self, name: &str) -> Result<String> {
+        self.claim_username_with(name, None).await
+    }
+
+    /// Registra il nome, con la prova della password di chi lo teneva se c'è (SPEC §3.4). Se ho
+    /// una password, il nome ne è subito protetto.
+    pub(crate) async fn claim_username_with(
+        &mut self,
+        name: &str,
+        name_auth: Option<&str>,
+    ) -> Result<String> {
         self.require_node()?;
         let name = normalize_name(name)?;
         let handle = format!("{name}@{}", node_host(&self.state.node)?);
@@ -1209,13 +1221,17 @@ impl Client {
             issued_at: now(),
         };
         let signed = Signed::sign(&self.identity, &claim)?;
+        let headers: Vec<(&str, &str)> = name_auth
+            .map(|a| vec![("rondine-name-auth", a)])
+            .unwrap_or_default();
         if let Err(e) = self
             .net
-            .call(
+            .call_with(
                 Method::PUT,
                 &self.state.node,
                 &format!("/v1/names/{name}"),
                 &signed,
+                &headers,
             )
             .await
         {
@@ -1224,6 +1240,9 @@ impl Client {
         }
         self.state.public_permit = Some(permit);
         self.save()?;
+        if self.state.password.is_some() {
+            self.upload_name_password().await?;
+        }
         Ok(handle)
     }
 
@@ -3729,6 +3748,14 @@ impl Client {
 
     /// Conferma il numero con il codice ricevuto: da qui chi ha il numero mi trova.
     pub async fn confirm_phone(&mut self, code: &str) -> Result<()> {
+        self.confirm_phone_with(code, None).await
+    }
+
+    pub(crate) async fn confirm_phone_with(
+        &mut self,
+        code: &str,
+        name_auth: Option<&str>,
+    ) -> Result<()> {
         self.require_node()?;
         let permit = match &self.state.public_permit {
             Some(p) => p.clone(),
@@ -3746,7 +3773,7 @@ impl Client {
                 Method::POST,
                 &self.state.node,
                 &path,
-                Some(&json!({ "code": code.trim(), "card": card })),
+                Some(&json!({ "code": code.trim(), "card": card, "name_auth": name_auth })),
             )
             .await?;
         self.state.phone_verified = true;

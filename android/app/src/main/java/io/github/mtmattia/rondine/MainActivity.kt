@@ -249,6 +249,8 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        io.github.mtmattia.rondine.ui.PasswordPrompt()
+
         invite?.let { link ->
             AlertDialog(
                 onDismissRequest = { Repo.pendingInvite.value = null },

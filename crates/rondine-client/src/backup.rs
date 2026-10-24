@@ -9,7 +9,8 @@ use std::path::Path;
 
 use reqwest::Method;
 use rondine_core::envelope::AppMessage;
-use rondine_core::{Identity, b64, backup, now};
+use rondine_core::username::{Handle, normalize_name};
+use rondine_core::{Identity, b64, backup, now, password};
 use rondine_mls::Device;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -29,9 +30,14 @@ struct Payload {
     photos: BTreeMap<String, String>,
 }
 
+#[derive(Deserialize)]
+struct NamePassword {
+    salt: String,
+}
+
 impl Client {
-    /// Il backup cifrato e il codice per aprirlo (da mostrare una volta e far annotare).
-    pub fn export_backup(&self) -> Result<(Vec<u8>, String)> {
+    /// Il JSON del backup: stato e foto del profilo (SPEC §7.8).
+    fn backup_payload(&self) -> Result<Vec<u8>> {
         let mut photos = BTreeMap::new();
         if let Ok(dir) = std::fs::read_dir(self.dir.join(PHOTOS_DIR)) {
             for entry in dir.flatten() {
@@ -49,26 +55,145 @@ impl Client {
             state: self.state.clone(),
             photos,
         };
+        Ok(serde_json::to_vec(&payload)?)
+    }
+
+    /// Il backup cifrato e il codice per aprirlo (da mostrare una volta e far annotare).
+    pub fn export_backup(&self) -> Result<(Vec<u8>, String)> {
         let code = backup::new_code();
-        let file = backup::seal(&code, &serde_json::to_vec(&payload)?)?;
+        let file = backup::seal(&code, &self.backup_payload()?)?;
         Ok((file, code))
+    }
+
+    /// Il backup cifrato con la password (versione 2, SPEC §7.8): serve averla scelta.
+    pub fn export_backup_with_password(&self) -> Result<Vec<u8>> {
+        let keys = self
+            .state
+            .password
+            .as_ref()
+            .ok_or_else(|| Error::Invalid("prima scegli una password".into()))?;
+        Ok(backup::seal_with_keys(keys, &self.backup_payload()?)?)
+    }
+
+    pub fn has_password(&self) -> bool {
+        self.state.password.is_some()
+    }
+
+    /// Sceglie (o cambia) la password (SPEC §3.4): protegge il nome utente, se c'è, e cifra i
+    /// backup automatici.
+    pub async fn set_password(&mut self, pw: &str) -> Result<()> {
+        let pw = pw.to_string();
+        let keys = tokio::task::spawn_blocking(move || password::new_keys(&pw))
+            .await
+            .map_err(|e| Error::Invalid(format!("password non salvata: {e}")))??;
+        let old = self.state.password.replace(keys);
+        if self.state.username.is_some()
+            && self.has_node()
+            && let Err(e) = self.upload_name_password().await
+        {
+            self.state.password = old;
+            return Err(e);
+        }
+        self.save()
+    }
+
+    /// Manda al nodo del nome il sale e la verifica della password.
+    pub(crate) async fn upload_name_password(&mut self) -> Result<()> {
+        let (Some(keys), Some(handle)) = (&self.state.password, &self.state.username) else {
+            return Ok(());
+        };
+        let name = Handle::parse(handle)?.name;
+        let body = json!({ "salt": keys.salt, "verifier": keys.verifier()? });
+        self.net
+            .owner(
+                &self.identity,
+                Method::PUT,
+                &self.state.node,
+                &format!("/v1/names/{name}/password"),
+                Some(&body),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// La prova della password per il nome `name` del mio nodo (SPEC §3.4).
+    async fn name_auth(&self, name: &str, pw: &str) -> Result<String> {
+        self.require_node()?;
+        let name = normalize_name(name.trim().trim_start_matches('@'))?;
+        let found: NamePassword = self
+            .net
+            .get(&self.state.node, &format!("/v1/names/{name}/password"))
+            .await?;
+        let salt = b64::decode(&found.salt)?;
+        let pw = pw.to_string();
+        let keys = tokio::task::spawn_blocking(move || password::keys(&pw, &salt))
+            .await
+            .map_err(|e| Error::Invalid(format!("password non controllata: {e}")))??;
+        Ok(keys.auth)
+    }
+
+    /// Riprende un nome utente protetto da password (per esempio dopo aver perso il telefono
+    /// senza backup). Se il nome aveva un numero verificato, va verificato prima lo stesso numero
+    /// (con [`Client::confirm_phone_with_password`]). Poi il nome resta protetto dalla stessa
+    /// password.
+    pub async fn recover_username(&mut self, name: &str, pw: &str) -> Result<String> {
+        let auth = self.name_auth(name, pw).await?;
+        let plain = name.trim().trim_start_matches('@').to_string();
+        let handle = self.claim_username_with(&plain, Some(&auth)).await?;
+        self.set_password(pw).await?;
+        Ok(handle)
+    }
+
+    /// Conferma il numero anche se è protetto dalla password di chi lo aveva (SPEC §13.2): `name`
+    /// è il suo nome utente su questo nodo.
+    pub async fn confirm_phone_with_password(
+        &mut self,
+        code: &str,
+        name: &str,
+        pw: &str,
+    ) -> Result<()> {
+        let auth = self.name_auth(name, pw).await?;
+        self.confirm_phone_with(code, Some(&auth)).await
     }
 
     /// Ripristina un backup in una cartella vuota. La rete serve solo dopo: alla prima
     /// sincronizzazione il client riapre le chat e chiede di rientrare nei gruppi.
-    pub async fn restore_backup(dir: &Path, file: &[u8], code: &str) -> Result<Client> {
+    /// `secret` è il codice di 30 cifre (versione 1) o la password (versione 2).
+    pub async fn restore_backup(dir: &Path, file: &[u8], secret: &str) -> Result<Client> {
         if Client::exists(dir) {
             return Err(Error::Invalid(
                 "in questa cartella c'è già un profilo".into(),
             ));
         }
-        let plain = {
-            let (file, code) = (file.to_vec(), code.to_string());
-            tokio::task::spawn_blocking(move || backup::open(&code, &file))
-                .await
-                .map_err(|e| Error::Invalid(format!("ripristino interrotto: {e}")))??
+        let (plain, keys) = {
+            let (file, secret) = (file.to_vec(), secret.to_string());
+            tokio::task::spawn_blocking(move || {
+                if backup::needs_password(&file) {
+                    backup::open_with_password(&secret, &file).map(|(p, k)| (p, Some(k)))
+                } else {
+                    backup::open(&secret, &file).map(|p| (p, None))
+                }
+            })
+            .await
+            .map_err(|e| Error::Invalid(format!("ripristino interrotto: {e}")))??
         };
-        let payload: Payload = serde_json::from_slice(&plain)?;
+        let mut client = Self::restore_payload(dir, &plain).await?;
+        // Stessa password: i backup automatici continuano senza chiederla.
+        if keys.is_some() {
+            client.state.password = keys;
+            client.save()?;
+        }
+        Ok(client)
+    }
+
+    /// Il file di backup si apre con la password (versione 2) e non con il codice?
+    pub fn is_password_backup(file: &[u8]) -> bool {
+        backup::needs_password(file)
+    }
+
+    /// Profilo dal backup decifrato (SPEC §7.8).
+    async fn restore_payload(dir: &Path, plain: &[u8]) -> Result<Client> {
+        let payload: Payload = serde_json::from_slice(plain)?;
         rondine_core::check_version(payload.v)?;
         let mut state = payload.state;
         let identity = Identity::from_seed(b64::decode_array::<32>(&state.seed)?);

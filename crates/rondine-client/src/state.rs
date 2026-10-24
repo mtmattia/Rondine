@@ -298,6 +298,9 @@ pub struct State {
     /// Segreti già calcolati dei numeri della rubrica (SPEC §9, §13.1): l'Argon2 non si rifà.
     #[serde(default)]
     pub discovery_cache: Vec<DiscoverySecret>,
+    /// Chiavi ricavate dalla password (SPEC §3.4): backup automatico e protezione del nome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<rondine_core::password::PasswordKeys>,
     /// Ripristinato da un backup e non ancora ricollegato (SPEC §7.8).
     #[serde(default)]
     pub pending_restore: bool,

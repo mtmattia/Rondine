@@ -162,11 +162,26 @@ impl Net {
         path: &str,
         body: &B,
     ) -> Result<Vec<u8>> {
-        let req = self
+        self.call_with(method, base, path, body, &[]).await
+    }
+
+    /// Come [`Net::call`], con intestazioni in più.
+    pub async fn call_with<B: Serialize>(
+        &self,
+        method: Method,
+        base: &str,
+        path: &str,
+        body: &B,
+        headers: &[(&str, &str)],
+    ) -> Result<Vec<u8>> {
+        let mut req = self
             .http
             .request(method, Self::url(base, path))
             .header("content-type", "application/json")
             .body(serde_json::to_vec(body)?);
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
         self.send(req).await
     }
 

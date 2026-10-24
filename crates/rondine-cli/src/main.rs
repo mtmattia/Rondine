@@ -46,12 +46,17 @@ enum Cmd {
     /// Ripristina un profilo da un backup (SPEC §7.8) nella cartella del profilo.
     Ripristina {
         file: PathBuf,
-        /// Il codice di 30 cifre del backup.
+        /// Il codice di 30 cifre del backup, o la password se l'hai fatto con la password.
         #[arg(long)]
         codice: String,
     },
-    /// Salva un backup cifrato del profilo e stampa il codice per aprirlo (SPEC §7.8).
-    Backup { file: PathBuf },
+    /// Salva un backup cifrato del profilo e stampa il codice per aprirlo (SPEC §7.8). Con
+    /// --password lo cifra con la tua password invece che con un codice nuovo.
+    Backup {
+        file: PathBuf,
+        #[arg(long)]
+        password: bool,
+    },
     /// Mostra chi sei e il tuo link d'invito.
     Io,
     /// Aggiunge il nodo, o passa a un altro (la vecchia casella si ritira ancora per 30 giorni).
@@ -74,8 +79,17 @@ enum Cmd {
         #[arg(long)]
         sms: bool,
     },
-    /// Conferma il numero con il codice ricevuto per SMS.
-    Codice { codice: String },
+    /// Conferma il numero con il codice ricevuto per SMS. Se il numero è protetto dalla password
+    /// di chi l'aveva (SPEC §3.4), servono anche il suo nome e la password.
+    Codice {
+        codice: String,
+        #[arg(long, requires = "password")]
+        nome: Option<String>,
+        #[arg(long, requires = "nome")]
+        password: Option<String>,
+    },
+    /// Sceglie o cambia la password (SPEC §3.4): protegge il nome utente e cifra i backup.
+    Password { password: String },
     /// Aggiunge una bacheca per la ricerca in rubrica.
     Bacheca { url: String },
     /// Ricerca dalla rubrica.
@@ -334,6 +348,13 @@ enum NomeCmd {
     Prendi { nome: String },
     /// Libera il tuo nome.
     Libera,
+    /// Riprende un nome protetto da password (SPEC §3.4); se aveva un numero verificato, prima
+    /// `rondine codice <codice> --nome <nome> --password …`.
+    Recupera {
+        nome: String,
+        #[arg(long)]
+        password: String,
+    },
     /// Cerca un nome utente senza aggiungerlo.
     Cerca { chi: String },
 }
@@ -832,7 +853,21 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.cmd {
         Cmd::Crea { .. } | Cmd::Ripristina { .. } | Cmd::Ritaglia { .. } => {}
-        Cmd::Backup { file } => {
+        Cmd::Backup {
+            file,
+            password: true,
+        } => {
+            std::fs::write(&file, c.export_backup_with_password()?)
+                .context("scrittura del backup")?;
+            println!(
+                "Backup salvato in {}: si apre con la tua password.",
+                file.display()
+            );
+        }
+        Cmd::Backup {
+            file,
+            password: false,
+        } => {
             let (data, code) = c.export_backup()?;
             std::fs::write(&file, data).context("scrittura del backup")?;
             println!("Backup salvato in {}.", file.display());
@@ -899,6 +934,18 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Nome(NomeCmd::Prendi { nome }) => {
             println!("Ora sei @{}", c.claim_username(&nome).await?);
         }
+        Cmd::Nome(NomeCmd::Recupera { nome, password }) => {
+            println!(
+                "Nome ripreso: ora sei @{}",
+                c.recover_username(&nome, &password).await?
+            );
+        }
+        Cmd::Password { password } => {
+            c.set_password(&password).await?;
+            println!(
+                "Password salvata: protegge il tuo nome e cifra i backup (`rondine backup <file> --password`)."
+            );
+        }
         Cmd::Nome(NomeCmd::Libera) => {
             c.release_username().await?;
             println!("Nome liberato.");
@@ -915,8 +962,15 @@ async fn main() -> anyhow::Result<()> {
             let n = c.request_phone(&numero).await?;
             println!("Codice mandato per SMS a {n}. Confermalo con `rondine codice <codice>`.");
         }
-        Cmd::Codice { codice } => {
-            c.confirm_phone(&codice).await?;
+        Cmd::Codice {
+            codice,
+            nome,
+            password,
+        } => {
+            match (nome, password) {
+                (Some(n), Some(p)) => c.confirm_phone_with_password(&codice, &n, &p).await?,
+                _ => c.confirm_phone(&codice).await?,
+            }
             println!("Numero verificato: chi lo ha ti trova su Rondine.");
         }
         Cmd::Bacheca { url } => {

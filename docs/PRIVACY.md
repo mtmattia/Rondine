@@ -20,7 +20,11 @@ come descritto qui.
 - La tua identità (chiave privata), i contatti, i messaggi, le foto, i documenti, i vocali e le
   posizioni, salvati nella memoria privata dell'app.
 - Il tuo numero di telefono e la rubrica: non escono mai in chiaro (vedi "Rubrica").
-- Il backup automatico di Android è disattivato. Disinstallando l'app tutto viene cancellato.
+- Se scegli una password, Rondine salva ogni giorno un backup **cifrato con la password** in
+  Documenti/Rondine sul telefono: resta se cancelli l'app, e non va su nessun server.
+- Nel backup di Android (Google o Seedvault, cifrato con il blocco schermo) va **solo** il tuo nome
+  utente, se hai una password: serve a proporti il ripristino dopo una reinstallazione. Chiavi,
+  contatti e messaggi non ci vanno mai.
 
 ## Cosa vede il nodo
 
@@ -39,6 +43,9 @@ internet:
   hai uno, perché chi verifica lo stesso numero possa recuperarlo;
 - **una sola eccezione, solo se la chiedi:** per verificare il tuo numero con un SMS il tuo nodo
   vede il numero una volta per mandare il codice, poi ne conserva solo un hash lento (Argon2id).
+- **se scegli una password,** accanto al tuo nome utente il nodo tiene un sale e una verifica che ne
+  derivano (non la password): servono a ridarti il nome se perdi il telefono. Chi gestisce il nodo
+  potrebbe provare a indovinarla per conto suo: meglio una frase lunga.
 
 **Deposito sigillato.** Chi ti scrive non si collega al tuo nodo: il messaggio arriva chiuso in un
 plico cifrato per il tuo nodo attraverso un altro nodo, la "staffetta" (Oblivious HTTP, RFC 9458).
@@ -139,7 +146,12 @@ by the author and behaves as described here.
 
 **On your phone only:** your identity (private key), contacts, messages, photos, documents, voice
 messages and locations, in the app's private storage; your phone number and address book never
-leave the phone in clear. Android backup is disabled; uninstalling deletes everything.
+leave the phone in clear. If you choose a password, a daily backup **encrypted with it** is saved
+in Documents/Rondine on the phone (it survives uninstalling, and goes to no server); only your
+username goes into Android backup (Google or Seedvault, encrypted with the screen lock), to offer a
+restore after reinstalling. If you choose a password, the node keeps a salt and a verifier derived
+from it next to your username (never the password itself), to give your name back if you lose the
+phone.
 
 **What the node sees:** everything it stores or forwards is **end-to-end encrypted** (MLS,
 RFC 9420) or an opaque identifier. It cannot read messages, media, locations, contact names or

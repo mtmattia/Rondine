@@ -49,6 +49,8 @@ object Repo {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var rondine: Rondine? = null
     private val syncLock = Mutex()
+    /** Un backup automatico alla volta: due insieme creerebbero due file. */
+    private val backupLock = Mutex()
     /** Completato quando il profilo è stato aperto (o si sa che non c'è). */
     private val loaded = CompletableDeferred<Unit>()
 
@@ -142,6 +144,69 @@ object Repo {
         get() = prefs().getLong("chiamate_viste", 0)
         set(v) { prefs().edit().putLong("chiamate_viste", v).apply() }
 
+    /** C'è la password (SPEC §3.4): backup automatico e nome protetto. Aggiornato a ogni refresh. */
+    val hasPassword = MutableStateFlow<Boolean?>(null)
+
+    /** Ultimo backup automatico riuscito (millisecondi), 0 se mai. */
+    val lastAutoBackup = MutableStateFlow(0L)
+
+    /** Errore dell'ultimo backup automatico, da mostrare nelle Impostazioni. */
+    val autoBackupError = MutableStateFlow<String?>(null)
+
+    /**
+     * Backup automatico in Documents/Rondine (SPEC §7.8): al massimo uno al giorno, salvo `force`
+     * (appena scelta la password, o "Copia adesso").
+     */
+    suspend fun autoBackup(force: Boolean = false) = backupLock.withLock {
+        val r = rondine ?: return@withLock
+        if (!r.hasPassword()) return@withLock
+        val last = prefs().getLong("backup_auto", 0)
+        if (!force && System.currentTimeMillis() - last < AutoBackup.EVERY_MS) return@withLock
+        try {
+            val bytes = r.exportBackupWithPassword()
+            val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                AutoBackup.write(app, bytes, prefs().getString("backup_auto_uri", null))
+            }
+            val now = System.currentTimeMillis()
+            prefs().edit().putLong("backup_auto", now).putString("backup_auto_uri", uri).apply()
+            lastAutoBackup.value = now
+            autoBackupError.value = null
+        } catch (e: RondineException) {
+            autoBackupError.value = e.userMessage
+        } catch (e: java.io.IOException) {
+            autoBackupError.value = e.message ?: "file non scritto"
+        } catch (e: SecurityException) {
+            autoBackupError.value = e.message ?: "permesso negato"
+        }
+    }
+
+    /** Profilo trovato nel promemoria dopo una reinstallazione: il nome utente. */
+    fun oldSession(): String? = hint().getString("nome", null)
+
+    fun forgetOldSession() {
+        hint().edit().clear().apply()
+    }
+
+    /**
+     * Promemoria per riconoscere la vecchia sessione se l'app viene cancellata (SPEC §7.8): solo il
+     * nome utente. È l'unico file che finisce nel backup di Android (res/xml/backup_rules.xml,
+     * data_extraction_rules.xml).
+     */
+    private fun hint() = app.getSharedPreferences("ricordo", Context.MODE_PRIVATE)
+
+    private fun saveHint(p: uniffi.rondine_ffi.Profile, password: Boolean) {
+        val name = p.username?.substringBefore('@')?.takeIf { password }
+        val h = hint()
+        if (h.getString("nome", null) == name) return
+        if (name == null) h.edit().clear().apply() else h.edit().putString("nome", name).apply()
+        android.app.backup.BackupManager(app).dataChanged()
+    }
+
+    /** Quando ho chiesto l'ultima volta di scegliere la password (millisecondi). */
+    var passwordAskedAt: Long
+        get() = prefs().getLong("password_chiesta", 0)
+        set(v) { prefs().edit().putLong("password_chiesta", v).apply() }
+
     /** Quando è stato fatto l'ultimo backup (millisecondi), 0 se mai. */
     var lastBackup: Long
         get() = prefs().getLong("ultimo_backup", 0)
@@ -207,6 +272,10 @@ object Repo {
     suspend fun refresh() {
         val r = rondine ?: return
         profile.value = r.profile()
+        val pw = r.hasPassword()
+        hasPassword.value = pw
+        lastAutoBackup.value = prefs().getLong("backup_auto", 0)
+        profile.value?.let { saveHint(it, pw) }
         chats.value = r.chats()
         groups.value = r.groups()
         calls.value = r.calls()
@@ -243,6 +312,7 @@ object Repo {
                 refresh()
             }
             io.github.mtmattia.rondine.call.CallManager.onSignals(res.calls)
+            autoBackup()
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty()) {
                 val foreground = ProcessLifecycleOwner.get().lifecycle.currentState
                     .isAtLeast(Lifecycle.State.STARTED)

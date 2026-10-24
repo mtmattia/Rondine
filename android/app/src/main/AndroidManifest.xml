@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Solo Android 9 e precedenti: backup automatico in Documents/Rondine (SPEC §7.8). -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <!-- Foto recenti nel pannello degli allegati (solo per mostrarle; da Android 14 si possono
          concedere solo alcune foto). -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -45,7 +47,9 @@
 
     <application
         android:name=".RondineApp"
-        android:allowBackup="false"
+        android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"

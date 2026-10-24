@@ -99,7 +99,23 @@ CREATE TABLE IF NOT EXISTS board (
     sig TEXT NOT NULL,
     PRIMARY KEY (loc, owner)
 );
+CREATE TABLE IF NOT EXISTS name_passwords (
+    identity TEXT PRIMARY KEY,
+    salt TEXT NOT NULL,
+    verifier TEXT NOT NULL,
+    failures INTEGER NOT NULL DEFAULT 0,
+    fail_day INTEGER NOT NULL DEFAULT 0
+);
 ";
+
+/// Password del nome di un'identità (SPEC §3.4): il sale e `blake3(accesso)`, mai la password.
+pub struct NamePassword {
+    pub salt: String,
+    pub verifier: String,
+    /// Tentativi sbagliati nel giorno `fail_day`.
+    pub failures: u32,
+    pub fail_day: u64,
+}
 
 fn to_i64(n: u64) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
@@ -192,6 +208,58 @@ impl Store {
                 |r| r.get(0),
             )
             .optional()
+    }
+
+    /// Proprietario della casella che ha verificato questo numero.
+    pub fn identity_of_phone(&self, phone_hash: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT i.owner FROM phone_dir p JOIN inboxes i ON p.inbox = i.inbox
+                 WHERE p.phone_hash = ?1",
+                [phone_hash],
+                |r| r.get(0),
+            )
+            .optional()
+    }
+
+    // --- password del nome (SPEC §3.4) ---
+
+    pub fn put_name_password(&self, identity: &str, salt: &str, verifier: &str) -> Result<()> {
+        // Cambiare password non azzera i tentativi sbagliati di oggi.
+        self.conn.execute(
+            "INSERT INTO name_passwords (identity, salt, verifier) VALUES (?1, ?2, ?3)
+             ON CONFLICT(identity) DO UPDATE SET salt = ?2, verifier = ?3",
+            params![identity, salt, verifier],
+        )?;
+        Ok(())
+    }
+
+    pub fn name_password(&self, identity: &str) -> Result<Option<NamePassword>> {
+        self.conn
+            .query_row(
+                "SELECT salt, verifier, failures, fail_day FROM name_passwords WHERE identity = ?1",
+                [identity],
+                |r| {
+                    Ok(NamePassword {
+                        salt: r.get(0)?,
+                        verifier: r.get(1)?,
+                        failures: r.get(2)?,
+                        fail_day: to_u64(r.get(3)?),
+                    })
+                },
+            )
+            .optional()
+    }
+
+    /// Una password sbagliata oggi (`day` = giorni dal 1970).
+    pub fn name_password_failure(&self, identity: &str, day: u64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE name_passwords SET
+             failures = CASE WHEN fail_day = ?2 THEN failures + 1 ELSE 1 END, fail_day = ?2
+             WHERE identity = ?1",
+            params![identity, to_i64(day)],
+        )?;
+        Ok(())
     }
 
     // --- numeri verificati (SPEC §13) ---

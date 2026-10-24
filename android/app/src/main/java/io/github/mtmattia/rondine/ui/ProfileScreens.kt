@@ -314,6 +314,70 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
     var photoMenu by remember { mutableStateOf(false) }
     // Backup (SPEC §7.8): prima il file, salvato dove vuole la persona, poi il codice da annotare.
     var backupAsk by remember { mutableStateOf(false) }
+    // Password (SPEC §3.4): nome protetto e backup automatico in Documents/Rondine.
+    val hasPassword by Repo.hasPassword.collectAsState()
+    val lastAuto by Repo.lastAutoBackup.collectAsState()
+    val autoError by Repo.autoBackupError.collectAsState()
+    var passwordDialog by remember { mutableStateOf(false) }
+    var autoMenu by remember { mutableStateOf(false) }
+    var recoverName by remember { mutableStateOf<String?>(null) }
+    var recoverPhoneCode by remember { mutableStateOf<String?>(null) }
+    if (passwordDialog) {
+        PasswordDialog(change = hasPassword == true, onDismiss = { passwordDialog = false }) {
+            passwordDialog = false
+            scope.launch { snackbar.showSnackbar("Password salvata") }
+        }
+    }
+    recoverName?.let { name ->
+        RecoverPasswordDialog(
+            title = "Nome protetto",
+            text = "@$name è protetto da una password. Se è tuo, scrivila: se avevi verificato il numero, " +
+                "verificalo prima anche qui.",
+            name = name, askName = false, onDismiss = { recoverName = null },
+        ) { n, pw ->
+            val h = Repo.client().recoverUsername(n, pw)
+            Repo.refresh()
+            "Nome ripreso: ora sei @$h"
+        }
+    }
+    recoverPhoneCode?.let { code ->
+        RecoverPasswordDialog(
+            title = "Numero protetto",
+            text = "Questo numero è protetto dalla password di chi l'aveva. Se eri tu, scrivi il tuo nome utente " +
+                "e la password.",
+            name = "", askName = true, onDismiss = { recoverPhoneCode = null },
+        ) { n, pw ->
+            Repo.client().confirmPhoneWithPassword(code, n, pw)
+            Repo.refresh()
+            "Numero verificato"
+        }
+    }
+    if (autoMenu) {
+        AlertDialog(
+            onDismissRequest = { autoMenu = false },
+            title = { Text("Backup automatico") },
+            text = {
+                Text(
+                    "Ogni giorno Rondine salva chat e contatti, cifrati con la tua password, in Documenti/Rondine " +
+                        "sul telefono. Se cancelli l'app, all'inizio scegli \"Ripristina da un backup\" e la password." +
+                        (autoError?.let { "\n\nUltimo tentativo non riuscito: $it" } ?: ""),
+                )
+            },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = {
+                        autoMenu = false
+                        scope.launch {
+                            Repo.autoBackup(force = true)
+                            snackbar.showSnackbar(Repo.autoBackupError.value?.let { "Non riuscito: $it" } ?: "Backup salvato in Documenti/Rondine")
+                        }
+                    }) { Text("Salva adesso") }
+                    TextButton(onClick = { autoMenu = false; passwordDialog = true }) { Text("Cambia password") }
+                    TextButton(onClick = { autoMenu = false }) { Text("Chiudi") }
+                }
+            },
+        )
+    }
     var pendingBackup by remember { mutableStateOf<uniffi.rondine_ffi.BackupFile?>(null) }
     var showCode by remember { mutableStateOf<String?>(null) }
     var lastBackup by remember { mutableStateOf(Repo.lastBackup) }
@@ -560,6 +624,18 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
         SettingsPage.Chat -> BackScaffold("Chat", back, snackbar) { m ->
             Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
                 SettingRow(
+                    Icons.Filled.Lock,
+                    "Backup automatico e password",
+                    when {
+                        hasPassword != true -> "Spento: tocca per scegliere una password"
+                        autoError != null -> "Non riuscito: $autoError"
+                        lastAuto == 0L -> "Ogni giorno in Documenti/Rondine"
+                        else -> "Ogni giorno in Documenti/Rondine · ultimo " + java.text.DateFormat
+                            .getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                            .format(java.util.Date(lastAuto))
+                    },
+                ) { if (hasPassword == true) autoMenu = true else passwordDialog = true }
+                SettingRow(
                     Icons.Filled.Backup,
                     "Backup delle chat",
                     if (lastBackup == 0L) "Mai fatto: salva una copia cifrata di chat e contatti"
@@ -635,10 +711,15 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             onDismiss = { dialog = null },
         ) { value ->
             dialog = null
-            run {
-                val h = Repo.client().claimUsername(value.trim())
-                Repo.refresh()
-                "Ora sei @$h"
+            scope.launch {
+                try {
+                    val h = Repo.client().claimUsername(value.trim())
+                    Repo.refresh()
+                    snackbar.showSnackbar("Ora sei @$h")
+                } catch (e: RondineException) {
+                    // Nome protetto da password (SPEC §3.4): se è il mio, la scrivo.
+                    if (e.needsPassword()) recoverName = value.trim().removePrefix("@") else snackbar.showSnackbar(e.userMessage)
+                }
             }
         }
         SettingsDialog.Name -> TextDialog(
@@ -710,10 +791,15 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             onDismiss = { dialog = null },
         ) { value ->
             dialog = null
-            run {
-                Repo.client().confirmPhone(value.trim())
-                Repo.refresh()
-                "Numero verificato: chi ce l'ha ti trova su Rondine"
+            scope.launch {
+                try {
+                    Repo.client().confirmPhone(value.trim())
+                    Repo.refresh()
+                    snackbar.showSnackbar("Numero verificato: chi ce l'ha ti trova su Rondine")
+                } catch (e: RondineException) {
+                    // Numero protetto dalla password di chi l'aveva (SPEC §13.2): se ero io, la scrivo.
+                    if (e.needsPassword()) recoverPhoneCode = value.trim() else snackbar.showSnackbar(e.userMessage)
+                }
             }
         }
         SettingsDialog.Node -> TextDialog(

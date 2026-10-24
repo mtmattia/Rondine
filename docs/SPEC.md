@@ -56,6 +56,12 @@ l'univocità è per nodo, come per l'email: `nome@nodo`.
     il nome passa a un'altra identità che verifica lo stesso numero sullo stesso nodo. Il nodo
     ricorda l'hash del numero accanto al nome (quando lo si prende, o quando poi si verifica il
     numero). Come su WhatsApp, chi controlla il numero controlla il nome.
+  - **Password del nome (verifica in due passaggi).** Chi tiene il nome può dargli una password
+    (§3.4). Da quel momento il nome passa a un'altra identità solo con:
+    - la **password**, se chi lo tiene non ha verificato un numero;
+    - la **password e lo stesso numero verificato**, se l'ha verificato;
+    - **password dimenticata:** lo stesso numero verificato basta da solo se l'identità che tiene
+      il nome non usa il nodo da almeno **7 giorni**, come su WhatsApp.
   - **Scadenza.** Un nome torna libero quando l'identità che lo tiene non usa più nessuna sua
     casella del nodo (nessuna richiesta firmata dal proprietario) da **180 giorni**. Il nodo
     aggiorna "visto l'ultima volta" al massimo una volta all'ora per casella.
@@ -80,6 +86,27 @@ Formato E.164 (`+393401234567`). Normalizzazione lato client: si tolgono spazi, 
 e parentesi; `00` iniziale diventa `+`; senza prefisso si aggiunge quello predefinito (`+39`).
 Sono validi solo 8–15 cifre dopo il `+`. **Il numero non lascia mai il telefono in chiaro.**
 
+
+### 3.4 Password
+Una password sola, scelta dalla persona (almeno 8 caratteri), protegge il nome utente (§3.2) e
+cifra il backup automatico (§7.8). La password non lascia mai il telefono: al nodo va solo una verifica che ne deriva (sotto).
+
+- `sale` = 16 byte casuali; `radice = Argon2id(password, sale, m = 65536 KiB, t = 3, p = 1,
+  32 byte)`; `chiave = blake3_derive_key("rondine v1 password backup", radice)`;
+  `accesso = blake3_derive_key("rondine v1 password nome", radice)`.
+- Il client conserva `sale`, `chiave` e `accesso`, così fa i backup senza richiederla.
+- Al nodo del nome va `{salt, verifier = blake3(accesso)}`
+  (`PUT /v1/names/{nome}/password`, proprietario). Chiunque può chiedere il sale
+  (`GET /v1/names/{nome}/password`); per prendersi il nome si manda `accesso` nell'intestazione
+  `Rondine-Name-Auth` di `PUT /v1/names/{nome}`. Al massimo **10 password sbagliate al giorno**
+  per nome (`429 too_many_attempts`); senza password giusta `409 name_protected`.
+- Chi riprende il nome con la password lo protegge subito con la stessa password e un sale nuovo.
+- Il numero di chi ha una password ed è attivo da meno di 7 giorni non passa a un'altra identità
+  con un semplice SMS (§13.2, `409 phone_locked`).
+
+Limite noto: chi gestisce il nodo ha `verifier` e `sale` e può provare password offline, pagando un
+Argon2id da 64 MiB per tentativo: una frase lunga lo rende inutile. Il nodo può comunque dare il
+nome a chi vuole: la garanzia vera resta il codice di sicurezza (§10).
 ## 4. Biglietto da visita
 
 Dice chi sei e come consegnarti messaggi. `Signed<Card>`, firmato dall'identità.
@@ -476,6 +503,15 @@ conversazioni cambiano a ogni messaggio, uno vecchio non serve) né foto e docum
 I messaggi arrivati dopo il backup e prima del ripristino non si possono più leggere. Il backup
 va usato su un telefono alla volta.
 
+**Backup automatico con la password.** Con una password (§3.4) il client fa anche file di versione
+**2**: `RONDINE-BACKUP\n`, il byte 2, il `sale` della password (16 byte), 24 byte di nonce, poi
+`XChaCha20-Poly1305(chiave, nonce, dati)` con la `chiave` di §3.4; si aprono con la password invece
+del codice. L'app Android ne salva uno al giorno in **`Documents/Rondine/rondine-backup.rondine`**
+(sovrascritto), una cartella del telefono che resta anche se si cancella l'app; non va mai sul
+nodo. Per riconoscere la vecchia sessione dopo una reinstallazione, nel backup di Android (Google o
+Seedvault, cifrato col blocco schermo) va solo un promemoria con il nome utente: l'app propone
+"Bentornato @nome" e apre il selettore di file in quella cartella.
+
 ### 7.9 Chiamate
 
 Voce e video viaggiano **direttamente tra i telefoni** con WebRTC, cifrati end-to-end
@@ -656,6 +692,8 @@ davvero di quella persona.
 | `PUT /v1/names/{nome}` | firma nel record | registra o aggiorna `Signed<NameClaim>` |
 | `GET /v1/names/{nome}` | — | `Signed<NameClaim>` |
 | `DELETE /v1/names/{nome}` | proprietario | libera il nome (auth con la chiave dell'identità) |
+| `PUT /v1/names/{nome}/password` | proprietario | `{salt, verifier}`: protegge il nome (§3.4) |
+| `GET /v1/names/{nome}/password` | — | `{salt}`, 404 se il nome non ha password |
 | `PUT /v1/board/{loc}` | firma nella voce | `{owner, blob, expires_at, sig}` |
 | `GET /v1/board/{loc}` | — | `[{owner, blob, expires_at}]` |
 | `POST /v1/board/batch` | firma in ogni voce | `{put: [{loc, entry}]}` → `{stored}` (§9) |
@@ -859,7 +897,10 @@ p = 1, 32 byte)`. Lento apposta: chi volesse provare tutti i numeri deve pagare 
 2. `POST /v1/inboxes/{inbox}/phone/confirm` (proprietario) `{code, card}`: con il codice giusto
    (al massimo 5 tentativi) il nodo firma l'attestazione e la pubblica nell'elenco dei numeri,
    insieme al biglietto. Un numero già verificato da un altro passa a chi lo conferma adesso
-   (come quando una SIM cambia proprietario).
+   (come quando una SIM cambia proprietario), salvo che chi lo aveva abbia una password (§3.4) e
+   non sia fermo da almeno 7 giorni: allora `409 phone_locked`, a meno che il corpo porti anche
+   `name_auth`, la prova della sua password (§3.4): chi ha perso il telefono si riprende così prima
+   il numero e poi il nome.
 
 ```json
 Signed<PhoneClaim>, firmato dal nodo:

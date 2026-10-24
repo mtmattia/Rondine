@@ -84,9 +84,8 @@ fun Onboarding() {
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
     var backupBytes by remember { mutableStateOf<ByteArray?>(null) }
-    val openBackup = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-    ) { uri ->
+    // Parte da Documents/Rondine, dove sta il backup automatico (SPEC §7.8).
+    val openBackup = androidx.activity.compose.rememberLauncherForActivityResult(OpenBackup()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             backupBytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -94,7 +93,67 @@ fun Onboarding() {
             }
         }
     }
-    backupBytes?.let { bytes ->
+    // Reinstallazione: Android ha rimesso il promemoria col nome utente.
+    var old by remember { mutableStateOf(Repo.oldSession()) }
+    old?.let { name ->
+        AlertDialog(
+            onDismissRequest = { old = null },
+            title = { Text("Bentornato, @$name!") },
+            text = {
+                Text(
+                    "Avevi già Rondine su questo telefono. Il backup automatico dovrebbe essere in " +
+                        "Documenti/Rondine: aprilo e scrivi la tua password per riavere chat e contatti.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    old = null
+                    openBackup.launch(arrayOf("*/*"))
+                }) { Text("Apri il backup") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    Repo.forgetOldSession()
+                    old = null
+                }) { Text("Inizia da capo") }
+            },
+        )
+    }
+    fun restore(bytes: ByteArray, secret: String) {
+        busy = true
+        error = null
+        scope.launch {
+            try {
+                Repo.restore(bytes, secret)
+            } catch (e: RondineException) {
+                error = e.userMessage
+            } finally {
+                busy = false
+            }
+        }
+    }
+    backupBytes?.takeIf { uniffi.rondine_ffi.isPasswordBackup(it) }?.let { bytes ->
+        var pw by remember { mutableStateOf("") }
+        var shown by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { backupBytes = null },
+            title = { Text("Ripristina da un backup") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Scrivi la password che hai scelto in Rondine.")
+                    PasswordField(pw, { pw = it }, "Password", shown) { shown = !shown }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    backupBytes = null
+                    restore(bytes, pw)
+                }, enabled = pw.isNotEmpty()) { Text("Ripristina") }
+            },
+            dismissButton = { TextButton(onClick = { backupBytes = null }) { Text("Annulla") } },
+        )
+    }
+    backupBytes?.takeIf { !uniffi.rondine_ffi.isPasswordBackup(it) }?.let { bytes ->
         TextDialog(
             title = "Ripristina da un backup",
             label = "Codice di 30 cifre",
@@ -103,17 +162,7 @@ fun Onboarding() {
             onDismiss = { backupBytes = null },
         ) { code ->
             backupBytes = null
-            busy = true
-            error = null
-            scope.launch {
-                try {
-                    Repo.restore(bytes, code)
-                } catch (e: RondineException) {
-                    error = e.userMessage
-                } finally {
-                    busy = false
-                }
-            }
+            restore(bytes, code)
         }
     }
 

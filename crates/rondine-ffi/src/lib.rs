@@ -639,6 +639,12 @@ pub async fn restore_profile(dir: String, backup: Vec<u8>, code: String) -> Resu
     Ok(Rondine::new(client))
 }
 
+/// Il file di backup si apre con la password (e non con il codice di 30 cifre)?
+#[uniffi::export]
+pub fn is_password_backup(data: Vec<u8>) -> bool {
+    Client::is_password_backup(&data)
+}
+
 /// Apre il profilo nella cartella, se esiste.
 #[uniffi::export]
 pub fn open_profile(dir: String) -> Result<Option<Arc<Rondine>>> {
@@ -1496,6 +1502,44 @@ impl Rondine {
     }
 
     /// Backup cifrato del profilo e codice di 30 cifre per aprirlo (SPEC §7.8).
+    /// Sceglie o cambia la password (SPEC §3.4): protegge il nome e cifra i backup automatici.
+    pub async fn set_password(&self, password: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.set_password(&password).await?) }))
+            .await
+    }
+
+    pub async fn has_password(&self) -> bool {
+        self.client.lock().await.has_password()
+    }
+
+    /// Il backup cifrato con la password, per il salvataggio automatico (SPEC §7.8).
+    pub async fn export_backup_with_password(&self) -> Result<Vec<u8>> {
+        let c = self.client.lock().await;
+        Ok(c.export_backup_with_password()?)
+    }
+
+    /// Riprende un nome protetto da password (SPEC §3.4).
+    pub async fn recover_username(&self, name: String, password: String) -> Result<String> {
+        self.run(move |c| Box::pin(async move { Ok(c.recover_username(&name, &password).await?) }))
+            .await
+    }
+
+    /// Conferma un numero protetto dalla password di chi l'aveva (SPEC §13.2).
+    pub async fn confirm_phone_with_password(
+        &self,
+        code: String,
+        name: String,
+        password: String,
+    ) -> Result<()> {
+        self.run(move |c| {
+            Box::pin(async move {
+                Ok(c.confirm_phone_with_password(&code, &name, &password)
+                    .await?)
+            })
+        })
+        .await
+    }
+
     pub async fn export_backup(&self) -> Result<BackupFile> {
         let c = self.client.lock().await;
         let (data, code) = c.export_backup()?;

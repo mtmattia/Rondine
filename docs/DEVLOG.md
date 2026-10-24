@@ -396,3 +396,18 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-24 — Cassaforte sul nodo tolta (revert), scelta di Mattia: la rubrica è del telefono e i
   contatti tornano da soli; non vuole copie del profilo sul nodo, nemmeno cifrate. Resta il backup
   su file con il codice di 30 cifre. Tenuta solo l'ottimizzazione di Argon2 nei test.
+- 2026-10-24 — Password (SPEC §3.4), come la voleva Mattia: "serve per il backup interno e per
+  riprendere il nome utente senza obbligo di numero verificato". Una password → Argon2id (64 MiB)
+  → chiave del backup e prova per il nome; al nodo solo sale e `blake3(prova)`. Nome: si riprende
+  con la password, e se il nome aveva un numero verificato servono password **e** numero (scelta di
+  Mattia); password dimenticata → basta il numero dopo 7 giorni di silenzio del vecchio telefono;
+  10 errori al giorno. Numero protetto: con la password passa subito (`name_auth`), senza dopo 7
+  giorni. Backup versione 2 cifrato con la password; l'app ne salva uno al giorno in
+  `Documents/Rondine/rondine-backup.rondine` (MediaStore, sovrascritto; Android ≤ 9 col permesso),
+  e mette il solo nome utente nel backup di Android: reinstallando "Bentornato, @nome!" apre il
+  selettore in quella cartella. Nel dialogo della password lo stesso nome con la stessa password
+  restituisce il nome. CLI `password`, `nome recupera`, `codice --nome --password`, `backup
+  --password`. Provato sull'emulatore: backup, disinstallazione, "Bentornato", ripristino con la
+  stessa identità; profilo da capo con stesso nome e password → nome ripreso. Corretti durante la
+  prova: due backup insieme facevano due file (mutex) e il correttore cambiava il nome utente.
+  1 test nel core (+1 nel backup), 4 di accettazione.

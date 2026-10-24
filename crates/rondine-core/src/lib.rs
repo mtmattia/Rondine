@@ -10,6 +10,7 @@ pub mod error;
 pub mod file;
 pub mod identity;
 pub mod lan;
+pub mod password;
 pub mod permit;
 pub mod phone;
 pub mod safety;

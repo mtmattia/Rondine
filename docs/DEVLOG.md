@@ -467,3 +467,4 @@ Una riga per modifica: data, cosa è cambiato.
   casuali. Chi è verificato lo riceve in silenzio se Rondine è il suo filtro chiamate (anche
   versione Play), se no dal registro chiamate; senza nessuno dei due risponde `unable` e chi
   verifica passa da sé all'SMS. L'attesa dell'esito finisce dopo 2 minuti.
+- 2026-10-24 — Versione 0.1.16 (versionCode 17).

@@ -103,8 +103,10 @@ Collegamento diretto quando entrambi sono online, rete locale senza internet, no
 ### Metadati: il nodo non deve vedere niente (richiesta di Mattia del 2026-10-24)
 Il contenuto è già illeggibile. Restano da nascondere al gestore del nodo:
 - [x] etichette dei permessi senza la chiave di chi scrive (SPEC §5)
-- [ ] deposito "sigillato" attraverso un altro nodo o un contatto, così il nodo di chi riceve non
-      vede l'IP di chi scrive
+- [x] deposito sigillato dei messaggi attraverso un nodo staffetta (SPEC §6.3, OHTTP + HPKE);
+      nodi senza sigillo scartati; senza staffetta parte con il lucchetto aperto
+- [ ] sigillati anche key package, file e sveglie
+- [ ] staffetta attraverso un contatto (mesh) quando non c'è un secondo nodo
 - [ ] casella con una chiave sua invece della chiave d'identità (il nodo non lega casella e
       biglietto)
 - [ ] dimensioni dei messaggi arrotondate (padding) e ritiri a intervalli fissi

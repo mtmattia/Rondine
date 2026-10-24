@@ -40,10 +40,13 @@ internet:
 - **una sola eccezione, solo se la chiedi:** per verificare il tuo numero con un SMS il tuo nodo
   vede il numero una volta per mandare il codice, poi ne conserva solo un hash lento (Argon2id).
 
-**Limite noto:** chi scrive deposita il messaggio collegandosi al nodo di chi riceve, quindi quel
-nodo vede l'indirizzo IP di chi deposita. Se chi scrive usa lo stesso nodo (o il nodo ne conosce
-l'indirizzo per altre vie), il gestore potrebbe dedurre chi scrive a chi dall'IP. Il contenuto resta
-illeggibile; nasconderlo del tutto richiede di depositare attraverso altri (vedi ROADMAP).
+**Deposito sigillato.** Chi ti scrive non si collega al tuo nodo: il messaggio arriva chiuso in un
+plico cifrato per il tuo nodo attraverso un altro nodo, la "staffetta" (Oblivious HTTP, RFC 9458).
+Il tuo nodo vede la tua casella ma non l'IP di chi scrive; la staffetta vede l'IP di chi scrive ma
+non a chi scrive né cosa. L'app non usa nodi che non offrono il sigillo. Se nessuna staffetta è
+disponibile, il messaggio parte lo stesso ed è segnato con un lucchetto aperto: in quel caso il nodo
+ha visto l'IP di chi l'ha mandato. Per ora sono sigillati i messaggi; l'avvio di una chat, i file e
+le sveglie vanno ancora diretti.
 
 I messaggi restano sul nodo finché il telefono non li ritira, al massimo 30 giorni; poi vengono
 cancellati.

@@ -351,3 +351,14 @@ Una riga per modifica: data, cosa è cambiato.
   permessi per i contatti era `contatto:<chiave corta>` e viaggiava in ogni deposito, quindi il
   nodo poteva sapere chi scrive a chi; ora è solo `contatto` (SPEC §5). PRIVACY.md: limite noto
   dell'IP di chi deposita; ROADMAP: sezione metadati. 3 test nuovi.
+- 2026-10-24 — Deposito sigillato (SPEC §6.3), richiesta di Mattia "il nodo non deve vedere
+  niente": Oblivious HTTP (RFC 9458) con HPKE (RFC 9180, hpke-rs come openmls) e risposta
+  sigillata con HKDF. Ogni nodo ha una chiave di sigillo derivata dalla sua, pubblicata firmata in
+  `/v1/info` con le staffette suggerite (`--staffetta`); `POST /v1/sealed` apre il plico e
+  deposita, `POST /v1/relay` inoltra senza aprire (solo verso nodi Rondine col sigillo, niente
+  indirizzi privati salvo le staffette di casa). Client: plico attraverso il proprio nodo, le
+  staffette suggerite o i nodi dei contatti, mai il destinatario; chiave accettata solo se firmata
+  dalla `node_key` del permesso; nodi senza sigillo scartati (profilo, cambio nodo, depositi →
+  ✗ con il motivo); senza staffette deposito diretto segnato `unsealed` (lucchetto aperto
+  nell'app, scelta di Mattia). 2 test nel core, 5 di accettazione con due nodi veri. Secondo nodo
+  sul Mac come staffetta per il nodo del PC.

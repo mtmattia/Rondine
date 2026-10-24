@@ -342,12 +342,19 @@ impl Client {
                     else {
                         continue;
                     };
-                    let card = entries.iter().find_map(|e| {
-                        let blob = e.verify(&loc).ok()?;
-                        let rec = discovery::open(&key, &blob).ok()?;
-                        let info = verify_card(&rec.card).ok()?;
-                        (rec.phone == s.number && info.identity != me).then_some(rec.card)
-                    });
+                    // Il biglietto più recente: chi reinstalla senza backup lascia in bacheca
+                    // anche la voce del profilo abbandonato, finché non scade.
+                    let card = entries
+                        .iter()
+                        .filter_map(|e| {
+                            let blob = e.verify(&loc).ok()?;
+                            let rec = discovery::open(&key, &blob).ok()?;
+                            let info = verify_card(&rec.card).ok()?;
+                            (rec.phone == s.number && info.identity != me)
+                                .then_some((info.issued_at, rec.card))
+                        })
+                        .max_by_key(|(issued_at, _)| *issued_at)
+                        .map(|(_, card)| card);
                     if let Some(card) = card {
                         found.entry(s.number.clone()).or_insert(card);
                     }

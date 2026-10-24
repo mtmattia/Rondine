@@ -416,3 +416,6 @@ Una riga per modifica: data, cosa è cambiato.
   e il nodo, con il limite di 512 KiB, rispondeva 413 in testo semplice. Ora il client pubblica a
   lotti di 100, `POST /v1/board/batch` accetta fino a 8 MiB e tutti gli errori sotto `/v1/` escono
   in JSON. Test `rubrica_grande_si_pubblica_a_lotti` e `errori_del_nodo_sempre_in_json`.
+- 2026-10-24 — Bug: la rubrica prendeva la prima voce valida della bacheca, che poteva essere il
+  profilo abbandonato di chi aveva reinstallato senza backup: si scriveva a una casella che nessuno
+  legge. Ora vale il biglietto più recente. Test `rubrica_sceglie_il_profilo_piu_recente`.

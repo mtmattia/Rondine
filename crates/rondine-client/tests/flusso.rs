@@ -2383,3 +2383,39 @@ async fn errori_del_nodo_sempre_in_json() -> R {
     assert!(v["message"].is_string(), "{v}");
     Ok(())
 }
+
+/// Bug: chi reinstalla senza backup lascia in bacheca la voce del profilo vecchio, e la rubrica
+/// prendeva la prima voce valida invece della più recente: si scriveva a un profilo abbandonato.
+#[tokio::test]
+async fn rubrica_sceglie_il_profilo_piu_recente() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    // Sei persone con un profilo vecchio e uno nuovo: l'ordine delle voci sul nodo dipende dalle
+    // chiavi, quindi con sei coppie il caso "la prima è la vecchia" capita di sicuro.
+    let numbers: Vec<String> = (0..6).map(|i| format!("34022233{i:02}")).collect();
+    for (i, n) in numbers.iter().enumerate() {
+        let mut vecchia = profile(&tmp, &format!("vecchia{i}"), &node).await?;
+        vecchia.set_phone(n)?;
+        vecchia.scan_address_book(&["3401112233".into()]).await?;
+    }
+    // Le date dei biglietti sono in secondi.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    for (i, n) in numbers.iter().enumerate() {
+        let mut nuova = profile(&tmp, &format!("nuova{i}"), &node).await?;
+        nuova.set_phone(n)?;
+        nuova.scan_address_book(&["3401112233".into()]).await?;
+    }
+
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    mattia.set_phone("3401112233")?;
+    let mut found: Vec<String> = mattia
+        .scan_address_book(&numbers)
+        .await?
+        .into_iter()
+        .map(|m| m.contact.display_name)
+        .collect();
+    found.sort();
+    let expected: Vec<String> = (0..6).map(|i| format!("nuova{i}")).collect();
+    assert_eq!(found, expected);
+    Ok(())
+}

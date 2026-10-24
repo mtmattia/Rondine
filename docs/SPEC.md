@@ -624,8 +624,10 @@ Due persone che hanno l'una il numero dell'altra si trovano da sole.
    Ed25519 derivata per luogo, `seed = blake3_keyed(seme_identità, "rondine/v1/board-owner" || loc)`,
    così le voci della stessa persona non si collegano tra loro.
 6. Chi cerca calcola gli stessi `loc` e `key`, legge le voci, decifra, scarta le proprie, controlla
-   che `phone` sia il numero che ha in rubrica e che il biglietto sia firmato. Il contatto trovato
-   resta **non verificato**.
+   che `phone` sia il numero che ha in rubrica e che il biglietto sia firmato. Se più voci valide
+   portano lo stesso numero (chi ha reinstallato senza backup lascia la voce del profilo vecchio
+   finché non scade), vale il biglietto con `issued_at` più recente. Il contatto trovato resta
+   **non verificato**.
 
 Limiti e scadenze: voce ≤ 4 KiB, al massimo 8 voci per luogo, durata massima 30 giorni.
 

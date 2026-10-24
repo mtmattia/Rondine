@@ -205,6 +205,7 @@ impl Client {
                     phone_verified_by: verified_by.clone(),
                     muted: false,
                     previous_key: None,
+                    chat_deleted: false,
                 });
             }
             self.note_key_change(&info.identity);

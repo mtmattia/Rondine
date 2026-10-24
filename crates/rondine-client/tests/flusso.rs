@@ -2574,3 +2574,43 @@ async fn rubrica_sceglie_il_profilo_piu_recente() -> R {
     assert_eq!(found, expected);
     Ok(())
 }
+
+/// Elimina chat, come su WhatsApp: la chat sparisce dalla lista con i suoi messaggi, il contatto
+/// resta, e un messaggio nuovo (in arrivo o in uscita) la fa ricomparire.
+#[tokio::test]
+async fn elimina_chat_e_ricompare_con_un_messaggio() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    silvia.send_text(&mattia.identity(), "ciao").await?;
+    mattia.sync().await?;
+    assert_eq!(mattia.chats().len(), 1);
+
+    mattia.delete_chat(&silvia.identity())?;
+    assert!(mattia.chats().is_empty());
+    assert!(mattia.messages_with(&silvia.identity()).is_empty());
+    assert!(
+        mattia
+            .contacts()
+            .iter()
+            .any(|c| c.identity == silvia.identity())
+    );
+
+    // Silvia riscrive: la chat torna, con il solo messaggio nuovo.
+    silvia.send_text(&mattia.identity(), "ci sei?").await?;
+    assert_eq!(texts(&mattia.sync().await?), ["ci sei?"]);
+    assert_eq!(mattia.chats().len(), 1);
+
+    // Eliminata di nuovo, la riapro scrivendo io.
+    mattia.delete_chat(&silvia.identity())?;
+    assert!(mattia.chats().is_empty());
+    mattia.send_text(&silvia.identity(), "eccomi").await?;
+    assert_eq!(mattia.chats().len(), 1);
+    assert_eq!(texts(&silvia.sync().await?), ["eccomi"]);
+    // Svuotarla dopo non la toglie dalla lista.
+    mattia.clear_chat(&silvia.identity())?;
+    assert_eq!(mattia.chats().len(), 1);
+    Ok(())
+}

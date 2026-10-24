@@ -50,6 +50,9 @@ pub struct Contact {
     /// di sicurezza è cambiato (app reinstallata, o qualcuno che si spaccia per lui).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_key: Option<PublicKey>,
+    /// Chat eliminata: fuori dalla lista finché non arriva o parte un messaggio nuovo.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub chat_deleted: bool,
 }
 
 /// Quanto è sicuro che la chiave di un contatto sia davvero sua (SPEC §10).

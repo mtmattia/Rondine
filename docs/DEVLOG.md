@@ -431,3 +431,7 @@ Una riga per modifica: data, cosa è cambiato.
   persona). Test `chiave_nuova_con_numero_verificato_continua_la_stessa_chat`,
   `chiave_nuova_senza_verifica_e_una_chat_a_parte` e `chat_a_parte_si_unisce_dopo_la_verifica`.
 - 2026-10-24 — Versione 0.1.15 (versionCode 16).
+- 2026-10-24 — "Elimina chat" (menu della lista chat e della chat, CLI `rondine elimina-chat`): via la
+  chat e i suoi messaggi da questo telefono, il contatto resta e la chat ricompare col prossimo
+  messaggio, come su WhatsApp. "Svuota chat" la lascia nella lista. Test
+  `elimina_chat_e_ricompare_con_un_messaggio`.

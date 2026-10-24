@@ -26,7 +26,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Foto e documenti | ✅ | SPEC §7.5: cifrati sul telefono, fino a 64 MiB; nelle chat 1:1 nella casella di chi riceve, nei gruppi una copia sola sul nido di chi manda; client, nodo, CLI e app; manca la coda se il nodo non risponde |
 | Messaggi vocali | ✅ | nell'app: un tocco sul microfono apre la registrazione con pausa, cestino e invio; viaggiano come file `audio/mp4` (SPEC §7.5) |
 | Rispondere, copiare, inoltrare, eliminare | ✅ | SPEC §7.1b: tieni premuto un messaggio; elimina per tutti solo i propri; anche nei gruppi |
-| Silenziare e svuotare le chat | ✅ | dalla lista chat, solo sul telefono |
+| Silenziare, svuotare ed eliminare le chat | ✅ | dalla lista chat e dalla chat, solo sul telefono |
 | Emoji | ✅ | tutte, con categorie, recenti e tonalità della pelle (selettore AndroidX); i messaggi di sole emoji grandi e senza bolla |
 | Sticker | ✅ | SPEC §7.5: 4 raccolte incluse (Fluent Emoji 3D, MIT), preferiti, recenti, creati da una foto col soggetto ritagliato sul telefono (U²-Net, `rondine-ritaglio`) e il bordo bianco, pacchetti miei (crea, rinomina, elimina; si aggiunge toccando uno sticker in chat), salvati da quelli ricevuti, dalla tastiera (Emoji Kitchen di Gboard) |
 | GIF | ✅ | animate nella chat; dalla ricerca GIF della tastiera, dal telefono, GIF salvate; manca una ricerca dentro l'app (serve un fornitore: Giphy, Klipy…) |

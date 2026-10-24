@@ -512,6 +512,7 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             ChatMenuItems(row.contact.id, row.contact.muted) { menu = false }
+            DeleteChatItem(row.contact.id, close = { menu = false })
             DropdownMenuItem(
                 text = { Text(if (row.contact.favorite) "Rimuovi dai preferiti" else "Aggiungi ai preferiti") },
                 onClick = {
@@ -523,6 +524,38 @@ private fun ChatListItem(row: ChatRow, onOpenChat: (String) -> Unit) {
                 },
             )
         }
+    }
+}
+
+/** "Elimina chat" di una chat 1:1: via messaggi e chat dalla lista; il contatto resta. */
+@Composable
+internal fun DeleteChatItem(id: String, close: () -> Unit, onDeleted: () -> Unit = {}) {
+    val scope = rememberCoroutineScope()
+    var confirm by remember { mutableStateOf(false) }
+    DropdownMenuItem(text = { Text("Elimina chat") }, onClick = { confirm = true })
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false; close() },
+            title = { Text("Eliminare la chat?") },
+            text = {
+                Text(
+                    "La chat e i suoi messaggi spariscono da questo telefono. Il contatto resta, " +
+                        "e la chat ricompare se ti scrive o se gli scrivi.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm = false
+                    close()
+                    scope.launch {
+                        Repo.client().deleteChat(id)
+                        Repo.refresh()
+                        onDeleted()
+                    }
+                }) { Text("Elimina", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false; close() }) { Text("Annulla") } },
+        )
     }
 }
 

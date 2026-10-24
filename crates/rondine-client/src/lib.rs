@@ -1441,6 +1441,7 @@ impl Client {
             .state
             .contacts
             .iter()
+            .filter(|c| !c.chat_deleted || !self.messages_with(&c.identity).is_empty())
             .map(|c| {
                 let msgs = self.messages_with(&c.identity);
                 let last = msgs.last().map(|m| (*m).clone());
@@ -1525,6 +1526,7 @@ impl Client {
                 phone_verified_by: None,
                 muted: false,
                 previous_key: None,
+                chat_deleted: false,
             });
         }
         self.note_key_change(&info.identity);
@@ -3060,8 +3062,25 @@ impl Client {
         }]
     }
 
-    /// Svuota la chat con un contatto, solo su questo telefono.
+    /// Elimina la chat con un contatto, solo su questo telefono: via i messaggi e via dalla
+    /// lista. Il contatto resta, e la chat ricompare col prossimo messaggio.
+    pub fn delete_chat(&mut self, with: &PublicKey) -> Result<()> {
+        let c = self
+            .contact_mut(with)
+            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
+        c.chat_deleted = true;
+        self.remove_messages(with)
+    }
+
+    /// Svuota la chat con un contatto, solo su questo telefono; resta nella lista.
     pub fn clear_chat(&mut self, with: &PublicKey) -> Result<()> {
+        if let Some(c) = self.contact_mut(with) {
+            c.chat_deleted = false;
+        }
+        self.remove_messages(with)
+    }
+
+    fn remove_messages(&mut self, with: &PublicKey) -> Result<()> {
         let ids: Vec<String> = self
             .state
             .messages
@@ -3497,6 +3516,7 @@ impl Client {
                     phone_verified_by: None,
                     muted: false,
                     previous_key: None,
+                    chat_deleted: false,
                 });
                 self.note_key_change(&from);
             }

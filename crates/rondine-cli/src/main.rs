@@ -197,6 +197,8 @@ enum Cmd {
     Verifica { contatto: String },
     /// Blocca un contatto.
     Blocca { contatto: String },
+    /// Elimina la chat con un contatto (messaggi compresi), solo qui; il contatto resta.
+    EliminaChat { contatto: String },
     /// Riprova un messaggio non inviato (✗), con l'inizio del suo id come lo mostra `leggi`.
     Riprova { messaggio: String },
     /// Apre un collegamento diretto via internet con un contatto, anche dietro NAT (SPEC §12.8),
@@ -1371,6 +1373,11 @@ async fn main() -> anyhow::Result<()> {
             let id = c.find_contact(&contatto)?.identity;
             c.mark_verified(&id)?;
             println!("Contatto verificato.");
+        }
+        Cmd::EliminaChat { contatto } => {
+            let id = c.find_contact(&contatto)?.identity;
+            c.delete_chat(&id)?;
+            println!("Chat eliminata. Ricompare se arriva o mandi un messaggio.");
         }
         Cmd::Blocca { contatto } => {
             let id = c.find_contact(&contatto)?.identity;

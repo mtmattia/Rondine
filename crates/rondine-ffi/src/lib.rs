@@ -1501,6 +1501,12 @@ impl Rondine {
             .await?)
     }
 
+    /// Elimina una chat 1:1 dalla lista, con i suoi messaggi; il contatto resta.
+    pub async fn delete_chat(&self, contact_id: String) -> Result<()> {
+        let k = key(&contact_id)?;
+        Ok(self.with(move |c| c.delete_chat(&k)).await?)
+    }
+
     /// Silenzia o riattiva le notifiche di una chat (1:1 o gruppo).
     pub async fn set_muted(&self, id: String, muted: bool) -> Result<()> {
         Ok(self.with(move |c| c.set_muted(&id, muted)).await?)

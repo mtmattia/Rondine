@@ -887,6 +887,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                     }
                                 },
                             )
+                            DeleteChatItem(contactId, { menu = false }, onBack)
                             if (c?.blocked == false) {
                                 DropdownMenuItem(
                                     text = { Text("Blocca", color = MaterialTheme.colorScheme.error) },

@@ -453,3 +453,12 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-24 — SPEC §14.1 riscritta: il numero lo verificano gli amici, da telefono a telefono
   (squillo con istanti casuali, poi SMS con codice dalla SIM di chi verifica, poi QR), al posto
   della ricevuta del gateway. Il nodo non vede numeri né codici.
+- 2026-10-24 — Verifica del numero tra amici (SPEC §14.1), prima parte della §14: messaggi
+  `verify_request`/`verify_reply`; tre squilli a istanti casuali (ritardo di rete −2…+10 s,
+  distanze ±2 s, una possibilità su 1500 di indovinare) o SMS con codice di 8 cifre dalla SIM di
+  chi verifica; il contatto passa a "numero verificato da te" (`phone_checked`). CLI
+  `verifica-numero`, `verifica-squillato`, `verifica-richieste`, `verifica-rispondi`,
+  `verifica-sms`. App: "Verifica il numero" nella pagina del contatto; versione libera con
+  permessi per chiamare, chiudere, leggere chiamate perse e SMS (ricevitore degli SMS di
+  verifica); versione Play con SMS dall'app dei messaggi e link `rondine:verifica/`. Test in
+  `tests/verifica.rs`.

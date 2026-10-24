@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -267,10 +268,27 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
                         )
                     }
                     Text(
-                        trustExplanation(c.trust, c.name), fontSize = 14.sp,
+                        trustExplanation(c.trust, c.name, c.phoneChecked != null), fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
+            }
+            val progress by Repo.verifyProgress.collectAsState()
+            var verifyPhone by remember { mutableStateOf(false) }
+            progress?.let {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(it, fontSize = 14.sp)
+                }
+            }
+            if (c.phoneChecked == null && !c.verified) {
+                OutlinedButton(onClick = { verifyPhone = true }, enabled = progress == null) {
+                    Text("Verifica il numero (squillo o SMS)")
+                }
+            }
+            if (verifyPhone) {
+                VerifyContactDialog(contactId, c.name, c.phone) { verifyPhone = false }
             }
             if (!c.verified) {
                 Button(onClick = {

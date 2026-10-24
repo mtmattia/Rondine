@@ -6,7 +6,7 @@ use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 use rondine_client::{
     CallOp, CallStatus, ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent,
-    NewFile, Trust,
+    NewFile, Trust, VerifyMethod,
 };
 use rondine_core::PublicKey;
 
@@ -195,6 +195,23 @@ enum Cmd {
     Sicurezza { contatto: String },
     /// Segna un contatto come verificato.
     Verifica { contatto: String },
+    /// Verifica il numero di un contatto (SPEC §14.1): con due squilli (predefinito) o con un SMS
+    /// dalla tua SIM. Stampa cosa fare; il numero è quello in rubrica.
+    VerificaNumero {
+        contatto: String,
+        #[arg(long)]
+        sms: bool,
+        #[arg(long)]
+        numero: Option<String>,
+    },
+    /// Annota quando è partita una chiamata della verifica (secondi unix; senza: adesso).
+    VerificaSquillato { id: String, istante: Option<u64> },
+    /// Richieste di verifica del tuo numero ancora aperte.
+    VerificaRichieste,
+    /// Risponde a uno squillo con gli istanti delle chiamate perse (secondi unix).
+    VerificaRispondi { id: String, istanti: Vec<u64> },
+    /// Un SMS di verifica arrivato (il testo intero, o solo il codice).
+    VerificaSms { testo: String },
     /// Blocca un contatto.
     Blocca { contatto: String },
     /// Elimina la chat con un contatto (messaggi compresi), solo qui; il contatto resta.
@@ -578,6 +595,15 @@ fn print_group_events(events: &[GroupEvent], client: &Client) {
     }
 }
 
+fn contact_name(client: &Client, id: &PublicKey) -> String {
+    client
+        .contacts()
+        .iter()
+        .find(|c| &c.identity == id)
+        .map(|c| c.display_name.clone())
+        .unwrap_or_else(|| id.short())
+}
+
 fn print_events(events: &[Event], client: &Client) {
     for e in events {
         match e {
@@ -593,6 +619,31 @@ fn print_events(events: &[Event], client: &Client) {
                         .map(|c| c.display_name.clone())
                         .unwrap_or_else(|| author.short());
                     println!("✦ aggiornamenti di {who} cambiati");
+                }
+            }
+            Event::VerifyRequest {
+                contact,
+                id,
+                method,
+            } => {
+                let who = contact_name(client, contact);
+                match method {
+                    VerifyMethod::Ring => println!(
+                        "☏ {who} sta per verificare il tuo numero con due squilli: \
+                         `rondine verifica-rispondi {id} <istante> <istante>`"
+                    ),
+                    VerifyMethod::Sms => println!(
+                        "☏ {who} sta per verificare il tuo numero con un SMS: \
+                         `rondine verifica-sms <testo o codice>`"
+                    ),
+                }
+            }
+            Event::PhoneChecked { contact, ok } => {
+                let who = contact_name(client, contact);
+                if *ok {
+                    println!("✓ numero di {who} verificato");
+                } else {
+                    println!("✗ numero di {who} non verificato: le prove non tornano");
                 }
             }
             Event::Call {
@@ -1371,6 +1422,60 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
             }
+        }
+        Cmd::VerificaNumero {
+            contatto,
+            sms,
+            numero,
+        } => {
+            let id = c.find_contact(&contatto)?.identity;
+            let method = if sms {
+                VerifyMethod::Sms
+            } else {
+                VerifyMethod::Ring
+            };
+            let p = c.start_verify(&id, method, numero.as_deref()).await?;
+            match &p.sms_text {
+                Some(text) => println!("Manda dalla tua SIM a {}:\n{text}", p.number),
+                None => println!(
+                    "Chiama {} due volte, dopo {} s e dopo {} s da adesso, chiudendo prima che \
+                     risponda; ogni volta `rondine verifica-squillato {}`.",
+                    p.number,
+                    p.delays.first().copied().unwrap_or_default(),
+                    p.delays.get(1).copied().unwrap_or_default(),
+                    p.id
+                ),
+            }
+        }
+        Cmd::VerificaSquillato { id, istante } => {
+            let at = istante.unwrap_or_else(rondine_core::now);
+            c.record_ring(&id, at)?;
+            println!("Annotato: {at}.");
+        }
+        Cmd::VerificaRichieste => {
+            let reqs = c.verify_requests();
+            if reqs.is_empty() {
+                println!("Nessuna richiesta.");
+            }
+            for r in reqs {
+                let how = match r.method {
+                    VerifyMethod::Ring => "squillo",
+                    VerifyMethod::Sms => "sms",
+                };
+                println!("{}  {}  {how}", r.id, contact_name(&c, &r.from));
+            }
+        }
+        Cmd::VerificaRispondi { id, istanti } => {
+            c.answer_ring(&id, &istanti).await?;
+            println!("Risposta mandata.");
+        }
+        Cmd::VerificaSms { testo } => {
+            let n = if testo.trim().chars().all(|ch| ch.is_ascii_digit()) {
+                c.answer_sms_code(&testo).await?
+            } else {
+                c.answer_sms_text(&testo).await?
+            };
+            println!("Codice mandato a {n} contatti.");
         }
         Cmd::Verifica { contatto } => {
             let id = c.find_contact(&contatto)?.identity;

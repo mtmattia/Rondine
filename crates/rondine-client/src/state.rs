@@ -53,6 +53,9 @@ pub struct Contact {
     /// Chat eliminata: fuori dalla lista finché non arriva o parte un messaggio nuovo.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub chat_deleted: bool,
+    /// Numero che ho verificato io, con uno squillo o un SMS, per questa chiave (SPEC §14.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_checked: Option<String>,
 }
 
 /// Quanto è sicuro che la chiave di un contatto sia davvero sua (SPEC §10).
@@ -70,7 +73,7 @@ impl Contact {
     pub fn trust(&self) -> Trust {
         if self.verified {
             Trust::InPerson
-        } else if self.phone_verified_by.is_some() {
+        } else if self.phone_verified_by.is_some() || self.phone_checked.is_some() {
             Trust::Phone
         } else {
             Trust::None
@@ -346,6 +349,12 @@ pub struct State {
     /// affidano loro. Spenta finché non la si accende.
     #[serde(default)]
     pub mesh: bool,
+    /// Verifiche del numero di un contatto che ho avviato io (SPEC §14.1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verifications: Vec<crate::verify::Verification>,
+    /// Richieste di verifica del mio numero arrivate dai contatti (SPEC §14.1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verify_requests: Vec<crate::verify::VerifyRequest>,
 }
 
 /// Una chiamata nel registro (SPEC §7.9).

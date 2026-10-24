@@ -120,6 +120,12 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(EXTRA_CHAT)?.let { openChatRequest.value = "chat/$it" }
         intent?.getStringExtra(EXTRA_GROUP)?.let { openChatRequest.value = "gruppo/$it" }
         val data = intent?.dataString
+        // rondine:verifica/… (dall'SMS di chi verifica il mio numero, SPEC §14.1).
+        if (data != null && data.startsWith("rondine:verifica/")) {
+            Repo.answerVerifySms(data)
+            Repo.notice.value = "Codice mandato: chi ti verifica vedrà l'esito"
+            return
+        }
         // rondine:invito/… (link d'invito) o rondine:@nome@nodo (link al nome, dai QR).
         if (data != null && data.startsWith("rondine:")) Repo.pendingInvite.value = data
     }
@@ -251,6 +257,7 @@ class MainActivity : ComponentActivity() {
 
         io.github.mtmattia.rondine.ui.PasswordPrompt()
         io.github.mtmattia.rondine.ui.VerifyPhonePrompt()
+        io.github.mtmattia.rondine.ui.VerifyPermissionPrompt()
 
         invite?.let { link ->
             AlertDialog(

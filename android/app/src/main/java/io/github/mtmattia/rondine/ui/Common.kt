@@ -206,10 +206,15 @@ fun trustLabel(trust: String): String = when (trust) {
 }
 
 /** Spiegazione del grado di fiducia, per la pagina del numero di sicurezza. */
-fun trustExplanation(trust: String, name: String): String = when (trust) {
+fun trustExplanation(trust: String, name: String, checkedByMe: Boolean = false): String = when (trust) {
     "persona" -> "Avete confrontato il codice di sicurezza: è proprio $name, senza doverti fidare di nessuno."
-    "numero" -> "Il nodo ha confermato con un SMS che il numero è di $name. Ti fidi del nodo e dell'operatore " +
-        "telefonico: confrontate il codice di sicurezza per non doverti fidare di nessuno."
+    "numero" -> if (checkedByMe) {
+        "Hai verificato tu, con uno squillo o un SMS, che questa chiave ha la SIM del numero di $name. Ti fidi " +
+            "solo dell'operatore telefonico: confrontate il codice di sicurezza per non doverti fidare di nessuno."
+    } else {
+        "Il nodo ha confermato con un SMS che il numero è di $name. Ti fidi del nodo e dell'operatore " +
+            "telefonico: confrontate il codice di sicurezza per non doverti fidare di nessuno."
+    }
     else -> "Nessuno ha confermato che questa chiave sia di $name. Confrontate il codice di sicurezza, " +
         "di persona o con una chiamata."
 }

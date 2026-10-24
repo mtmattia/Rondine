@@ -11,6 +11,7 @@ mod rubrica;
 mod scheduled;
 mod state;
 mod status;
+mod verify;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,7 @@ pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
 pub use punch::IncomingWaiter;
 pub use rondine_core::envelope::CallOp;
+pub use rondine_core::envelope::VerifyMethod;
 pub use rubrica::AddressBookMatch;
 pub use scheduled::{ScheduledMessage, ScheduledTarget};
 pub use state::{
@@ -41,6 +43,7 @@ pub use state::{
     GroupMessage, GroupRef, Location, Outgoing, Source, State, Trust, Via,
 };
 pub use status::StatusPost;
+pub use verify::{Verification, VerifyPlan, VerifyRequest};
 
 /// Foto o documento da mandare (SPEC §7.5).
 #[derive(Clone, Debug, Default)]
@@ -207,6 +210,18 @@ pub enum Event {
         video: bool,
         sdp: Option<String>,
         ring: bool,
+    },
+    /// Un contatto sta per verificare il mio numero (SPEC §14.1): il telefono guardi le chiamate
+    /// perse (squillo) o gli SMS in arrivo (SMS) e risponda.
+    VerifyRequest {
+        contact: PublicKey,
+        id: String,
+        method: VerifyMethod,
+    },
+    /// Esito della verifica del numero di un contatto che ho avviato io.
+    PhoneChecked {
+        contact: PublicKey,
+        ok: bool,
     },
 }
 
@@ -434,6 +449,8 @@ impl Client {
                 my_statuses: Vec::new(),
                 statuses: Vec::new(),
                 mesh: false,
+                verifications: Vec::new(),
+                verify_requests: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -504,6 +521,8 @@ impl Client {
                 my_statuses: Vec::new(),
                 statuses: Vec::new(),
                 mesh: false,
+                verifications: Vec::new(),
+                verify_requests: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
                 group_chats: Vec::new(),
@@ -1534,6 +1553,7 @@ impl Client {
                 muted: false,
                 previous_key: None,
                 chat_deleted: false,
+                phone_checked: None,
             });
         }
         self.note_key_change(&info.identity);
@@ -3557,6 +3577,7 @@ impl Client {
                     muted: false,
                     previous_key: None,
                     chat_deleted: false,
+                    phone_checked: None,
                 });
                 self.note_key_change(&from);
             }
@@ -3650,6 +3671,12 @@ impl Client {
             AppMessage::Status(s) => self.received_status(sender, *s),
             AppMessage::StatusDelete { id, .. } => Ok(self.received_status_delete(sender, &id)),
             AppMessage::StatusSeen { id, ts, .. } => Ok(self.received_status_seen(sender, &id, ts)),
+            AppMessage::VerifyRequest { id, method, .. } => {
+                Ok(self.received_verify_request(sender, id, method))
+            }
+            AppMessage::VerifyReply { id, at, code, .. } => {
+                Ok(self.received_verify_reply(sender, &id, &at, code.as_deref()))
+            }
             // Da una versione più nuova: non si sa cosa sia, si lascia perdere senza errori.
             AppMessage::Unknown => Ok(Vec::new()),
             AppMessage::Typing { active, ts, .. } => {

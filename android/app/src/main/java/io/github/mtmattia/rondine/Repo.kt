@@ -296,6 +296,69 @@ object Repo {
         revision.value = revision.value + 1
     }
 
+    /** Verifica del numero in corso (SPEC §14.1): cosa sta succedendo, per chi verifica. */
+    val verifyProgress = MutableStateFlow<String?>(null)
+
+    /** Qualcuno verifica il mio numero e mancano i permessi per rispondere da solo. */
+    val verifyNeedsPermission = MutableStateFlow(false)
+
+    /** Avvia la verifica del numero di un contatto: squilli o SMS dalla mia SIM (SPEC §14.1). */
+    fun verifyContact(contactId: String, method: String, number: String?) {
+        scope.launch {
+            try {
+                val plan = client().startVerify(contactId, method, number)
+                io.github.mtmattia.rondine.verify.PhoneVerify.run(app, plan) { verifyProgress.value = it }
+            } catch (e: RondineException) {
+                verifyProgress.value = null
+                notice.value = "Verifica non partita: ${e.userMessage}"
+            }
+        }
+    }
+
+    /** Un SMS (o un link rondine:verifica/…) di verifica arrivato: il codice va a chi l'ha chiesto. */
+    fun answerVerifySms(text: String) {
+        scope.launch {
+            loaded.await()
+            val sent = try { client().answerSmsText(text) } catch (_: RondineException) { 0u }
+            // L'SMS può arrivare prima della richiesta nella chat: lo si tiene per quando arriva.
+            if (sent == 0u) earlyVerifySms = text to System.currentTimeMillis()
+        }
+    }
+
+    private var earlyVerifySms: Pair<String, Long>? = null
+
+    private fun onVerify(
+        requests: List<uniffi.rondine_ffi.VerifyRequestInfo>,
+        checks: List<uniffi.rondine_ffi.PhoneCheckInfo>,
+    ) {
+        val verify = io.github.mtmattia.rondine.verify.PhoneVerify
+        for (r in requests) {
+            val name = chats.value.firstOrNull { it.contact.id == r.contactId }?.contact?.name ?: "Un contatto"
+            if (verify.full && !verify.granted(app, verify.verifiedPermissions)) verifyNeedsPermission.value = true
+            if (!verify.full) notice.value = "$name sta verificando il tuo numero: quando arriva il suo SMS, tocca il link."
+            when (r.method) {
+                "squillo" -> {
+                    val since = System.currentTimeMillis()
+                    scope.launch { verify.watchRings(app, r.id, since) }
+                }
+                "sms" -> earlyVerifySms?.let { (text, at) ->
+                    earlyVerifySms = null
+                    if (System.currentTimeMillis() - at < 15 * 60_000L) answerVerifySms(text)
+                }
+            }
+        }
+        for (c in checks) {
+            verifyProgress.value = null
+            val name = chats.value.firstOrNull { it.contact.id == c.contactId }?.contact?.name ?: "il contatto"
+            notice.value = if (c.ok) {
+                "Numero di $name verificato: questa chiave ha davvero la sua SIM ✓"
+            } else {
+                "Numero di $name non verificato: le prove non tornano. Riprova, o confrontate il codice di sicurezza di persona."
+            }
+        }
+        if (checks.isNotEmpty()) scope.launch { refresh() }
+    }
+
     /** Ritira i messaggi; se l'app non è in primo piano mostra le notifiche. */
     suspend fun sync(): Result<Unit> {
         // Una sveglia push può far partire il processo da zero: prima di ritirare la casella
@@ -318,6 +381,7 @@ object Repo {
                 refresh()
             }
             io.github.mtmattia.rondine.call.CallManager.onSignals(res.calls)
+            onVerify(res.verifyRequests, res.phoneChecks)
             autoBackup()
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty()) {
                 val foreground = ProcessLifecycleOwner.get().lifecycle.currentState

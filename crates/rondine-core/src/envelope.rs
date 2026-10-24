@@ -110,9 +110,37 @@ pub enum AppMessage {
     /// Chi l'ha guardato lo dice a chi l'ha pubblicato (SPEC §7.10).
     #[serde(rename = "status_seen")]
     StatusSeen { v: u32, id: String, ts: u64 },
+    /// Chi verifica il mio numero sta per chiamarlo o scrivergli (SPEC §14.1). Non dice quando.
+    #[serde(rename = "verify_request")]
+    VerifyRequest {
+        v: u32,
+        id: String,
+        method: VerifyMethod,
+    },
+    /// La prova dal telefono verificato: gli istanti delle chiamate perse (squillo) o il codice
+    /// arrivato per SMS (SPEC §14.1).
+    #[serde(rename = "verify_reply")]
+    VerifyReply {
+        v: u32,
+        id: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        at: Vec<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+    },
     /// Un tipo che questa versione non conosce, da una versione più nuova: si ignora (SPEC §7).
     #[serde(other)]
     Unknown,
+}
+
+/// Come si verifica un numero tra amici (SPEC §14.1).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VerifyMethod {
+    /// Due chiamate a istanti casuali, chiuse prima della risposta.
+    Ring,
+    /// Un SMS con un codice dalla SIM di chi verifica.
+    Sms,
 }
 
 /// Aggiornamento (storia): testo su sfondo colorato o foto, per 24 ore (SPEC §7.10).
@@ -312,6 +340,7 @@ impl AppMessage {
             AppMessage::Call(c) => c.v,
             AppMessage::Status(s) => s.v,
             AppMessage::StatusDelete { v, .. } | AppMessage::StatusSeen { v, .. } => *v,
+            AppMessage::VerifyRequest { v, .. } | AppMessage::VerifyReply { v, .. } => *v,
             AppMessage::Unknown => crate::PROTOCOL_VERSION,
         }
     }

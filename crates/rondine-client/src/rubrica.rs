@@ -209,6 +209,7 @@ impl Client {
                     muted: false,
                     previous_key: None,
                     chat_deleted: false,
+                    phone_checked: None,
                 });
             }
             self.note_key_change(&info.identity);

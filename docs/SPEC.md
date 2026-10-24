@@ -998,23 +998,34 @@ non riceve lo squillo né l'SMS, che arrivano alla SIM vera: la risposta della S
 dalla chiave vera, e la chiave falsa non passa mai la prova. Resta solo chi ha in mano la SIM
 (furto o duplicato), come per ogni verifica via telefono.
 
+Messaggi nella chat (MLS, depositi silenziosi):
+- chi verifica: `{"type": "verify_request", "v": 1, "id", "method": "ring" | "sms"}`. Non dice
+  quando partono le chiamate né il codice;
+- chi è verificato: `{"type": "verify_reply", "v": 1, "id", "at": [secondi unix…]}` (squillo) o
+  `{"type": "verify_reply", "v": 1, "id", "code": "12345678"}` (SMS).
+
+Chi verifica accetta una risposta solo dalla chiave che stava verificando, una volta sola, entro
+15 minuti. Le richieste ricevute valgono 15 minuti, al massimo 20 alla volta.
+
 1. **Squillo** (metodo principale; gratis e automatico).
-   - Chi verifica manda nella chat `{"type": "verify_ring", "id"}` (che è partito non dice quando),
-     aspetta un tempo a caso tra 3 e 20 s e chiama il numero, chiudendo dopo 4 s; poi una
-     seconda volta dopo un altro tempo a caso. Annota gli istanti di inizio delle chiamate.
-   - Il telefono chiamato vede nel registro le chiamate perse da quel numero e risponde nella
-     chat `{"type": "verify_ring_seen", "id", "at": [t1, t2]}` (secondi, ora del telefono).
-   - Chi verifica accetta se entrambi gli istanti coincidono con i suoi entro 2 s (tenendo conto
-     della differenza tra gli orologi, stimata dai messaggi della chat). Indovinarli a caso riesce
-     circa una volta su 200.
-   - Serve il permesso di leggere il registro chiamate a chi viene verificato: c'è nella versione
-     libera (F-Droid, GitHub). Dove manca (versione Play, iPhone) si usa l'SMS.
+   - Chi verifica chiama il numero **3 volte**, chiudendo dopo 4 s: la prima dopo 3–60 s a caso,
+     le altre 10–60 s a caso dopo la precedente. Annota l'istante di partenza di ogni chiamata.
+   - Il telefono chiamato guarda nel registro le chiamate in arrivo (perse o rifiutate) dei 3
+     minuti dopo la richiesta e risponde con i loro istanti (al massimo 5).
+   - Chi verifica accetta se c'è un istante che arriva dopo la sua prima chiamata con un ritardo
+     tra −2 e +10 s (la rete mobile impiega qualche secondo a far squillare, e gli orologi
+     differiscono di poco) e se gli altri tornano alla **stessa distanza dal primo** entro 2 s.
+     Indovinarli a caso riesce circa una volta su 1500.
+   - Serve il permesso di chiamare (e di chiudere la chiamata) a chi verifica, e di leggere il
+     registro chiamate a chi è verificato: ci sono nella versione libera (F-Droid, GitHub). Dove
+     mancano (versione Play, iPhone) si usa l'SMS.
 2. **SMS tra amici** (alternativa).
-   - Chi verifica sceglie un codice a caso di 8 cifre e lo manda **dalla sua SIM** al numero, con
-     l'SMS già scritto dall'app: "Rondine: <nome> ti chiede di confermare il tuo numero, codice
-     12345678 — rondine:verifica/12345678".
-   - Chi lo riceve tocca il link (o copia il codice) e la sua app lo rimanda nella chat
-     `{"type": "verify_sms", "id", "code"}`. Chi verifica controlla codice e chiave.
+   - Chi verifica sceglie un codice a caso di 8 cifre e lo manda **dalla sua SIM** al numero:
+     "Rondine: <nome> ti chiede di confermare il tuo numero. Codice 12345678
+     rondine:verifica/12345678". Nella versione libera l'app lo manda da sé; altrimenti apre
+     l'app dei messaggi con il testo già scritto.
+   - Il telefono che lo riceve lo riconosce (versione libera: legge gli SMS in arrivo; altrimenti
+     si tocca il link) e manda il codice nella chat a chi ha chiesto una verifica via SMS.
 3. **QR di persona** (§10): la garanzia più forte, senza telefono né operatore.
 
 Esito: il contatto passa al grado **"numero verificato da te"** (§10), per quella chiave e quel

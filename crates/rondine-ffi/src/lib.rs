@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rondine_client::{
     CallOp, CallStatus, ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent,
-    GroupMessage, NewFile, Source, Trust, Via,
+    GroupMessage, NewFile, Source, Trust, VerifyMethod, Via,
 };
 use rondine_core::PublicKey;
 use tokio::sync::Mutex;
@@ -93,6 +93,8 @@ pub struct ContactInfo {
     pub source: String,
     /// Trovato col numero verificato: il nodo che l'ha verificato (SPEC §13).
     pub phone_verified_by: Option<String>,
+    /// Numero che ho verificato io, con uno squillo o un SMS (SPEC §14.1).
+    pub phone_checked: Option<String>,
     /// Notifiche silenziate.
     pub muted: bool,
     /// Foto del profilo (percorso), se l'ha mandata.
@@ -474,6 +476,56 @@ pub struct SyncResult {
     pub statuses_changed: bool,
     /// Squilli, risposte e fine delle chiamate, in ordine di arrivo.
     pub calls: Vec<CallSignal>,
+    /// Contatti che stanno per verificare il mio numero (SPEC §14.1).
+    pub verify_requests: Vec<VerifyRequestInfo>,
+    /// Esiti delle verifiche del numero che ho avviato.
+    pub phone_checks: Vec<PhoneCheckInfo>,
+}
+
+/// Un contatto sta per verificare il mio numero (SPEC §14.1).
+#[derive(uniffi::Record, Clone)]
+pub struct VerifyRequestInfo {
+    pub id: String,
+    pub contact_id: String,
+    /// "squillo" o "sms".
+    pub method: String,
+}
+
+/// Esito della verifica del numero di un contatto.
+#[derive(uniffi::Record, Clone)]
+pub struct PhoneCheckInfo {
+    pub contact_id: String,
+    pub ok: bool,
+}
+
+/// Cosa deve fare il telefono per verificare il numero di un contatto (SPEC §14.1).
+#[derive(uniffi::Record, Clone)]
+pub struct VerifyPlanInfo {
+    pub id: String,
+    /// Il numero da chiamare o a cui scrivere, in E.164.
+    pub number: String,
+    /// "squillo" o "sms".
+    pub method: String,
+    /// Squillo: dopo quanti secondi da adesso far partire ogni chiamata.
+    pub delays: Vec<u64>,
+    /// SMS: il testo da mandare dalla mia SIM.
+    pub sms_text: Option<String>,
+}
+
+fn method_name(m: VerifyMethod) -> String {
+    match m {
+        VerifyMethod::Ring => "squillo",
+        VerifyMethod::Sms => "sms",
+    }
+    .into()
+}
+
+fn verify_request_info(r: &rondine_client::VerifyRequest) -> VerifyRequestInfo {
+    VerifyRequestInfo {
+        id: r.id.clone(),
+        contact_id: r.from.to_b64(),
+        method: method_name(r.method),
+    }
 }
 
 /// Come [`contact_info`], con la foto del profilo se il contatto l'ha mandata.
@@ -512,6 +564,7 @@ fn contact_info(c: &Contact) -> ContactInfo {
         about: None,
         previous_key: c.previous_key.map(|k| k.to_b64()),
         phone_verified_by: c.phone_verified_by.clone(),
+        phone_checked: c.phone_checked.clone(),
         muted: c.muted,
         trust: match c.trust() {
             Trust::InPerson => "persona",
@@ -1518,6 +1571,71 @@ impl Rondine {
         Ok(self.with(move |c| c.delete_chat(&k)).await?)
     }
 
+    /// Avvia la verifica del numero di un contatto (SPEC §14.1). `method`: "squillo" o "sms";
+    /// `number`: quello in rubrica, se il contatto non ce l'ha già.
+    pub async fn start_verify(
+        &self,
+        contact_id: String,
+        method: String,
+        number: Option<String>,
+    ) -> Result<VerifyPlanInfo> {
+        let k = key(&contact_id)?;
+        let m = match method.as_str() {
+            "squillo" => VerifyMethod::Ring,
+            "sms" => VerifyMethod::Sms,
+            _ => {
+                return Err(RondineError::Invalid(format!(
+                    "metodo sconosciuto: {method}"
+                )));
+            }
+        };
+        self.run(move |c| {
+            Box::pin(async move {
+                let p = c.start_verify(&k, m, number.as_deref()).await?;
+                Ok(VerifyPlanInfo {
+                    id: p.id,
+                    number: p.number,
+                    method: method_name(p.method),
+                    delays: p.delays,
+                    sms_text: p.sms_text,
+                })
+            })
+        })
+        .await
+    }
+
+    /// La chiamata `id` della verifica è partita all'istante `at` (secondi unix).
+    pub async fn record_ring(&self, id: String, at: u64) -> Result<()> {
+        Ok(self.with(move |c| c.record_ring(&id, at)).await?)
+    }
+
+    /// Le richieste di verifica del mio numero ancora valide.
+    pub async fn verify_requests(&self) -> Result<Vec<VerifyRequestInfo>> {
+        Ok(self
+            .with(|c| Ok::<_, rondine_client::Error>(c.verify_requests()))
+            .await?
+            .iter()
+            .map(verify_request_info)
+            .collect())
+    }
+
+    /// Risponde a uno squillo con gli istanti delle chiamate perse (secondi unix).
+    pub async fn answer_ring(&self, id: String, at: Vec<u64>) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.answer_ring(&id, &at).await?) }))
+            .await
+    }
+
+    /// Un SMS arrivato: se è di verifica, il suo codice va a chi l'ha chiesto. Quanti contatti.
+    pub async fn answer_sms_text(&self, text: String) -> Result<u32> {
+        self.run(move |c| {
+            Box::pin(async move {
+                let n = c.answer_sms_text(&text).await?;
+                Ok(u32::try_from(n).unwrap_or(u32::MAX))
+            })
+        })
+        .await
+    }
+
     /// Accende o spegne la mesh tra amici (SPEC §12.5).
     pub async fn set_mesh(&self, on: bool) -> Result<()> {
         Ok(self.with(move |c| c.set_mesh(on)).await?)
@@ -1614,6 +1732,8 @@ impl Rondine {
             messages_deleted: false,
             calls: Vec::new(),
             statuses_changed: false,
+            verify_requests: Vec::new(),
+            phone_checks: Vec::new(),
         };
         for e in synced.groups {
             match e {
@@ -1669,6 +1789,19 @@ impl Rondine {
                     video,
                     sdp,
                     ring,
+                }),
+                Event::VerifyRequest {
+                    contact,
+                    id,
+                    method,
+                } => out.verify_requests.push(VerifyRequestInfo {
+                    id,
+                    contact_id: contact.to_b64(),
+                    method: method_name(method),
+                }),
+                Event::PhoneChecked { contact, ok } => out.phone_checks.push(PhoneCheckInfo {
+                    contact_id: contact.to_b64(),
+                    ok,
                 }),
                 Event::Receipt { ids, .. } => {
                     out.receipts = out

@@ -87,9 +87,6 @@ object Repo {
     val pendingInvite = MutableStateFlow<String?>(null)
     /** Messaggio da mostrare all'utente (errori fuori da una schermata precisa). */
     val notice = MutableStateFlow<String?>(null)
-
-    /** Numero appena salvato e non verificato: proporre la verifica con un SMS. */
-    val askVerifyPhone = MutableStateFlow(false)
     /** Chat aperta sullo schermo: niente notifiche per quella. */
     @Volatile var openChat: String? = null
     /** Gruppo aperto sullo schermo: niente notifiche per quello. */
@@ -124,10 +121,7 @@ object Repo {
 
     suspend fun create(name: String, node: String, phone: String?) {
         val r = createProfile(profileDir, name, node)
-        if (!phone.isNullOrBlank()) {
-            r.setPhone(phone)
-            askVerifyPhone.value = true
-        }
+        if (!phone.isNullOrBlank()) r.setPhone(phone)
         rondine = r
         loaded.complete(Unit)
         startLan()

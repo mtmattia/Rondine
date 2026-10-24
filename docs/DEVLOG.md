@@ -475,3 +475,4 @@ Una riga per modifica: data, cosa è cambiato.
   `chiave_cambiata_verificata_riparte_da_sola`,
   `contatto_verificato_con_chiave_nuova_va_riverificato`.
 - 2026-10-24 — Versione 0.1.17 (versionCode 18); nodo del PC aggiornato (caselle abbandonate, `/seen`).
+- 2026-10-24 — App: tolta la verifica del proprio numero via SMS del nodo ("Verifica adesso il tuo numero", "Verifica con un SMS" nelle Impostazioni, codice e numero protetto): con la §14 il numero lo verificano gli amici con lo squillo.

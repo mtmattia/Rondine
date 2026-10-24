@@ -359,7 +359,6 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
             run("Salvo…") {
                 Repo.client().setPhone(value)
                 Repo.refresh()
-                Repo.askVerifyPhone.value = true
                 // Col numero si pubblica anche il mio biglietto per chi mi ha in rubrica.
                 Repo.scanAddressBook(device.flatMap { it.numbers })
                 null

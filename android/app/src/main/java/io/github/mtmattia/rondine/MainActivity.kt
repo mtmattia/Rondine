@@ -256,7 +256,6 @@ class MainActivity : ComponentActivity() {
         }
 
         io.github.mtmattia.rondine.ui.PasswordPrompt()
-        io.github.mtmattia.rondine.ui.VerifyPhonePrompt()
         io.github.mtmattia.rondine.ui.VerifyPermissionPrompt()
 
         invite?.let { link ->

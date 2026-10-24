@@ -305,7 +305,7 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
     }
 }
 
-private enum class SettingsDialog { Username, Phone, Node, PhoneMenu, Code, Name }
+private enum class SettingsDialog { Username, Phone, Node, Name }
 
 /** Pagine delle Impostazioni, come quelle di WhatsApp: elenco, profilo, Info e sezioni. */
 private enum class SettingsPage { Main, Profile, About, Account, Privacy, Chat, Notifications, Help, Updates }
@@ -343,7 +343,6 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
     var passwordDialog by remember { mutableStateOf(false) }
     var autoMenu by remember { mutableStateOf(false) }
     var recoverName by remember { mutableStateOf<String?>(null) }
-    var recoverPhoneCode by remember { mutableStateOf<String?>(null) }
     if (passwordDialog) {
         PasswordDialog(change = hasPassword == true, onDismiss = { passwordDialog = false }) {
             passwordDialog = false
@@ -360,18 +359,6 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             val h = Repo.client().recoverUsername(n, pw)
             Repo.refresh()
             "Nome ripreso: ora sei @$h"
-        }
-    }
-    recoverPhoneCode?.let { code ->
-        RecoverPasswordDialog(
-            title = "Numero protetto",
-            text = "Questo numero è protetto dalla password di chi l'aveva. Se eri tu, scrivi il tuo nome utente " +
-                "e la password.",
-            name = "", askName = true, onDismiss = { recoverPhoneCode = null },
-        ) { n, pw ->
-            Repo.client().confirmPhoneWithPassword(code, n, pw)
-            Repo.refresh()
-            "Numero verificato"
         }
     }
     if (autoMenu) {
@@ -584,7 +571,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                     Icons.Outlined.Phone, "Telefono",
                     p.phone?.let { if (p.phoneVerified) "$it · verificato ✓" else it },
                     placeholder = "Aggiungi il tuo numero",
-                ) { dialog = if (p.phone != null && p.hasNode) SettingsDialog.PhoneMenu else SettingsDialog.Phone }
+                ) { dialog = SettingsDialog.Phone }
             }
         }
         SettingsPage.About -> AboutPage(p.about, p.aboutUntil, snackbar, back) { text, until ->
@@ -607,7 +594,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                         p.hasNode -> "${p.phone} · tocca per verificarlo con un SMS"
                         else -> p.phone!!
                     },
-                ) { dialog = if (p.phone != null && p.hasNode) SettingsDialog.PhoneMenu else SettingsDialog.Phone }
+                ) { dialog = SettingsDialog.Phone }
                 SettingRow(
                     Icons.Filled.Dns,
                     "Nodo",
@@ -796,65 +783,15 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             label = "Numero",
             placeholder = "340 123 4567",
             initial = p.phone ?: "",
-            note = "Resta sul telefono: al nodo arrivano solo voci cifrate per chi ha già il tuo numero.",
+            note = "Resta sul telefono: al nodo arrivano solo voci cifrate per chi ha già il tuo numero. " +
+                "Lo verificano i tuoi amici, con uno squillo dalla tua pagina nella loro app.",
             onDismiss = { dialog = null },
         ) { value ->
             dialog = null
             run {
                 val n = Repo.client().setPhone(value)
                 Repo.refresh()
-                Repo.askVerifyPhone.value = true
                 "Numero salvato: $n"
-            }
-        }
-        SettingsDialog.PhoneMenu -> AlertDialog(
-            onDismissRequest = { dialog = null },
-            title = { Text("Numero di telefono") },
-            text = {
-                Column {
-                    Text(
-                        if (p.phoneVerified) {
-                            "${p.phone} è verificato: chi ha il tuo numero ti trova su Rondine, anche se tu non hai il suo."
-                        } else {
-                            "Verificalo con un SMS: chi ha il tuo numero ti troverà su Rondine anche se tu non hai il " +
-                                "suo. Il tuo nodo vede il numero solo per mandare l'SMS, poi ne tiene solo un hash."
-                        },
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    if (!p.phoneVerified) {
-                        TextButton(onClick = {
-                            dialog = null
-                            run {
-                                val n = Repo.client().requestPhone(p.phone!!)
-                                dialog = SettingsDialog.Code
-                                "Codice mandato per SMS a $n"
-                            }
-                        }) { Text("Verifica con un SMS") }
-                    }
-                    TextButton(onClick = { dialog = SettingsDialog.Phone }) { Text("Cambia numero") }
-                }
-            },
-            confirmButton = { TextButton(onClick = { dialog = null }) { Text("Chiudi") } },
-        )
-        SettingsDialog.Code -> TextDialog(
-            title = "Codice di verifica",
-            label = "Codice di 6 cifre",
-            placeholder = "123456",
-            note = "L'hai ricevuto per SMS. Vale 10 minuti.",
-            onDismiss = { dialog = null },
-        ) { value ->
-            dialog = null
-            scope.launch {
-                try {
-                    Repo.client().confirmPhone(value.trim())
-                    Repo.refresh()
-                    snackbar.showSnackbar("Numero verificato: chi ce l'ha ti trova su Rondine")
-                } catch (e: RondineException) {
-                    // Numero protetto dalla password di chi l'aveva (SPEC §13.2): se ero io, la scrivo.
-                    if (e.needsPassword()) recoverPhoneCode = value.trim() else snackbar.showSnackbar(e.userMessage)
-                }
             }
         }
         SettingsDialog.Node -> TextDialog(

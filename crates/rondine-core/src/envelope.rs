@@ -55,6 +55,9 @@ pub enum AppMessage {
         addr: String,
         cert: String,
         ts: u64,
+        /// Indirizzo IPv6 (senza NAT), se il telefono ne ha uno (SPEC §12.8).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        addr6: Option<String>,
     },
     /// Busta affidata a un postino della mesh (SPEC §12.5).
     Relay {

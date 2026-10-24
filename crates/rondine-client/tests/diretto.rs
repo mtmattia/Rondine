@@ -13,9 +13,21 @@ type R = Result<(), Box<dyn std::error::Error>>;
 /// Nodo con il suo STUN incorporato; il secondo valore spegne la parte HTTP.
 async fn start_node()
 -> Result<(String, tokio::task::JoinHandle<std::io::Result<()>>), Box<dyn std::error::Error>> {
+    start_node_with(false).await
+}
+
+/// Come `start_node`, con `v6` anche uno STUN su IPv6 (::1).
+async fn start_node_with(
+    v6: bool,
+) -> Result<(String, tokio::task::JoinHandle<std::io::Result<()>>), Box<dyn std::error::Error>> {
     let stun = tokio::net::UdpSocket::bind("127.0.0.1:0").await?;
-    let stun_url = format!("stun:{}", stun.local_addr()?);
+    let mut urls = vec![format!("stun:{}", stun.local_addr()?)];
     tokio::spawn(rondine_nodo::serve_stun(stun));
+    if v6 {
+        let stun6 = tokio::net::UdpSocket::bind("[::1]:0").await?;
+        urls.push(format!("stun:{}", stun6.local_addr()?));
+        tokio::spawn(rondine_nodo::serve_stun(stun6));
+    }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let url = format!("http://{}", listener.local_addr()?);
     let state = AppState::new(Config {
@@ -25,10 +37,7 @@ async fn start_node()
         allow_local_push: true,
         fcm: None,
         sms: None,
-        turn: Some(TurnConfig {
-            urls: vec![stun_url],
-            secret: None,
-        }),
+        turn: Some(TurnConfig { urls, secret: None }),
     })?;
     let handle = tokio::spawn(rondine_nodo::serve(listener, state));
     Ok((url, handle))
@@ -97,6 +106,22 @@ async fn buco_nel_nat_poi_senza_nodo() -> R {
     assert_eq!(receive(&mut mattia).await?, ["diretto!"]);
     mattia.send_text(&silvia.identity(), "anche qui").await?;
     assert_eq!(receive(&mut silvia).await?, ["anche qui"]);
+    Ok(())
+}
+
+/// Con IPv6 da tutti e due i lati il collegamento diretto nasce lì (niente NAT da forare), e i
+/// messaggi passano.
+#[tokio::test]
+async fn buco_su_ipv6_quando_ce_l_hanno_tutti_e_due() -> R {
+    let (node, _http) = start_node_with(true).await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &node).await?;
+    until_linked(&mut silvia, &mut mattia).await?;
+    assert!(silvia.direct_link_v6(&mattia.identity()));
+    assert!(mattia.direct_link_v6(&silvia.identity()));
+    silvia.sync().await?;
+    mattia.send_text(&silvia.identity(), "via IPv6").await?;
+    assert_eq!(receive(&mut silvia).await?, ["via IPv6"]);
     Ok(())
 }
 

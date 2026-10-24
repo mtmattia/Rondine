@@ -1,5 +1,6 @@
-//! Buco nel NAT IPv4 (SPEC §12.8): indirizzo pubblico con STUN, offerta e risposta dentro MLS,
-//! poi QUIC diretto tra i due telefoni con i certificati fissati dalle impronte.
+//! Buco nel NAT (SPEC §12.8): indirizzo pubblico con STUN, offerta e risposta dentro MLS, poi
+//! QUIC diretto tra i due telefoni con i certificati fissati dalle impronte. Su IPv6 (niente NAT,
+//! solo il firewall) quando ce l'hanno tutti e due, se no su IPv4.
 //!
 //! Qui c'è solo la parte di rete; i messaggi `punch` li manda e li riceve il client.
 
@@ -91,6 +92,8 @@ impl IncomingWaiter {
 
 struct Link {
     conn: quinn::Connection,
+    /// Su IPv6.
+    v6: bool,
     /// Tiene vivo il socket della connessione.
     endpoint: quinn::Endpoint,
     last_used: Arc<AtomicU64>,
@@ -115,6 +118,8 @@ type Links = Arc<Mutex<HashMap<PublicKey, Link>>>;
 struct Pending {
     peer: PublicKey,
     socket: std::net::UdpSocket,
+    /// Il socket IPv6, se c'è un indirizzo IPv6.
+    socket6: Option<std::net::UdpSocket>,
     cert: CertificateDer<'static>,
     key: Vec<u8>,
     created: u64,
@@ -168,6 +173,17 @@ impl Punch {
         self.links
             .lock()
             .map(|m| m.get(peer).is_some_and(|l| l.conn.close_reason().is_none()))
+            .unwrap_or(false)
+    }
+
+    /// Il collegamento diretto con il contatto è su IPv6?
+    pub(crate) fn link_is_v6(&self, peer: &PublicKey) -> bool {
+        self.links
+            .lock()
+            .map(|m| {
+                m.get(peer)
+                    .is_some_and(|l| l.v6 && l.conn.close_reason().is_none())
+            })
             .unwrap_or(false)
     }
 
@@ -240,86 +256,142 @@ impl Punch {
         }
     }
 
-    /// Prepara un'offerta: socket nuovo, indirizzo pubblico, certificato. Restituisce
-    /// `(id, indirizzo, impronta)`.
+    /// Prepara un'offerta: socket nuovi (IPv4 e, se c'è, IPv6), indirizzi pubblici,
+    /// certificato. Restituisce `(id, indirizzo IPv4, indirizzo IPv6, impronta)`.
     pub(crate) async fn offer(
         &mut self,
         peer: PublicKey,
         servers: &[SocketAddr],
-    ) -> Result<(String, SocketAddr, String)> {
+    ) -> Result<(String, SocketAddr, Option<SocketAddr>, String)> {
         self.last_try.insert(peer, now());
-        let (socket, mine) = discover(servers).await?;
+        let (socket, mine) = discover(servers, false).await?;
+        let six = discover(servers, true).await.ok();
         let (cert, key) = new_cert()?;
         let fp = fingerprint_b64(&cert);
         let id = rondine_core::random_id();
+        let mine6 = six.as_ref().map(|(_, a)| *a);
+        let socket6 = match six {
+            Some((s, _)) => Some(s.into_std()?),
+            None => None,
+        };
         self.pending.insert(
             id.clone(),
             Pending {
                 peer,
                 socket: socket.into_std()?,
+                socket6,
                 cert,
                 key,
                 created: now(),
             },
         );
-        Ok((id, mine, fp))
+        Ok((id, mine, mine6, fp))
     }
 
     /// Risponde a un'offerta: apre il proprio NAT verso chi offre e aspetta la sua connessione.
     /// Restituisce `(indirizzo, impronta)`.
+    /// Restituisce `(indirizzo IPv4, indirizzo IPv6, impronta)`: si ascolta su IPv4 e, se tutti
+    /// e due hanno IPv6, anche lì; vince la prima connessione.
     pub(crate) async fn answer(
         &mut self,
         peer: PublicKey,
         their_addr: SocketAddr,
+        their_addr6: Option<SocketAddr>,
         their_fp: &str,
         servers: &[SocketAddr],
-    ) -> Result<(SocketAddr, String)> {
+    ) -> Result<(SocketAddr, Option<SocketAddr>, String)> {
         let their_fp = decode_fp(their_fp)?;
-        let (socket, mine) = discover(servers).await?;
+        let (socket, mine) = discover(servers, false).await?;
+        let six = match their_addr6 {
+            Some(a6) => discover(servers, true).await.ok().map(|s| (s, a6)),
+            None => None,
+        };
+        // Se un pacchetto non parte pazienza: serve solo ad aprire NAT e firewall.
         for _ in 0..5 {
-            // Se un pacchetto non parte pazienza: serve solo ad aprire il NAT.
             let _ = socket.send_to(&[0], their_addr).await;
+            if let Some(((s6, _), a6)) = &six {
+                let _ = s6.send_to(&[0], a6).await;
+            }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         let (cert, key) = new_cert()?;
         let fp = fingerprint_b64(&cert);
-        let server = server_config(cert, key, their_fp)?;
         let endpoint = quinn::Endpoint::new(
             quinn::EndpointConfig::default(),
-            Some(server),
+            Some(server_config(cert.clone(), key.clone(), their_fp.clone())?),
             socket.into_std()?,
             Arc::new(quinn::TokioRuntime),
         )?;
+        let mut mine6 = None;
+        let endpoint6 = match six {
+            Some(((s6, a6), _)) => {
+                mine6 = Some(a6);
+                Some(quinn::Endpoint::new(
+                    quinn::EndpointConfig::default(),
+                    Some(server_config(cert, key, their_fp)?),
+                    s6.into_std()?,
+                    Arc::new(quinn::TokioRuntime),
+                )?)
+            }
+            None => None,
+        };
         self.answering.insert(peer, now());
         let (links, inbox) = (self.links.clone(), self.inbox.clone());
         let task = tokio::spawn(async move {
-            let accept = async {
-                // Solo chi ha il certificato giusto completa l'handshake: gli altri si scartano.
+            // Solo chi ha il certificato giusto completa l'handshake: gli altri si scartano.
+            async fn first(endpoint: &quinn::Endpoint) -> Option<quinn::Connection> {
                 while let Some(incoming) = endpoint.accept().await {
                     if let Ok(conn) = incoming.await {
                         return Some(conn);
                     }
                 }
                 None
+            }
+            let both = async {
+                match &endpoint6 {
+                    Some(e6) => tokio::select! {
+                        c = first(e6) => c.map(|c| (c, true)),
+                        c = first(&endpoint) => c.map(|c| (c, false)),
+                    },
+                    None => first(&endpoint).await.map(|c| (c, false)),
+                }
             };
-            match tokio::time::timeout(ACCEPT_WAIT, accept).await {
-                Ok(Some(conn)) => register(&links, &inbox, peer, endpoint, conn),
-                _ => endpoint.close(0u32.into(), b""),
+            match tokio::time::timeout(ACCEPT_WAIT, both).await {
+                Ok(Some((conn, true))) => {
+                    endpoint.close(0u32.into(), b"");
+                    if let Some(e6) = endpoint6 {
+                        register(&links, &inbox, peer, e6, conn, true);
+                    }
+                }
+                Ok(Some((conn, false))) => {
+                    if let Some(e6) = &endpoint6 {
+                        e6.close(0u32.into(), b"");
+                    }
+                    register(&links, &inbox, peer, endpoint, conn, false);
+                }
+                _ => {
+                    endpoint.close(0u32.into(), b"");
+                    if let Some(e6) = endpoint6 {
+                        e6.close(0u32.into(), b"");
+                    }
+                }
             }
         });
         if let Some(old) = self.tasks.insert(peer, task.abort_handle()) {
             old.abort();
         }
-        Ok((mine, fp))
+        Ok((mine, mine6, fp))
     }
 
     /// È arrivata la risposta a una mia offerta: mi collego. La connessione si apre in
     /// sottofondo; `has_link` dice quando è pronta.
+    /// Prima su IPv6, se tutti e due ce l'hanno; se non riesce, su IPv4.
     pub(crate) fn connect(
         &mut self,
         peer: PublicKey,
         id: &str,
         their_addr: SocketAddr,
+        their_addr6: Option<SocketAddr>,
         their_fp: &str,
     ) -> Result<()> {
         let Some(p) = self.pending.remove(id) else {
@@ -328,7 +400,8 @@ impl Punch {
         if p.peer != peer || p.created + PUNCH_TTL_SECS < now() {
             return Err(Error::Invalid("risposta fuori tempo o di un altro".into()));
         }
-        let client = client_config(p.cert, p.key, decode_fp(their_fp)?)?;
+        let fp = decode_fp(their_fp)?;
+        let client = client_config(p.cert.clone(), p.key.clone(), fp.clone())?;
         let mut endpoint = quinn::Endpoint::new(
             quinn::EndpointConfig::default(),
             None,
@@ -336,13 +409,37 @@ impl Punch {
             Arc::new(quinn::TokioRuntime),
         )?;
         endpoint.set_default_client_config(client);
-        let connecting = endpoint
-            .connect(their_addr, "rondine")
-            .map_err(|e| Error::Invalid(format!("collegamento diretto: {e}")))?;
+        let six = match (p.socket6, their_addr6) {
+            (Some(s6), Some(a6)) => {
+                let mut e6 = quinn::Endpoint::new(
+                    quinn::EndpointConfig::default(),
+                    None,
+                    s6,
+                    Arc::new(quinn::TokioRuntime),
+                )?;
+                e6.set_default_client_config(client_config(p.cert, p.key, fp)?);
+                Some((e6, a6))
+            }
+            _ => None,
+        };
         let (links, inbox) = (self.links.clone(), self.inbox.clone());
         let task = tokio::spawn(async move {
+            if let Some((e6, a6)) = six {
+                if let Ok(connecting) = e6.connect(a6, "rondine")
+                    && let Ok(Ok(conn)) = tokio::time::timeout(CONNECT_WAIT / 2, connecting).await
+                {
+                    endpoint.close(0u32.into(), b"");
+                    register(&links, &inbox, peer, e6, conn, true);
+                    return;
+                }
+                e6.close(0u32.into(), b"");
+            }
+            let Ok(connecting) = endpoint.connect(their_addr, "rondine") else {
+                endpoint.close(0u32.into(), b"");
+                return;
+            };
             match tokio::time::timeout(CONNECT_WAIT, connecting).await {
-                Ok(Ok(conn)) => register(&links, &inbox, peer, endpoint, conn),
+                Ok(Ok(conn)) => register(&links, &inbox, peer, endpoint, conn, false),
                 _ => endpoint.close(0u32.into(), b""),
             }
         });
@@ -395,6 +492,7 @@ fn register(
     peer: PublicKey,
     endpoint: quinn::Endpoint,
     conn: quinn::Connection,
+    v6: bool,
 ) {
     let last = Arc::new(AtomicU64::new(now()));
     let stable = conn.stable_id();
@@ -403,6 +501,7 @@ fn register(
             peer,
             Link {
                 conn: conn.clone(),
+                v6,
                 endpoint,
                 last_used: last.clone(),
             },
@@ -439,7 +538,7 @@ fn register(
     });
 }
 
-/// Server STUN dagli `urls` del nodo (§7.9): `stun:` e `turn:` UDP, solo IPv4.
+/// Server STUN dagli `urls` del nodo (§7.9): `stun:` e `turn:` UDP, IPv4 e IPv6.
 pub(crate) async fn stun_servers(urls: &[String]) -> Vec<SocketAddr> {
     let mut out = Vec::new();
     for url in urls {
@@ -464,19 +563,26 @@ pub(crate) async fn stun_servers(urls: &[String]) -> Vec<SocketAddr> {
             format!("{hostport}:3478")
         };
         if let Ok(addrs) = tokio::net::lookup_host(&target).await {
-            out.extend(addrs.filter(SocketAddr::is_ipv4));
+            out.extend(addrs);
         }
     }
     out.dedup();
     out
 }
 
-/// Socket UDP nuovo e il suo indirizzo visto da fuori, chiesto ai server STUN.
-async fn discover(servers: &[SocketAddr]) -> Result<(tokio::net::UdpSocket, SocketAddr)> {
-    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+/// Socket UDP nuovo (IPv4, o IPv6 con `v6`) e il suo indirizzo visto da fuori, chiesto ai
+/// server STUN della stessa famiglia.
+async fn discover(servers: &[SocketAddr], v6: bool) -> Result<(tokio::net::UdpSocket, SocketAddr)> {
+    let servers: Vec<&SocketAddr> = servers.iter().filter(|s| s.is_ipv6() == v6).collect();
+    if servers.is_empty() {
+        return Err(Error::Invalid(
+            "nessun server STUN per questa famiglia".into(),
+        ));
+    }
+    let socket = tokio::net::UdpSocket::bind(if v6 { "[::]:0" } else { "0.0.0.0:0" }).await?;
     let mut buf = [0u8; 576];
     for _ in 0..2 {
-        for server in servers {
+        for &server in &servers {
             let tx = stun::transaction_id();
             if socket
                 .send_to(&stun::binding_request(&tx), server)

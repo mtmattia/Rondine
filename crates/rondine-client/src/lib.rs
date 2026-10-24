@@ -309,6 +309,7 @@ struct PunchJob {
     id: String,
     op: rondine_core::envelope::PunchOp,
     addr: std::net::SocketAddr,
+    addr6: Option<std::net::SocketAddr>,
     cert: String,
 }
 
@@ -799,6 +800,11 @@ impl Client {
         out
     }
 
+    /// Il collegamento diretto via internet con il contatto è su IPv6 (SPEC §12.8)?
+    pub fn direct_link_v6(&self, id: &PublicKey) -> bool {
+        self.punch.link_is_v6(id)
+    }
+
     /// C'è una via diretta (rete locale o internet) verso il contatto?
     pub fn has_direct_route(&self, id: &PublicKey) -> bool {
         !self.direct_addrs(id).is_empty()
@@ -906,7 +912,7 @@ impl Client {
         if servers.is_empty() {
             return false;
         }
-        let Ok((pid, addr, cert)) = self.punch.offer(*id, &servers).await else {
+        let Ok((pid, addr, addr6, cert)) = self.punch.offer(*id, &servers).await else {
             return false;
         };
         let app = AppMessage::Punch {
@@ -916,6 +922,7 @@ impl Client {
             addr: addr.to_string(),
             cert,
             ts: now(),
+            addr6: addr6.map(|a| a.to_string()),
         };
         self.send_punch(&contact, &app, Kind::Normal).await
     }
@@ -954,7 +961,9 @@ impl Client {
             match job.op {
                 rondine_core::envelope::PunchOp::Answer => {
                     // Una risposta che non aspettavo più: niente da fare.
-                    let _ = self.punch.connect(job.from, &job.id, job.addr, &job.cert);
+                    let _ = self
+                        .punch
+                        .connect(job.from, &job.id, job.addr, job.addr6, &job.cert);
                 }
                 rondine_core::envelope::PunchOp::Offer => {
                     if self.punch.has_pending(&job.from) {
@@ -971,9 +980,9 @@ impl Client {
                     if servers.is_empty() {
                         continue;
                     }
-                    let Ok((addr, cert)) = self
+                    let Ok((addr, addr6, cert)) = self
                         .punch
-                        .answer(job.from, job.addr, &job.cert, &servers)
+                        .answer(job.from, job.addr, job.addr6, &job.cert, &servers)
                         .await
                     else {
                         continue;
@@ -985,6 +994,7 @@ impl Client {
                         addr: addr.to_string(),
                         cert,
                         ts: now(),
+                        addr6: addr6.map(|a| a.to_string()),
                     };
                     self.send_punch(&contact, &app, Kind::Quiet).await;
                 }
@@ -3803,6 +3813,7 @@ impl Client {
                 addr,
                 cert,
                 ts,
+                addr6,
                 ..
             } => {
                 // Vecchia: chi l'ha mandata non aspetta più (SPEC §12.8).
@@ -3818,6 +3829,9 @@ impl Client {
                         id,
                         op,
                         addr,
+                        addr6: addr6
+                            .and_then(|a| a.parse::<std::net::SocketAddr>().ok())
+                            .filter(std::net::SocketAddr::is_ipv6),
                         cert,
                     });
                 }

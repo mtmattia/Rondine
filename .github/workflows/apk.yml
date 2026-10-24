@@ -3,6 +3,8 @@
 #   RONDINE_FIRMA_KEYSTORE_B64 e RONDINE_FIRMA_PASSWORD): APK foss nella Release di GitHub (lo
 #   stesso, byte per byte, che compila F-Droid) e AAB play per Google Play. Stessa firma: le
 #   versioni si aggiornano a vicenda (docs/PUBBLICAZIONE.md).
+#   Se la Release ha già gli APK (pubblicata dal PC con scripts/pubblica.sh) non fa niente; se
+#   esiste ma è vuota (creata dal sito di GitHub) ci carica gli APK.
 # - Branch di lavoro `ccr-*`: APK di prova (debug, chiave di debug di ogni build) in una
 #   pre-release.
 name: APK
@@ -23,13 +25,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Già pubblicata dal PC?
+        id: gia
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "rondine-${tag}.apk"; then
+            echo "La Release $tag ha già gli APK (scripts/pubblica.sh): niente da fare."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-java@v4
+        if: steps.gia.outputs.skip != 'true'
         with:
           distribution: temurin
           java-version: "17"
 
       # L'SDK Android è già sul runner (ANDROID_HOME): si aggiungono licenze e NDK.
       - name: SDK e NDK
+        if: steps.gia.outputs.skip != 'true'
         run: |
           sdkm=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
           yes | "$sdkm" --licenses > /dev/null || true
@@ -37,13 +53,15 @@ jobs:
 
       # La versione di Rust è quella di rust-toolchain.toml (rustup la installa da sé).
       - name: Rust
+        if: steps.gia.outputs.skip != 'true'
         run: rustup show active-toolchain
 
       - name: cargo-ndk
+        if: steps.gia.outputs.skip != 'true'
         run: cargo install cargo-ndk --version 4.1.2 --locked
 
       - name: Versione firmata
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && steps.gia.outputs.skip != 'true'
         working-directory: android
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,8 +93,16 @@ jobs:
           news="../fastlane/metadata/android/it-IT/changelogs/${code}.txt"
           if [ -f "$news" ]; then cat "$news"; echo; fi > "$notes"
           echo "Rondine ${tag}. Due versioni, stessa firma: si installano una sopra l'altra senza perdere niente. rondine-${tag}.apk è la versione libera (come su F-Droid): notifiche con ntfy. rondine-${tag}-play.apk è la versione Google: se manca ntfy, notifiche attraverso Google (FCM). L'AAB è per Google Play." >> "$notes"
-          cd .. && gh release create "$tag" $pre "rondine-${tag}.apk" "rondine-${tag}-play.apk" "rondine-${tag}-play.aab" \
-            --target "$GITHUB_SHA" --title "Rondine ${tag}" --notes-file "$notes"
+          cd ..
+          files=("rondine-${tag}.apk" "rondine-${tag}-play.apk" "rondine-${tag}-play.aab")
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # Release creata a mano dal sito, senza APK: si completa.
+            gh release upload "$tag" "${files[@]}" --clobber
+            gh release edit "$tag" $pre --title "Rondine ${tag}" --notes-file "$notes"
+          else
+            gh release create "$tag" $pre "${files[@]}" \
+              --target "$GITHUB_SHA" --title "Rondine ${tag}" --notes-file "$notes"
+          fi
         shell: bash
 
       - name: Compila l'APK di prova

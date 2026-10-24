@@ -48,6 +48,25 @@ keytool -genkeypair -keystore rondine.jks -alias rondine -keyalg RSA -keysize 40
   l'uscita di `base64 -w0 rondine.jks`, e `RONDINE_FIRMA_PASSWORD`. Da lì ogni tag `v*` produce
   APK e AAB firmati in una Release (`.github/workflows/apk.yml`).
 
+## Pubblicare dal PC (2-3 minuti)
+
+La pubblicazione automatica (tag `v*` su GitHub) compila tutto da zero e impiega circa 25
+minuti. Dal PC, dove ci sono la chiave e 16 processori, basta un comando:
+
+```sh
+# alzati versionCode e versionName, scritte le novità in fastlane/.../changelogs/<versionCode>.txt,
+# fatto il commit e il push su main:
+scripts/pubblica.sh          # APK foss e play
+scripts/pubblica.sh --aab    # anche l'AAB per Google Play
+scripts/pubblica.sh --prova  # compila e controlla la firma, senza pubblicare
+```
+
+Lo script controlla che main sia pulito e allineato a GitHub e che la versione sia nuova, compila,
+verifica che gli APK abbiano la firma del progetto, poi crea tag e Release con gli stessi file e
+le stesse note della pubblicazione automatica. Quella, trovando la Release già con gli APK, si
+ferma senza fare niente; se invece la Release è stata creata dal sito senza APK, ce li carica.
+Gli APK sono identici a quelli di GitHub (provato con la 0.1.13: stesso `sha256sum`).
+
 ## Build riproducibile
 
 Lo stesso sorgente dà lo stesso APK, byte per byte, su qualunque computer: Rust è fissato in

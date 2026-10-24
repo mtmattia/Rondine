@@ -328,3 +328,9 @@ Una riga per modifica: data, cosa è cambiato.
   lavoro" salvate e mostrate nella nuvoletta; con il nodo spento il salvataggio aspettava i tempi
   delle consegne, ora la pagina torna subito indietro. Niente "Link" del profilo, lingua,
   dispositivi collegati né prodotti Meta.
+- 2026-10-24 — Pubblicata la 0.1.13 (collegamento diretto, Impostazioni come WhatsApp). Il primo
+  tentativo del 22 era fallito solo alla fine: la Release creata dal sito impediva a quella
+  automatica di nascere, quindi niente APK; tag spostato sull'ultimo commit e Release rifatta.
+  Nuovo `scripts/pubblica.sh`: pubblica dal PC in 2-3 minuti invece di 25 (firma verificata con
+  apksigner); la pubblicazione automatica si ferma se la Release ha già gli APK e completa quelle
+  vuote. APK della 0.1.13 compilato sul PC identico a quello di GitHub (sha256).

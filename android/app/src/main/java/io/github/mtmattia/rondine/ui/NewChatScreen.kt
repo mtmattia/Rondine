@@ -250,7 +250,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
                         Text(
                             listOfNotNull(
                                 if (local != null && local != c.name) "~${c.name}" else null,
-                                c.username?.let { "@$it" } ?: c.phone ?: c.shortId,
+                                c.about ?: c.username?.let { "@$it" } ?: c.phone ?: c.shortId,
                                 if (c.phoneVerifiedBy != null) "numero verificato" else null,
                             ).joinToString(" · "),
                             fontSize = 13.sp,

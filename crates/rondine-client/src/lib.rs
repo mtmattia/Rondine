@@ -356,6 +356,7 @@ impl Client {
                 retired: Vec::new(),
                 push_endpoint: None,
                 my_photo_ts: 0,
+                my_about: None,
                 photos: Vec::new(),
                 discovery_cache: Vec::new(),
                 pending_restore: false,
@@ -418,6 +419,7 @@ impl Client {
                 retired: Vec::new(),
                 push_endpoint: None,
                 my_photo_ts: 0,
+                my_about: None,
                 photos: Vec::new(),
                 discovery_cache: Vec::new(),
                 pending_restore: false,
@@ -2387,7 +2389,64 @@ impl Client {
                 let _ = std::fs::remove_file(&path);
             }
         }
-        // Sempre più recente della precedente, anche con due cambi nello stesso secondo.
+        self.broadcast_profile().await
+    }
+
+    /// Il mio nome, come lo vedono i contatti.
+    pub fn display_name(&self) -> &str {
+        &self.state.display_name
+    }
+
+    /// Cambia il mio nome (SPEC §7.7): vale per i biglietti nuovi e arriva subito a contatti e
+    /// gruppi.
+    pub async fn set_display_name(&mut self, name: &str) -> Result<()> {
+        let name = name.trim();
+        let n = name.chars().count();
+        if n == 0 || n > rondine_core::envelope::MAX_NAME_CHARS {
+            return Err(Error::Invalid(
+                "il nome deve avere da 1 a 64 caratteri".into(),
+            ));
+        }
+        self.state.display_name = name.to_string();
+        self.broadcast_profile().await
+    }
+
+    /// Le mie "Info" attuali, se ci sono e non sono scadute.
+    pub fn my_about(&self) -> Option<rondine_core::envelope::About> {
+        self.state.my_about.clone().filter(|a| a.active(now()))
+    }
+
+    /// Mette (o con `None` toglie) le mie "Info", fino a `until` o per sempre (SPEC §7.7).
+    pub async fn set_about(&mut self, text: Option<&str>, until: Option<u64>) -> Result<()> {
+        let about = match text.map(str::trim).filter(|t| !t.is_empty()) {
+            Some(t) if t.chars().count() > rondine_core::envelope::About::MAX_CHARS => {
+                return Err(Error::Invalid(
+                    "Info troppo lunghe (al massimo 139 caratteri)".into(),
+                ));
+            }
+            Some(t) => Some(rondine_core::envelope::About {
+                text: t.to_string(),
+                until,
+            }),
+            None => None,
+        };
+        self.state.my_about = about;
+        self.broadcast_profile().await
+    }
+
+    /// Le "Info" di un contatto o di un membro di un gruppo, se attive.
+    pub fn about_of(&self, id: &PublicKey) -> Option<rondine_core::envelope::About> {
+        self.state
+            .photos
+            .iter()
+            .find(|p| &p.identity == id)
+            .and_then(|p| p.about.clone())
+            .filter(|a| a.active(now()))
+    }
+
+    /// Il profilo è cambiato: `ts` nuovo e messaggio a tutti i contatti e i gruppi attivi.
+    async fn broadcast_profile(&mut self) -> Result<()> {
+        // Sempre più recente del precedente, anche con due cambi nello stesso secondo.
         self.state.my_photo_ts = now().max(self.state.my_photo_ts + 1);
         self.save()?;
         let contacts: Vec<PublicKey> = self
@@ -2430,6 +2489,8 @@ impl Client {
             v: 1,
             ts: self.state.my_photo_ts,
             photo,
+            name: Some(self.state.display_name.clone()),
+            about: self.state.my_about.clone(),
         })
     }
 
@@ -2456,6 +2517,8 @@ impl Client {
         sender: PublicKey,
         ts: u64,
         photo: Option<String>,
+        name: Option<String>,
+        about: Option<rondine_core::envelope::About>,
     ) -> Result<Vec<Event>> {
         if self
             .state
@@ -2483,12 +2546,23 @@ impl Client {
                 false
             }
         };
+        let about =
+            about.filter(|a| a.text.chars().count() <= rondine_core::envelope::About::MAX_CHARS);
         self.state.photos.retain(|p| p.identity != sender);
         self.state.photos.push(state::PhotoEntry {
             identity: sender,
             ts,
             has,
+            about,
         });
+        // Il nome scelto vale per chi non l'ha nella mia rubrica (lì conta il nome della rubrica).
+        if let Some(n) = name.map(|n| n.trim().to_string()).filter(|n| {
+            !n.is_empty() && n.chars().count() <= rondine_core::envelope::MAX_NAME_CHARS
+        }) && let Some(c) = self.contact_mut(&sender)
+            && c.source != Source::Rubrica
+        {
+            c.display_name = n;
+        }
         Ok(vec![Event::PhotoChanged { identity: sender }])
     }
 
@@ -3076,7 +3150,13 @@ impl Client {
             AppMessage::File(f) => self.received_file(sender, *f),
             AppMessage::Location(l) => self.received_location(sender, l),
             AppMessage::LocationUpdate(l) => self.received_location_update(sender, l),
-            AppMessage::Profile { ts, photo, .. } => self.received_profile(sender, ts, photo),
+            AppMessage::Profile {
+                ts,
+                photo,
+                name,
+                about,
+                ..
+            } => self.received_profile(sender, ts, photo, name, about),
             AppMessage::Call(c) => self.received_call(sender, c),
             AppMessage::Status(s) => self.received_status(sender, *s),
             AppMessage::StatusDelete { id, .. } => Ok(self.received_status_delete(sender, &id)),

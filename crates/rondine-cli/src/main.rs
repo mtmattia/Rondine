@@ -108,6 +108,16 @@ enum Cmd {
         #[arg(long)]
         togli: bool,
     },
+    /// Cambia il mio nome: arriva subito a contatti e gruppi (SPEC §7.7).
+    Rinomina { nome: String },
+    /// Le mie "Info" (SPEC §7.7): un testo breve, per sempre o per qualche ora; senza testo le
+    /// toglie.
+    Info {
+        testo: Option<String>,
+        /// Dopo quante ore sparisce (senza: per sempre).
+        #[arg(long)]
+        ore: Option<u64>,
+    },
     /// Posizione: fissa, in tempo reale, aggiornamenti.
     #[command(subcommand)]
     Posizione(PosizioneCmd),
@@ -862,6 +872,9 @@ async fn main() -> anyhow::Result<()> {
                     ""
                 }
             );
+            if let Some(a) = c.my_about() {
+                println!("Info:     {}", a.text);
+            }
             println!("Bacheche: {}", s.boards.join(", "));
             println!("Link:     {}", c.share_link()?);
             println!("Invito:   {}", c.invite_link()?);
@@ -964,6 +977,21 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Posizione(PosizioneCmd::Ferma { id }) => {
             c.stop_location(&id).await?;
             println!("Condivisione finita.");
+        }
+        Cmd::Rinomina { nome } => {
+            c.set_display_name(&nome).await?;
+            println!(
+                "Ora ti chiami {}: i tuoi contatti e i tuoi gruppi lo sanno.",
+                c.display_name()
+            );
+        }
+        Cmd::Info { testo, ore } => {
+            let until = ore.map(|h| rondine_core::now() + h * 3600);
+            c.set_about(testo.as_deref(), until).await?;
+            match c.my_about() {
+                Some(a) => println!("Info: {}", a.text),
+                None => println!("Info tolte."),
+            }
         }
         Cmd::Foto { file, togli } => {
             if togli {

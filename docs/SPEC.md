@@ -362,6 +362,21 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
   - a un gruppo, entrando (insieme al proprio `hello`).
 - Chi la riceve tiene, per ogni mittente, quella con `ts` più recente.
 
+**Nome e Info.** Lo stesso messaggio porta tutto il profilo attuale, non solo la foto:
+
+```json
+{ "v": 1, "type": "profile", "ts": 1792240200, "photo": "<b64 JPEG>",
+  "name": "Mattia", "about": { "text": "😴 Sto dormendo", "until": 1792326600 } }
+```
+
+- `name` (facoltativo, 1–64 caratteri): il nome che ho scelto. Sostituisce quello del biglietto
+  per chi mi ha aggiunto con un invito, un nome utente o un messaggio; chi mi ha in rubrica vede il
+  nome della sua rubrica.
+- `about` (facoltativo, `null` = nessuna): testo fino a 139 caratteri, come le "Info" di
+  WhatsApp, con `until` (secondi Unix) dopo cui non si mostra più; `until` assente = per sempre.
+- Un `profile` senza `name` o `about` (per esempio da una versione vecchia) vuol dire "nessuno".
+- Si manda quando cambia uno qualsiasi dei tre, con un `ts` nuovo.
+
 ### 7.8 Backup e ripristino
 
 **File di backup** (resta sul telefono o dove lo mette la persona): `RONDINE-BACKUP\n`, un byte di

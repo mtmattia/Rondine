@@ -970,9 +970,15 @@ impl Client {
                     });
                 }
             }
-            AppMessage::Profile { ts, photo, .. } => {
+            AppMessage::Profile {
+                ts,
+                photo,
+                name,
+                about,
+                ..
+            } => {
                 // Anche da chi non è un contatto: lo si vede nel gruppo (SPEC §7.7).
-                let ev = self.received_profile(sender, ts, photo)?;
+                let ev = self.received_profile(sender, ts, photo, name, about)?;
                 if !ev.is_empty() {
                     self.batch
                         .groups

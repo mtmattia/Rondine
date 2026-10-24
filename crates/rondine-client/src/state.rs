@@ -246,9 +246,12 @@ pub struct State {
     /// Endpoint UnifiedPush registrato, da spostare se cambia il nodo.
     #[serde(default)]
     pub push_endpoint: Option<String>,
-    /// Quando ho cambiato (o tolto) la mia foto; 0 se non l'ho mai messa (SPEC §7.7).
+    /// Quando ho cambiato il mio profilo (foto, nome o Info); 0 se mai (SPEC §7.7).
     #[serde(default)]
     pub my_photo_ts: u64,
+    /// Le mie "Info" (SPEC §7.7).
+    #[serde(default)]
+    pub my_about: Option<rondine_core::envelope::About>,
     /// Foto ricevute da contatti e membri dei gruppi: chi e di quando. Il file sta in
     /// `foto/<chiave>.jpg` nella cartella del profilo.
     #[serde(default)]
@@ -319,12 +322,14 @@ pub struct DiscoverySecret {
     pub published_at: u64,
 }
 
-/// La foto più recente ricevuta da qualcuno (`has` falso: l'ha tolta).
+/// Il profilo più recente ricevuto da qualcuno (SPEC §7.7): foto (`has` falso: l'ha tolta) e Info.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PhotoEntry {
     pub identity: PublicKey,
     pub ts: u64,
     pub has: bool,
+    #[serde(default)]
+    pub about: Option<rondine_core::envelope::About>,
 }
 
 /// Casella di un nodo lasciato, ritirata fino a `until` per chi ha ancora il biglietto vecchio.

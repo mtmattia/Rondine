@@ -93,6 +93,12 @@ pub enum AppMessage {
         ts: u64,
         #[serde(default)]
         photo: Option<String>,
+        /// Nome scelto da chi lo manda (SPEC §7.7).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// "Info": testo breve con scadenza (SPEC §7.7).
+        #[serde(default)]
+        about: Option<About>,
     },
     /// Squillo, risposta o fine di una chiamata (SPEC §7.9).
     Call(CallMsg),
@@ -249,6 +255,28 @@ pub struct FileMsg {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sticker: bool,
 }
+
+/// Le "Info" del profilo (SPEC §7.7).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct About {
+    pub text: String,
+    /// Dopo questo istante non si mostra più; `None` = per sempre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<u64>,
+}
+
+impl About {
+    /// Lunghezze massime di SPEC §7.7, in caratteri.
+    pub const MAX_CHARS: usize = 139;
+
+    /// Valida adesso?
+    pub fn active(&self, now: u64) -> bool {
+        !self.text.trim().is_empty() && self.until.is_none_or(|u| now < u)
+    }
+}
+
+/// Lunghezza massima del nome nel profilo (SPEC §7.7).
+pub const MAX_NAME_CHARS: usize = 64;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

@@ -2014,3 +2014,51 @@ async fn aggiornamenti_ai_contatti() -> R {
     assert!(mattia.post_status(Some("  "), None, None).await.is_err());
     Ok(())
 }
+
+#[tokio::test]
+async fn nome_e_info_del_profilo() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    let im = mattia.identity();
+
+    // Cambio nome (SPEC §7.7): chi mi ha aggiunto con un invito vede quello nuovo.
+    assert!(mattia.set_display_name("   ").await.is_err());
+    mattia.set_display_name("Mattia T.").await?;
+    assert_eq!(mattia.display_name(), "Mattia T.");
+    silvia.sync().await?;
+    let c = silvia.contacts().iter().find(|c| c.identity == im).cloned();
+    assert_eq!(c.map(|c| c.display_name).as_deref(), Some("Mattia T."));
+
+    // Info con scadenza: arriva, poi si toglie.
+    let troppo = "x".repeat(140);
+    assert!(mattia.set_about(Some(&troppo), None).await.is_err());
+    let until = rondine_core::now() + 3600;
+    mattia.set_about(Some("💼 Al lavoro"), Some(until)).await?;
+    assert_eq!(
+        mattia.my_about().map(|a| a.text).as_deref(),
+        Some("💼 Al lavoro")
+    );
+    silvia.sync().await?;
+    let a = silvia.about_of(&im).ok_or("Info non arrivata")?;
+    assert_eq!((a.text.as_str(), a.until), ("💼 Al lavoro", Some(until)));
+    // Il nome resta quello cambiato prima: ogni profilo li porta tutti.
+    let c = silvia.contacts().iter().find(|c| c.identity == im).cloned();
+    assert_eq!(c.map(|c| c.display_name).as_deref(), Some("Mattia T."));
+
+    mattia.set_about(None, None).await?;
+    assert!(mattia.my_about().is_none());
+    silvia.sync().await?;
+    assert!(silvia.about_of(&im).is_none());
+
+    // Già scaduta: non si mostra.
+    mattia
+        .set_about(Some("ieri"), Some(rondine_core::now() - 1))
+        .await?;
+    silvia.sync().await?;
+    assert!(silvia.about_of(&im).is_none());
+    Ok(())
+}

@@ -1,6 +1,22 @@
 package io.github.mtmattia.rondine.ui
 
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.foundation.layout.Box
@@ -220,6 +236,9 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
             ZoomableAvatar(c.name, c.id, 120.dp, c.photo)
             Text(c.name, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
             c.username?.let { Text("@$it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            c.about?.let {
+                Text(it, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp))
+            }
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                 Text(
                     number.split(" ").chunked(4).joinToString("\n") { it.joinToString("  ") },
@@ -254,7 +273,10 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
     }
 }
 
-private enum class SettingsDialog { Username, Phone, Node, PhoneMenu, Code }
+private enum class SettingsDialog { Username, Phone, Node, PhoneMenu, Code, Name }
+
+/** Pagine delle Impostazioni, come quelle di WhatsApp: elenco, profilo, Info e sezioni. */
+private enum class SettingsPage { Main, Profile, About, Account, Privacy, Chat, Notifications, Help, Updates }
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Unit) {
@@ -407,121 +429,189 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
         )
     }
 
-    BackScaffold("Impostazioni", onBack, snackbar) { m ->
-        Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Row(
-                Modifier.fillMaxWidth().clickable(onClick = onMyQr).padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.clickable { photoMenu = true }) {
-                    Avatar(p.name, p.id, 64.dp, p.photo)
-                    Box(
-                        Modifier.align(Alignment.BottomEnd).size(22.dp)
-                            .background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.PhotoCamera, "Cambia foto", Modifier.size(13.dp),
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                        )
+    var page by remember { mutableStateOf(SettingsPage.Main) }
+    val back: () -> Unit = {
+        page = when (page) {
+            SettingsPage.Main -> SettingsPage.Main.also { onBack() }
+            SettingsPage.About -> SettingsPage.Profile
+            else -> SettingsPage.Main
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = page != SettingsPage.Main) { back() }
+
+    fun open(url: String) = context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+
+    when (page) {
+        SettingsPage.Main -> SettingsMain(
+            p = p,
+            push = push,
+            snackbar = snackbar,
+            onBack = back,
+            onMyQr = onMyQr,
+            onPage = { page = it },
+            onFeedback = { open("https://github.com/mtmattia/Rondine/issues") },
+            onInvite = {
+                context.startActivity(
+                    Intent.createChooser(
+                        Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(
+                            Intent.EXTRA_TEXT,
+                            "Scrivimi su Rondine, il messenger senza centralino: ${p.shareLink}",
+                        ),
+                        "Invita un amico",
+                    ),
+                )
+            },
+        )
+        SettingsPage.Profile -> BackScaffold("Profilo", back, snackbar) { m ->
+            Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
+                Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.clickable { photoMenu = true }) {
+                        Avatar(p.name, p.id, 160.dp, p.photo)
+                        Box(
+                            Modifier.align(Alignment.BottomEnd).size(48.dp)
+                                .background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.PhotoCamera, "Cambia foto", tint = MaterialTheme.colorScheme.onPrimary)
+                        }
                     }
                 }
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(p.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        p.username?.let { "@$it" } ?: "Nessun nome utente",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ProfileRow(Icons.Outlined.Person, "Nome", p.name) { dialog = SettingsDialog.Name }
+                ProfileRow(Icons.Outlined.Info, "Info", p.about, placeholder = "Imposta Informazioni") {
+                    page = SettingsPage.About
+                }
+                ProfileRow(
+                    Icons.Filled.AlternateEmail, "Nome utente", p.username?.let { "@$it" },
+                    placeholder = "Scegline uno per farti trovare",
+                ) { dialog = SettingsDialog.Username }
+                ProfileRow(
+                    Icons.Outlined.Phone, "Telefono",
+                    p.phone?.let { if (p.phoneVerified) "$it · verificato ✓" else it },
+                    placeholder = "Aggiungi il tuo numero",
+                ) { dialog = if (p.phone != null && p.hasNode) SettingsDialog.PhoneMenu else SettingsDialog.Phone }
+            }
+        }
+        SettingsPage.About -> AboutPage(p.about, p.aboutUntil, snackbar, back) { text, until ->
+            // Si torna subito al profilo: l'invio a contatti e gruppi può richiedere un po'.
+            page = SettingsPage.Profile
+            run {
+                Repo.client().setAbout(text, until)
+                Repo.refresh()
+                if (text == null) "Info tolte" else "Info aggiornate: le vedono i tuoi contatti e i tuoi gruppi"
+            }
+        }
+        SettingsPage.Account -> BackScaffold("Account", back, snackbar) { m ->
+            Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
+                SettingRow(
+                    Icons.Filled.Phone,
+                    "Numero di telefono",
+                    when {
+                        p.phone == null -> "Non impostato"
+                        p.phoneVerified -> "${p.phone} · verificato ✓"
+                        p.hasNode -> "${p.phone} · tocca per verificarlo con un SMS"
+                        else -> p.phone!!
+                    },
+                ) { dialog = if (p.phone != null && p.hasNode) SettingsDialog.PhoneMenu else SettingsDialog.Phone }
+                SettingRow(
+                    Icons.Filled.Dns,
+                    "Nodo",
+                    if (p.hasNode) p.node else "Nessuno: tocca per aggiungerne uno",
+                ) { dialog = SettingsDialog.Node }
+                SettingRow(Icons.Filled.QrCode2, "Link d'invito e QR", "Condividi o reimposta", onMyQr)
+                SettingRow(Icons.Filled.Key, "La tua chiave", "${p.shortId}… · tocca per copiarla intera") {
+                    context.getSystemService(ClipboardManager::class.java)
+                        ?.setPrimaryClip(ClipData.newPlainText("Chiave Rondine", p.id))
+                    scope.launch { snackbar.showSnackbar("Chiave copiata") }
+                }
+            }
+        }
+        SettingsPage.Privacy -> BackScaffold("Privacy", back, snackbar) { m ->
+            Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
+                val blocked = Repo.chats.collectAsState().value.count { it.contact.blocked }
+                SettingRow(Icons.Filled.Block, "Contatti bloccati", if (blocked == 0) "Nessuno" else "$blocked") {}
+                var maps by remember { mutableStateOf(MapTiles.enabled(context)) }
+                SettingRow(
+                    Icons.Filled.Map,
+                    "Mappe nelle posizioni",
+                    if (maps) {
+                        "Attive: da OpenStreetMap solo il quadrato di circa 2 km, il punto esatto lo disegna il telefono"
+                    } else {
+                        "Spente: nessuna richiesta al server delle mappe"
+                    },
+                ) {
+                    maps = !maps
+                    MapTiles.setEnabled(context, maps)
+                }
+                SettingRow(Icons.Filled.PrivacyTip, "Cosa vede il nodo", "Cosa resta sul telefono e cosa passa dal nodo") {
+                    open("https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md")
+                }
+            }
+        }
+        SettingsPage.Chat -> BackScaffold("Chat", back, snackbar) { m ->
+            Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
+                SettingRow(
+                    Icons.Filled.Backup,
+                    "Backup delle chat",
+                    if (lastBackup == 0L) "Mai fatto: salva una copia cifrata di chat e contatti"
+                    else "Ultimo: " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                        .format(java.util.Date(lastBackup)),
+                ) { backupAsk = true }
+            }
+        }
+        SettingsPage.Notifications -> BackScaffold("Notifiche", back, snackbar) { m ->
+            Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
+                SettingRow(Icons.Filled.Notifications, "Distributore UnifiedPush", "$push · tocca per sceglierlo", onPickPush)
+                SettingRow(
+                    Icons.Filled.BatteryChargingFull,
+                    "Notifiche ad app chiusa",
+                    "Su Xiaomi, realme, Oppo, Huawei e simili: consenti a Rondine l'attività in background " +
+                        "e l'avvio automatico, e non chiuderla dalle app recenti",
+                ) {
+                    context.startActivity(
+                        Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(Uri.parse("package:${context.packageName}")),
                     )
                 }
-                Icon(Icons.Filled.QrCode2, "Il mio codice QR", tint = MaterialTheme.colorScheme.primary)
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            SettingRow(Icons.Filled.AlternateEmail, "Nome utente", p.username?.let { "@$it" } ?: "Scegline uno per farti trovare") {
-                dialog = SettingsDialog.Username
-            }
-            SettingRow(
-                Icons.Filled.Phone,
-                "Numero di telefono",
-                when {
-                    p.phone == null -> "Non impostato"
-                    p.phoneVerified -> "${p.phone} · verificato ✓"
-                    p.hasNode -> "${p.phone} · tocca per verificarlo con un SMS"
-                    else -> p.phone!!
-                },
-            ) { dialog = if (p.phone != null && p.hasNode) SettingsDialog.PhoneMenu else SettingsDialog.Phone }
-            SettingRow(Icons.Filled.QrCode2, "Link d'invito e QR", "Condividi o reimposta", onMyQr)
-            SettingRow(
-                Icons.Filled.Backup,
-                "Backup",
-                if (lastBackup == 0L) "Mai fatto: salva una copia cifrata di chat e contatti"
-                else "Ultimo: " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
-                    .format(java.util.Date(lastBackup)),
-            ) { backupAsk = true }
-            SettingRow(Icons.Filled.Notifications, "Notifiche", "$push · tocca per scegliere il distributore UnifiedPush", onPickPush)
-            SettingRow(
-                Icons.Filled.Dns,
-                "Nodo",
-                if (p.hasNode) p.node else "Nessuno: tocca per aggiungerne uno",
-            ) { dialog = SettingsDialog.Node }
-            SettingRow(
-                Icons.Filled.BatteryChargingFull,
-                "Notifiche ad app chiusa",
-                "Su Xiaomi, realme, Oppo, Huawei e simili: consenti a Rondine l'attività in background " +
-                    "e l'avvio automatico, e non chiuderla dalle app recenti",
-            ) {
-                context.startActivity(
-                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        .setData(Uri.parse("package:${context.packageName}")),
-                )
-            }
-            var maps by remember { mutableStateOf(MapTiles.enabled(context)) }
-            SettingRow(
-                Icons.Filled.Map,
-                "Mappe nelle posizioni",
-                if (maps) {
-                    "Attive: da OpenStreetMap solo il quadrato di circa 2 km, il punto esatto lo disegna il telefono"
-                } else {
-                    "Spente: nessuna richiesta al server delle mappe"
-                },
-            ) {
-                maps = !maps
-                MapTiles.setEnabled(context, maps)
-            }
-            if (io.github.mtmattia.rondine.update.Updater.supported(context)) {
-                val upd by io.github.mtmattia.rondine.update.Updater.state.collectAsState()
-                SettingRow(Icons.Filled.SystemUpdate, "Aggiornamenti", io.github.mtmattia.rondine.update.updateSubtitle(upd)) {
-                    io.github.mtmattia.rondine.update.onUpdateRow(context, scope)
+        }
+        SettingsPage.Help -> BackScaffold("Aiuto", back, snackbar) { m ->
+            Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
+                SettingRow(Icons.Filled.PrivacyTip, "Informativa sulla privacy", "Cosa resta sul telefono e cosa vede il nodo") {
+                    open("https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md")
                 }
-                var auto by remember { mutableStateOf(io.github.mtmattia.rondine.update.Updater.autoEnabled(context)) }
-                SettingRow(
-                    Icons.Filled.Update,
-                    "Controllo automatico degli aggiornamenti",
-                    if (auto) "Attivo: due volte al giorno chiede a GitHub l'ultima versione" else "Spento",
-                ) {
-                    auto = !auto
-                    io.github.mtmattia.rondine.update.Updater.setAutoEnabled(context, auto)
+                SettingRow(Icons.Filled.Code, "Codice sorgente", "Rondine è open source (MIT o Apache-2.0)") {
+                    open("https://github.com/mtmattia/Rondine")
                 }
-            } else {
                 SettingRow(
-                    Icons.Filled.SystemUpdate, "Versione ${io.github.mtmattia.rondine.BuildConfig.VERSION_NAME}",
-                    if (io.github.mtmattia.rondine.BuildConfig.DEBUG) "Versione di prova" else "Gli aggiornamenti arrivano da Google Play",
+                    Icons.Filled.Info,
+                    "Versione ${BuildConfig.VERSION_NAME}",
+                    if (BuildConfig.DEBUG) "Versione di prova" else "Rondine",
                 ) {}
             }
-            SettingRow(Icons.Filled.PrivacyTip, "Privacy", "Cosa resta sul telefono e cosa vede il nodo") {
-                context.startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md")),
-                )
+        }
+        SettingsPage.Updates -> BackScaffold("Aggiornamenti dell'app", back, snackbar) { m ->
+            Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
+                if (io.github.mtmattia.rondine.update.Updater.supported(context)) {
+                    val upd by io.github.mtmattia.rondine.update.Updater.state.collectAsState()
+                    SettingRow(Icons.Filled.SystemUpdate, "Aggiornamenti", io.github.mtmattia.rondine.update.updateSubtitle(upd)) {
+                        io.github.mtmattia.rondine.update.onUpdateRow(context, scope)
+                    }
+                    var auto by remember { mutableStateOf(io.github.mtmattia.rondine.update.Updater.autoEnabled(context)) }
+                    SettingRow(
+                        Icons.Filled.Update,
+                        "Controllo automatico",
+                        if (auto) "Attivo: due volte al giorno chiede a GitHub l'ultima versione" else "Spento",
+                    ) {
+                        auto = !auto
+                        io.github.mtmattia.rondine.update.Updater.setAutoEnabled(context, auto)
+                    }
+                } else {
+                    SettingRow(
+                        Icons.Filled.SystemUpdate, "Versione ${BuildConfig.VERSION_NAME}",
+                        if (BuildConfig.DEBUG) "Versione di prova" else "Gli aggiornamenti arrivano da Google Play",
+                    ) {}
+                }
             }
-            SettingRow(Icons.Filled.Code, "Codice sorgente", "Rondine è open source (MIT o Apache-2.0)") {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mtmattia/Rondine")))
-            }
-            Text(
-                "La tua chiave: ${p.shortId}…",
-                Modifier.padding(16.dp),
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 
@@ -539,6 +629,21 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 val h = Repo.client().claimUsername(value.trim())
                 Repo.refresh()
                 "Ora sei @$h"
+            }
+        }
+        SettingsDialog.Name -> TextDialog(
+            title = "Nome",
+            label = "Il tuo nome",
+            placeholder = "Mattia",
+            initial = p.name,
+            note = "Lo vedono i tuoi contatti e i tuoi gruppi. Chi ti ha in rubrica vede il nome che ti ha dato lui.",
+            onDismiss = { dialog = null },
+        ) { value ->
+            dialog = null
+            run {
+                Repo.client().setDisplayName(value.trim())
+                Repo.refresh()
+                "Nome aggiornato"
             }
         }
         SettingsDialog.Phone -> TextDialog(
@@ -639,8 +744,231 @@ private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onCli
         Spacer(Modifier.width(24.dp))
         Column {
             Text(title, fontSize = 16.sp)
-            Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
 
+
+/** Prima pagina delle Impostazioni, con la struttura di WhatsApp: Info, foto, nome e sezioni. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsMain(
+    p: uniffi.rondine_ffi.Profile,
+    push: String,
+    snackbar: SnackbarHostState,
+    onBack: () -> Unit,
+    onMyQr: () -> Unit,
+    onPage: (SettingsPage) -> Unit,
+    onFeedback: () -> Unit,
+    onInvite: () -> Unit,
+) {
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            TopAppBar(
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
+                title = {},
+                actions = {
+                    IconButton(onClick = onMyQr) { Icon(Icons.Filled.QrCode2, "Il mio codice QR") }
+                    IconButton(onClick = { onPage(SettingsPage.Profile) }) { Icon(Icons.Filled.Edit, "Modifica profilo") }
+                },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
+            Column(
+                Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // Le Info in una nuvoletta sopra la foto; vuota invita a scriverle.
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.padding(horizontal = 32.dp).clickable { onPage(SettingsPage.About) },
+                ) {
+                    Text(
+                        p.about ?: "Oggi in emoji…",
+                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        fontSize = 14.sp,
+                        maxLines = 2,
+                        textAlign = TextAlign.Center,
+                        color = if (p.about == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.clickable { onPage(SettingsPage.Profile) }) { Avatar(p.name, p.id, 120.dp, p.photo) }
+                Spacer(Modifier.height(12.dp))
+                Text(p.name, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    p.username?.let { "@$it" } ?: "Nessun nome utente",
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SettingRow(Icons.Filled.Key, "Account", "Numero di telefono, nodo, la tua chiave") { onPage(SettingsPage.Account) }
+            SettingRow(Icons.Filled.Lock, "Privacy", "Contatti bloccati, mappe, cosa vede il nodo") { onPage(SettingsPage.Privacy) }
+            SettingRow(Icons.Filled.Forum, "Chat", "Backup delle chat") { onPage(SettingsPage.Chat) }
+            SettingRow(Icons.Filled.Notifications, "Notifiche", push) { onPage(SettingsPage.Notifications) }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SettingRow(Icons.Filled.Info, "Aiuto", "Informativa sulla privacy, codice sorgente, versione") {
+                onPage(SettingsPage.Help)
+            }
+            SettingRow(Icons.Filled.BugReport, "Invia un feedback", "Segnala problemi tecnici", onFeedback)
+            SettingRow(Icons.Filled.GroupAdd, "Invita un amico", "", onInvite)
+            SettingRow(Icons.Filled.SystemUpdate, "Aggiornamenti dell'app", "") { onPage(SettingsPage.Updates) }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** Riga della pagina Profilo: titolo e valore, o un invito colorato se manca. */
+@Composable
+private fun ProfileRow(
+    icon: ImageVector,
+    title: String,
+    value: String?,
+    placeholder: String? = null,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(24.dp))
+        Column {
+            Text(title, fontSize = 17.sp)
+            Text(
+                value ?: placeholder ?: "",
+                fontSize = 15.sp,
+                color = if (value == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Durate delle Info, in secondi (0 = per sempre). */
+private val AboutDurations = listOf(
+    "1 ora" to 3_600L,
+    "8 ore" to 8 * 3_600L,
+    "1 giorno" to 86_400L,
+    "1 settimana" to 7 * 86_400L,
+    "Per sempre" to 0L,
+)
+
+private val AboutSuggestions = listOf(
+    "🌙" to "Assente, lascia un messaggio",
+    "😴" to "Sto dormendo",
+    "💼" to "Al lavoro",
+    "✈️" to "In viaggio",
+    "💪" to "In palestra",
+)
+
+/** Le Info (SPEC §7.7): testo, durata e suggerimenti, come su WhatsApp. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AboutPage(
+    current: String?,
+    currentUntil: ULong?,
+    snackbar: SnackbarHostState,
+    onBack: () -> Unit,
+    onSave: (String?, ULong?) -> Unit,
+) {
+    var text by remember { mutableStateOf(current ?: "") }
+    var duration by remember { mutableStateOf(if (current != null && currentUntil == null) 4 else 2) }
+    var menu by remember { mutableStateOf(false) }
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            TopAppBar(
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
+                title = { Text("Info") },
+            )
+        },
+        floatingActionButton = {
+            androidx.compose.material3.FloatingActionButton(
+                onClick = {
+                    val t = text.trim()
+                    if (t.isEmpty()) {
+                        onSave(null, null)
+                    } else {
+                        val secs = AboutDurations[duration].second
+                        onSave(t, if (secs == 0L) null else (System.currentTimeMillis() / 1000 + secs).toULong())
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) { Icon(Icons.Filled.Check, "Salva") }
+        },
+    ) { padding ->
+        Column(Modifier.padding(padding).padding(horizontal = 16.dp).fillMaxSize().verticalScroll(rememberScrollState())) {
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { if (it.codePointCount(0, it.length) <= 139) text = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Condividi cosa stai facendo…") },
+                leadingIcon = { Icon(Icons.Outlined.EmojiEmotions, null, tint = MaterialTheme.colorScheme.primary) },
+                trailingIcon = {
+                    if (text.isNotEmpty()) {
+                        IconButton(onClick = { text = "" }) { Icon(Icons.Filled.Close, "Cancella") }
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+                maxLines = 3,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    androidx.compose.material3.AssistChip(
+                        onClick = { menu = true },
+                        label = { Text(AboutDurations[duration].first) },
+                        leadingIcon = { Icon(Icons.Filled.Schedule, null, Modifier.size(18.dp)) },
+                        trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null, Modifier.size(18.dp)) },
+                        shape = RoundedCornerShape(50),
+                    )
+                    androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        AboutDurations.forEachIndexed { i, (label, _) ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    duration = i
+                                    menu = false
+                                },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Le vedono i tuoi contatti e i tuoi gruppi",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (current != null) {
+                TextButton(onClick = { onSave(null, null) }) {
+                    Text("Togli Info", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("Suggerimenti", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            AboutSuggestions.forEach { (emoji, label) ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { text = "$emoji $label" }.padding(vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(emoji, fontSize = 26.sp)
+                    Spacer(Modifier.width(16.dp))
+                    Text(label, fontSize = 17.sp)
+                }
+            }
+            Spacer(Modifier.height(80.dp))
+        }
+    }
+}

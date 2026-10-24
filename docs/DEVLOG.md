@@ -317,3 +317,14 @@ Una riga per modifica: data, cosa è cambiato.
   sincronizza appena arriva una busta diretta. 5 test nuovi in `tests/diretto.rs`; il test che
   voleva il nodo come via principale ora vuole il diretto. Provato su 127.0.0.1 e avvio dell'app
   sull'emulatore: il NAT vero va provato con due telefoni.
+- 2026-10-24 — Impostazioni rifatte sugli screenshot di WhatsApp di Mattia: prima pagina con la
+  nuvoletta delle Info sopra la foto, nome e @nome, matita e QR in alto, sezioni (Account, Privacy,
+  Chat, Notifiche, Aiuto, Invia un feedback, Invita un amico, Aggiornamenti dell'app); pagina
+  Profilo con foto grande e fotocamera, Nome, Info, Nome utente, Telefono; pagina Info con campo,
+  durata (1 ora, 8 ore, 1 giorno, 1 settimana, per sempre) e suggerimenti. Per farlo il messaggio
+  `profile` (SPEC §7.7) porta anche `name` e `about` {text, until}: `set_display_name`,
+  `set_about`, `about_of`; CLI `rondine rinomina` e `rondine info`; FFI e scheda del contatto e
+  nuova chat mostrano le Info. Test di accettazione nuovo. Provato sull'emulatore: Info "💼 Al
+  lavoro" salvate e mostrate nella nuvoletta; con il nodo spento il salvataggio aspettava i tempi
+  delle consegne, ora la pagina torna subito indietro. Niente "Link" del profilo, lingua,
+  dispositivi collegati né prodotti Meta.

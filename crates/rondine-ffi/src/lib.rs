@@ -72,6 +72,9 @@ pub struct Profile {
     pub photo: Option<String>,
     /// Il mio numero è verificato via SMS (SPEC §13).
     pub phone_verified: bool,
+    /// Le mie "Info" attive e fino a quando (SPEC §7.7).
+    pub about: Option<String>,
+    pub about_until: Option<u64>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -92,6 +95,8 @@ pub struct ContactInfo {
     pub muted: bool,
     /// Foto del profilo (percorso), se l'ha mandata.
     pub photo: Option<String>,
+    /// Le sue "Info" attive (SPEC §7.7).
+    pub about: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -462,6 +467,7 @@ fn contact_info_with_photo(client: &Client, c: &Contact) -> ContactInfo {
     info.photo = client
         .photo_of(&c.identity)
         .map(|p| p.to_string_lossy().into_owned());
+    info.about = client.about_of(&c.identity).map(|a| a.text);
     info
 }
 
@@ -483,6 +489,7 @@ fn contact_info(c: &Contact) -> ContactInfo {
         }
         .into(),
         photo: None,
+        about: None,
         phone_verified_by: c.phone_verified_by.clone(),
         muted: c.muted,
     }
@@ -692,6 +699,8 @@ fn view_of(c: &Client) -> View {
             has_node: c.has_node(),
             photo: c.my_photo().map(|p| p.to_string_lossy().into_owned()),
             phone_verified: s.phone_verified,
+            about: c.my_about().map(|a| a.text),
+            about_until: c.my_about().and_then(|a| a.until),
         })
     })()
     .ok();
@@ -1212,6 +1221,18 @@ impl Rondine {
     /// prepara quadrato a 256×256 (SPEC §7.7).
     pub async fn set_photo(&self, jpeg: Option<Vec<u8>>) -> Result<()> {
         self.run(move |c| Box::pin(async move { Ok(c.set_photo(jpeg).await?) }))
+            .await
+    }
+
+    /// Cambia il mio nome (SPEC §7.7).
+    pub async fn set_display_name(&self, name: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.set_display_name(&name).await?) }))
+            .await
+    }
+
+    /// Mette (o con `None` toglie) le mie "Info", fino a `until` (secondi) o per sempre.
+    pub async fn set_about(&self, text: Option<String>, until: Option<u64>) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.set_about(text.as_deref(), until).await?) }))
             .await
     }
 

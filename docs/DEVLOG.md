@@ -389,3 +389,7 @@ Una riga per modifica: data, cosa è cambiato.
   sull'emulatore con il trasporto locale di bmgr: disinstallata e reinstallata, ripristinata la
   stessa identità. 1 test nel core, 3 di accettazione. Argon2 ottimizzato anche nei test (8 s →
   0,4 s).
+- 2026-10-24 — Tolto il nodo staffetta sul Mac, su richiesta di Mattia: launchd `it.rondinenodo`
+  scaricato (plist in `~/rondine-nodo/it.rondinenodo.plist.spento`), `tailscale serve` spento,
+  `RONDINE_STAFFETTE` tolto dal servizio del PC. Senza staffetta i depositi sul nodo del PC partono
+  con il lucchetto aperto (SPEC §6.3).

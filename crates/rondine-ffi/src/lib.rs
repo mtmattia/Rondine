@@ -1536,17 +1536,9 @@ impl Rondine {
     }
 
     /// Conferma un numero protetto dalla password di chi l'aveva (SPEC §13.2).
-    pub async fn confirm_phone_with_password(
-        &self,
-        code: String,
-        name: String,
-        password: String,
-    ) -> Result<()> {
+    pub async fn confirm_phone_with_password(&self, code: String, password: String) -> Result<()> {
         self.run(move |c| {
-            Box::pin(async move {
-                Ok(c.confirm_phone_with_password(&code, &name, &password)
-                    .await?)
-            })
+            Box::pin(async move { Ok(c.confirm_phone_with_password(&code, &password).await?) })
         })
         .await
     }

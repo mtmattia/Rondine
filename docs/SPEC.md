@@ -50,18 +50,16 @@ l'univocità è per nodo, come per l'email: `nome@nodo`.
 - `nodo`: host (eventualmente `:porta`) dell'URL pubblico del nodo.
 - Nell'app si mostra `@nome` se il nodo è quello predefinito della persona che guarda, altrimenti
   `@nome@nodo`.
-- Il nodo assegna un nome al primo che lo chiede. Solo la stessa identità può aggiornarlo o
-  liberarlo, con due eccezioni (per chi ha perso il telefono o cancellato l'app senza backup):
-  - **Recupero col numero.** Se chi tiene il nome ha verificato un numero su questo nodo (§13),
-    il nome passa a un'altra identità che verifica lo stesso numero sullo stesso nodo. Il nodo
-    ricorda l'hash del numero accanto al nome (quando lo si prende, o quando poi si verifica il
-    numero). Come su WhatsApp, chi controlla il numero controlla il nome.
-  - **Password del nome (verifica in due passaggi).** Chi tiene il nome può dargli una password
-    (§3.4). Da quel momento il nome passa a un'altra identità solo con:
+- **Il nome utente vuole una password** (§3.4): il client non lo chiede senza. Il nodo assegna
+  un nome al primo che lo chiede. Solo la stessa identità può aggiornarlo o liberarlo; per chi ha
+  perso il telefono o cancellato l'app senza backup:
+  - **Password (verifica in due passaggi).** Il nome passa a un'altra identità solo con:
     - la **password**, se chi lo tiene non ha verificato un numero;
-    - la **password e lo stesso numero verificato**, se l'ha verificato;
-    - **password dimenticata:** lo stesso numero verificato basta da solo se l'identità che tiene
-      il nome non usa il nodo da almeno **7 giorni**, come su WhatsApp.
+    - la **password e lo stesso numero verificato**, se l'ha verificato.
+    Non c'è scorciatoia con l'SMS: chi clona la SIM non si prende il nome. Il nodo ricorda l'hash
+    del numero accanto al nome (quando lo si prende, o quando poi si verifica il numero).
+  - **Nomi senza password** (presi con versioni precedenti): passano a chi verifica lo stesso
+    numero sullo stesso nodo.
   - **Scadenza.** Un nome torna libero quando l'identità che lo tiene non usa più nessuna sua
     casella del nodo (nessuna richiesta firmata dal proprietario) da **180 giorni**. Il nodo
     aggiorna "visto l'ultima volta" al massimo una volta all'ora per casella.
@@ -88,21 +86,37 @@ Sono validi solo 8–15 cifre dopo il `+`. **Il numero non lascia mai il telefon
 
 
 ### 3.4 Password
-Una password sola, scelta dalla persona (almeno 8 caratteri), protegge il nome utente (§3.2) e
-cifra il backup automatico (§7.8). La password non lascia mai il telefono: al nodo va solo una verifica che ne deriva (sotto).
+Una password sola, scelta dalla persona (almeno 8 caratteri), protegge il nome utente (§3.2) e il
+numero verificato (§13) e cifra il backup automatico (§7.8). La password non lascia mai il
+telefono: al nodo va solo una verifica che ne deriva (sotto).
+
+**Tre modi di esserci.**
+- **Con il numero:** numero verificato via SMS (§13) e password. Si trova e si è trovati in
+  rubrica; chi reinstalla e verifica di nuovo lo stesso numero, con la password, continua le sue
+  chat (§10).
+- **Con il nome utente:** password obbligatoria; si è trovati come `@nome`.
+- **Anonimo:** né numero né nome, nessuna password necessaria. Si comunica solo con link e QR;
+  nessuno ti trova, e per gli altri resti "non verificato" (§10).
+
+Il client rifiuta `claim_username` e la richiesta dell'SMS finché non c'è una password.
 
 - `sale` = 16 byte casuali; `radice = Argon2id(password, sale, m = 65536 KiB, t = 3, p = 1,
   32 byte)`; `chiave = blake3_derive_key("rondine v1 password backup", radice)`;
   `accesso = blake3_derive_key("rondine v1 password nome", radice)`.
 - Il client conserva `sale`, `chiave` e `accesso`, così fa i backup senza richiederla.
-- Al nodo del nome va `{salt, verifier = blake3(accesso)}`
-  (`PUT /v1/names/{nome}/password`, proprietario). Chiunque può chiedere il sale
-  (`GET /v1/names/{nome}/password`); per prendersi il nome si manda `accesso` nell'intestazione
+- Al proprio nodo va `{salt, verifier = blake3(accesso)}` con
+  `PUT /v1/inboxes/{inbox}/password` (proprietario), appena scelta e a ogni cambio di nodo; vale
+  per l'identità, con o senza nome (`PUT /v1/names/{nome}/password` resta per le versioni
+  precedenti). Chiunque può chiedere il sale per nome (`GET /v1/names/{nome}/password`) o per
+  numero verificato (`GET /v1/phone/{phone_hash}/password`); per prendersi il nome si manda
+  `accesso` nell'intestazione
   `Rondine-Name-Auth` di `PUT /v1/names/{nome}`. Al massimo **10 password sbagliate al giorno**
   per nome (`429 too_many_attempts`); senza password giusta `409 name_protected`.
 - Chi riprende il nome con la password lo protegge subito con la stessa password e un sale nuovo.
-- Il numero di chi ha una password ed è attivo da meno di 7 giorni non passa a un'altra identità
-  con un semplice SMS (§13.2, `409 phone_locked`).
+- Il numero di chi ha una password non passa a un'altra identità con un semplice SMS (§13.2,
+  `409 phone_locked`).
+- **Password dimenticata:** nessuna scorciatoia. Nome e numero si liberano solo quando l'identità
+  che li tiene non usa il nodo da **180 giorni** (la scadenza dei nomi).
 
 Limite noto: chi gestisce il nodo ha `verifier` e `sale` e può provare password offline, pagando un
 Argon2id da 64 MiB per tentativo: una frase lunga lo rende inutile. Il nodo può comunque dare il
@@ -603,53 +617,30 @@ che l'app ha ricevuto una sveglia. Per chiamare FCM (API HTTP v1) il ripetitore 
 (libreria `ring`) un JWT per `https://oauth2.googleapis.com/token`, con lo scope
 `https://www.googleapis.com/auth/firebase.messaging`. Lo stesso schema servirà per APNs (iPhone).
 
-## 9. Scoperta dalla rubrica, senza centralino
+## 9. Scoperta dalla rubrica
 
-Due persone che hanno l'una il numero dell'altra si trovano da sole.
+**Si trova solo chi ha verificato il suo numero, e cerca solo chi ha verificato il proprio.** Un
+numero solo scritto non prova niente: chiunque potrebbe scriverlo. La ricerca usa l'elenco dei
+numeri verificati (§13.3): il client calcola `phone_hash` di ogni numero della rubrica e chiede al
+proprio nodo e alle bacheche del suo elenco, a lotti di al massimo 1000. Il contatto trovato ha il
+grado "numero verificato" (§10). Il client tiene gli hash calcolati per non ripetere l'Argon2 a
+ogni ricerca.
 
-1. Per ogni coppia di numeri normalizzati: `p = min(a,b) || "|" || max(a,b)`.
-2. `s = Argon2id(p, sale = "rondine/scoperta/v1", m = 19456 KiB, t = 2, p = 1, 32 byte)`.
-3. `loc = blake3_derive_key("rondine v1 scoperta luogo", s)`;
-   `key = blake3_derive_key("rondine v1 scoperta chiave", s)`.
-4. Record = XChaCha20-Poly1305(`key`, nonce casuale di 24 byte) di:
+**Profili abbandonati.** Chi verifica e poi cancella l'app senza backup lascia nell'elenco il
+profilo vecchio finché non verifica di nuovo lo stesso numero. Per ogni biglietto trovato il
+client chiede al suo nodo `GET /v1/inboxes/{inbox}/seen` → `{"seen": <giorno>}` (inizio del giorno
+UTC dell'ultima attività del proprietario; `404 unknown_inbox` se la casella non c'è più) e
+**scarta i profili fermi da più di 3 giorni**. Tra più profili per lo stesso numero (su nodi
+diversi) vale il più attivo, poi il biglietto con `issued_at` più recente. Con un nodo che non sa
+rispondere vale la data del biglietto.
 
-   ```json
-   { "v": 1, "phone": "+39340...", "card": <Signed<Card>> }
-   ```
-
-   dove `phone` è il numero di chi pubblica.
-5. Si pubblica su **ogni bacheca dell'elenco del client**: `PUT /v1/board/{b64 loc}`. L'elenco
-   contiene il proprio nodo e le bacheche predefinite dell'app. Due persone su nodi diversi si
-   trovano se hanno almeno una bacheca in comune. Ogni voce ha una chiave proprietaria
-   Ed25519 derivata per luogo, `seed = blake3_keyed(seme_identità, "rondine/v1/board-owner" || loc)`,
-   così le voci della stessa persona non si collegano tra loro.
-6. Chi cerca calcola gli stessi `loc` e `key`, legge le voci, decifra, scarta le proprie, controlla
-   che `phone` sia il numero che ha in rubrica e che il biglietto sia firmato. Chi reinstalla
-   senza backup lascia in bacheca la voce del profilo vecchio finché non scade: per ogni
-   biglietto il client chiede al suo nodo `GET /v1/inboxes/{inbox}/seen` → `{"seen": <giorno>}`
-   (inizio del giorno UTC dell'ultima attività del proprietario; `404 unknown_inbox` se la casella
-   non c'è più) e **scarta i profili fermi da più di 3 giorni**. Tra quelli rimasti vale il più
-   attivo, poi il biglietto con `issued_at` più recente. Senza nodo, o con un nodo che non sa
-   rispondere, vale la data del biglietto. Il contatto trovato resta
-   **non verificato**.
-
-Limiti e scadenze: voce ≤ 4 KiB, al massimo 8 voci per luogo, durata massima 30 giorni.
-
-**A lotti.** Una rubrica ha centinaia di numeri: invece di una richiesta per luogo,
-- `POST /v1/board/batch` `{"put": [{"loc": "<b64>", "entry": {owner, blob, expires_at, sig}}, …]}`
-  → `{"stored": n}` (le voci non valide si saltano);
-- `POST /v1/board/lookup` `{"locs": ["<b64>", …]}` → `{"<loc>": [voci], …}` (solo i luoghi con
-  voci);
-
-al massimo 1000 elementi per richiesta (corpo fino a 8 MiB per `batch`), con gli stessi
-controlli delle richieste singole. Il client pubblica a lotti di 100 voci (ognuna porta un
-biglietto sigillato, circa 1,5 KB), così resta sotto i 512 KiB dei nodi fino alla 0.1.14. Il
-client tiene i segreti calcolati (`loc`, `key`) per non ripetere l'Argon2 a ogni ricerca, e
-ripubblica una voce solo quando è passata metà della sua durata.
-
-Limite noto: chi conosce *entrambi* i numeri può calcolare il luogo, vedere che due persone si
-conoscono e pubblicare un record falso. Per questo il primo contatto resta non verificato
-finché non passa da SMS, QR o numero di sicurezza.
+**Scoperta a coppie (fino alla 0.1.15).** Le versioni precedenti pubblicavano anche voci cifrate
+per ogni coppia di numeri (`PUT /v1/board/{loc}`, `POST /v1/board/batch`, `POST /v1/board/lookup`;
+luogo e chiave da `Argon2id(min(a,b) || "|" || max(a,b), sale = "rondine/scoperta/v1")`). Non si
+pubblicano né si leggono più: non erano verificate (chi conosceva i due numeri poteva falsificarle)
+e restavano in bacheca anche per i profili abbandonati. Il nodo accetta ancora le richieste, per
+le versioni vecchie, con voce ≤ 4 KiB, al massimo 8 voci per luogo, durata massima 30 giorni e
+corpo fino a 8 MiB per `batch`.
 
 ## 10. Numero di sicurezza
 
@@ -682,7 +673,8 @@ sola: restano due chat e l'avviso.
    nessuno.
 2. **numero verificato**: trovato col numero confermato via SMS (§13). Ci si fida del nodo che
    firma il `PhoneClaim` e dell'operatore telefonico (duplicato della SIM).
-3. **non verificato**: link, nome utente o rubrica senza SMS. La chiave l'ha data qualcun altro.
+3. **non verificato**: link, QR non confrontato o nome utente. La chiave l'ha data qualcun altro;
+   chi è anonimo (né numero né nome, §3.4) resta sempre qui finché non lo si verifica di persona.
 
 La crittografia è la stessa per tutti e tre: il grado dice solo quanto è sicuro che la chiave sia
 davvero di quella persona.
@@ -722,6 +714,8 @@ non c'è): un errore in un altro formato vuol dire che l'indirizzo non è un nod
 | `PUT /v1/board/{loc}` | firma nella voce | `{owner, blob, expires_at, sig}` |
 | `GET /v1/board/{loc}` | — | `[{owner, blob, expires_at}]` |
 | `GET /v1/inboxes/{inbox}/seen` | — | `{seen}`: giorno dell'ultima attività del proprietario (§9) |
+| `PUT /v1/inboxes/{inbox}/password` | proprietario | `{salt, verifier}` della password (§3.4) |
+| `GET /v1/phone/{phone_hash}/password` | — | `{salt}` della password di chi ha verificato il numero (§3.4) |
 | `POST /v1/board/batch` | firma in ogni voce | `{put: [{loc, entry}]}` → `{stored}` (§9) |
 | `POST /v1/board/lookup` | — | `{locs}` → `{loc: [voci]}` (§9) |
 | `POST /v1/phone/lookup` | — | `{hashes}` → `{hash: {card, claim}}` (§13.3) |
@@ -907,7 +901,8 @@ con il codice 1 se la sua coda (1000 buste, comune con la rete locale) è piena.
 ## 13. Numero verificato
 
 Chi ha il tuo numero ti trova sempre, e sa che quel numero l'hai confermato tu: come su WhatsApp,
-con un codice di 6 cifre via SMS. È facoltativo.
+con un codice di 6 cifre via SMS. Un numero non verificato non serve a niente: né a trovare né a
+essere trovati (§9). Per chiedere l'SMS serve una password (§3.4).
 
 **Eccezione alla regola "il nodo non vede i numeri":** per mandare l'SMS il **proprio** nodo
 vede il numero una volta. Poi conserva solo `phone_hash`. Gli altri nodi non lo vedono mai.
@@ -923,10 +918,11 @@ p = 1, 32 byte)`. Lento apposta: chi volesse provare tutti i numeri deve pagare 
 2. `POST /v1/inboxes/{inbox}/phone/confirm` (proprietario) `{code, card}`: con il codice giusto
    (al massimo 5 tentativi) il nodo firma l'attestazione e la pubblica nell'elenco dei numeri,
    insieme al biglietto. Un numero già verificato da un altro passa a chi lo conferma adesso
-   (come quando una SIM cambia proprietario), salvo che chi lo aveva abbia una password (§3.4) e
-   non sia fermo da almeno 7 giorni: allora `409 phone_locked`, a meno che il corpo porti anche
-   `name_auth`, la prova della sua password (§3.4): chi ha perso il telefono si riprende così prima
-   il numero e poi il nome.
+   (come quando una SIM cambia proprietario), salvo che chi lo aveva abbia una password (§3.4):
+   allora `409 phone_locked`, a meno che il corpo porti anche `name_auth`, la prova della sua
+   password (sale da `GET /v1/phone/{phone_hash}/password`). Chi ha perso il telefono si riprende
+   così prima il numero e poi il nome. Senza password il numero si libera solo dopo 180 giorni di
+   inattività di chi lo aveva.
 
 ```json
 Signed<PhoneClaim>, firmato dal nodo:

@@ -26,15 +26,32 @@ fun VerifyPhonePrompt() {
     val scope = rememberCoroutineScope()
     var sent by remember { mutableStateOf<String?>(null) }
     var protectedCode by remember { mutableStateOf<String?>(null) }
+    val hasPassword by Repo.hasPassword.collectAsState()
+    var needPassword by remember { mutableStateOf(false) }
     val phone = profile?.phone
+    fun sendCode(n: String) {
+        scope.launch {
+            try {
+                sent = Repo.client().requestPhone(n)
+            } catch (e: RondineException) {
+                Repo.notice.value = e.userMessage
+            }
+        }
+    }
+    // Il numero si verifica solo con una password: chi clona la SIM non se lo prende (SPEC §3.4).
+    if (needPassword) {
+        PasswordDialog(change = false, onDismiss = { needPassword = false }) {
+            needPassword = false
+            phone?.let { sendCode(it) }
+        }
+    }
     protectedCode?.let { code ->
         RecoverPasswordDialog(
             title = "Numero protetto",
-            text = "Questo numero è protetto dalla password di chi l'aveva. Se eri tu, scrivi il tuo nome utente " +
-                "e la password.",
-            name = profile?.username ?: "", askName = true, onDismiss = { protectedCode = null },
-        ) { n, pw ->
-            Repo.client().confirmPhoneWithPassword(code, n, pw)
+            text = "Questo numero è protetto dalla password di chi l'aveva. Se eri tu, scrivi la tua password.",
+            name = "-", askName = false, onDismiss = { protectedCode = null },
+        ) { _, pw ->
+            Repo.client().confirmPhoneWithPassword(code, pw)
             Repo.refresh()
             "Numero verificato: chi ce l'ha ti trova su Rondine"
         }
@@ -65,21 +82,16 @@ fun VerifyPhonePrompt() {
         title = { Text("Verifica adesso il tuo numero") },
         text = {
             Text(
-                "Con un SMS di conferma ti trova anche chi ha $phone ma non è nella tua rubrica, e se " +
-                    "reinstalli l'app i tuoi contatti continuano a riconoscerti. Il tuo nodo vede il " +
-                    "numero solo per mandare l'SMS.",
+                "Solo con il numero verificato trovi chi hai in rubrica e chi ha $phone trova te; " +
+                    "se reinstalli l'app, i tuoi contatti continuano a riconoscerti. Serve anche una " +
+                    "password, così nessuno se lo prende clonando la SIM. Il tuo nodo vede il numero " +
+                    "solo per mandare l'SMS.",
             )
         },
         confirmButton = {
             TextButton(onClick = {
                 Repo.askVerifyPhone.value = false
-                scope.launch {
-                    try {
-                        sent = Repo.client().requestPhone(phone)
-                    } catch (e: RondineException) {
-                        Repo.notice.value = e.userMessage
-                    }
-                }
+                if (hasPassword == true) sendCode(phone) else needPassword = true
             }) { Text("Verifica adesso") }
         },
         dismissButton = { TextButton(onClick = { Repo.askVerifyPhone.value = false }) { Text("Più tardi") } },

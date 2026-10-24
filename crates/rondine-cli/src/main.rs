@@ -83,9 +83,8 @@ enum Cmd {
     /// di chi l'aveva (SPEC §3.4), servono anche il suo nome e la password.
     Codice {
         codice: String,
-        #[arg(long, requires = "password")]
-        nome: Option<String>,
-        #[arg(long, requires = "nome")]
+        /// La password di chi aveva il numero, se era protetto (eri tu).
+        #[arg(long)]
         password: Option<String>,
     },
     /// Sceglie o cambia la password (SPEC §3.4): protegge il nome utente e cifra i backup.
@@ -363,14 +362,7 @@ enum NomeCmd {
 
 #[derive(Subcommand)]
 enum RubricaCmd {
-    /// Pubblica il tuo biglietto, cifrato, per questi numeri.
-    Pubblica {
-        numeri: Vec<String>,
-        /// File con un numero per riga.
-        #[arg(long)]
-        file: Option<PathBuf>,
-    },
-    /// Cerca chi tra questi numeri ti ha in rubrica.
+    /// Cerca chi tra questi numeri usa Rondine con il numero verificato (serve il tuo verificato).
     Cerca {
         numeri: Vec<String>,
         #[arg(long)]
@@ -968,24 +960,16 @@ async fn main() -> anyhow::Result<()> {
             let n = c.request_phone(&numero).await?;
             println!("Codice mandato per SMS a {n}. Confermalo con `rondine codice <codice>`.");
         }
-        Cmd::Codice {
-            codice,
-            nome,
-            password,
-        } => {
-            match (nome, password) {
-                (Some(n), Some(p)) => c.confirm_phone_with_password(&codice, &n, &p).await?,
-                _ => c.confirm_phone(&codice).await?,
+        Cmd::Codice { codice, password } => {
+            match password {
+                Some(p) => c.confirm_phone_with_password(&codice, &p).await?,
+                None => c.confirm_phone(&codice).await?,
             }
             println!("Numero verificato: chi lo ha ti trova su Rondine.");
         }
         Cmd::Bacheca { url } => {
             c.add_board(&url)?;
             println!("Bacheche: {}", c.state().boards.join(", "));
-        }
-        Cmd::Rubrica(RubricaCmd::Pubblica { numeri, file }) => {
-            let n = c.publish_contacts(&numbers(numeri, file)?).await?;
-            println!("Pubblicato per {n} numeri.");
         }
         Cmd::Rubrica(RubricaCmd::Cerca { numeri, file }) => {
             let found = c.scan_address_book(&numbers(numeri, file)?).await?;

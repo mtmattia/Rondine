@@ -441,3 +441,12 @@ Una riga per modifica: data, cosa è cambiato.
   dell'ultima attività di una casella (`GET /v1/inboxes/{inbox}/seen`); la rubrica scarta i
   profili fermi da più di 3 giorni e preferisce il più attivo. Test
   `rubrica_non_aggancia_i_profili_abbandonati`.
+- 2026-10-24 — Tre modi di esserci (SPEC §3.4): **con il numero** (verificato via SMS e con
+  password), **con il nome utente** (password obbligatoria) o **anonimo** (solo link e QR). La
+  rubrica cerca e trova solo numeri verificati: tolte le voci a coppie, non verificate e causa dei
+  profili fantasma. La password vale per l'identità (`PUT /v1/inboxes/{inbox}/password`) e
+  protegge anche il numero di chi non ha un nome; sale per numero con
+  `GET /v1/phone/{hash}/password`. Niente più scorciatoia con l'SMS per la password dimenticata:
+  nome e numero si liberano solo dopo 180 giorni di inattività. App: password chiesta prima di
+  nome e SMS, rubrica solo col numero verificato. Test riscritti per il modello verificato, più
+  `numero_senza_nome_protetto_dalla_password`.

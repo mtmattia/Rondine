@@ -19,8 +19,9 @@ const LAG_SECS: std::ops::RangeInclusive<i64> = -2..=10;
 const MAX_CALLS: usize = 10;
 /// Dopo quanto una verifica o una richiesta non vale più.
 const VERIFY_TTL_SECS: u64 = 15 * 60;
-/// Dopo quanti secondi dalla richiesta parte lo squillo.
-const RING_AFTER_SECS: u64 = 1;
+/// Dopo quanti secondi dalla richiesta parte lo squillo: il tempo che la sveglia arrivi al
+/// telefono da verificare e che il suo filtro chiamate si prepari.
+const RING_AFTER_SECS: u64 = 6;
 /// Dove sta il codice nell'SMS: il link che l'app riconosce.
 const SMS_LINK: &str = "rondine:verifica/";
 
@@ -183,7 +184,8 @@ impl Client {
             id: id.clone(),
             method,
         };
-        self.send_app_with(&c, &app, Kind::Quiet, None).await?;
+        // Sveglia il telefono da verificare: deve aspettarsi lo squillo (o l'SMS).
+        self.send_app_with(&c, &app, Kind::Normal, None).await?;
         Ok(VerifyPlan {
             id,
             number,
@@ -325,7 +327,8 @@ impl Client {
             code,
             unable,
         };
-        self.send_app_with(&c, &app, Kind::Quiet, None)
+        // Sveglia chi verifica: sta aspettando l'esito.
+        self.send_app_with(&c, &app, Kind::Normal, None)
             .await
             .is_ok()
     }

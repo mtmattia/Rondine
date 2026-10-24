@@ -2708,3 +2708,29 @@ async fn rubrica_non_aggancia_i_profili_abbandonati() -> R {
     assert_eq!(texts(&nuova.sync().await?), ["eccoti"]);
     Ok(())
 }
+
+/// Bug: la richiesta di verifica del numero (SPEC §14.1) partiva silenziosa e non svegliava il
+/// telefono da verificare: lo squillo arrivava senza nessuno ad aspettarlo, e chi verificava
+/// restava ad aspettare la risposta.
+#[tokio::test]
+async fn la_richiesta_di_verifica_sveglia_il_telefono() -> R {
+    let (push_url, got) = fake_distributor().await?;
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add_from_invite(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    mattia.set_push_endpoint(&push_url).await?;
+    silvia.set_phone("3402223344")?;
+    silvia
+        .start_verify(
+            &mattia.identity(),
+            rondine_client::VerifyMethod::Ring,
+            Some("3401112233"),
+        )
+        .await?;
+    // Al massimo una sveglia ogni 10 s per casella: quella del saluto può farla aspettare.
+    assert_eq!(wait_wakes(&got, 1, 12_000).await?.len(), 1);
+    Ok(())
+}

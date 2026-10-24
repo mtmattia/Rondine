@@ -19,7 +19,14 @@ class RingScreening : CallScreeningService() {
     override fun onScreenCall(details: Call.Details) {
         val incoming = details.callDirection == Call.Details.DIRECTION_INCOMING
         val number = details.handle?.schemeSpecificPart
-        if (!incoming || number.isNullOrBlank() || !Repo.expectingRing()) {
+        if (!incoming || number.isNullOrBlank()) {
+            respondToCall(details, CallResponse.Builder().build())
+            return
+        }
+        if (!Repo.expectingRing()) {
+            // Non aspetto uno squillo: la chiamata passa come sempre. Me la ricordo per due minuti,
+            // solo in memoria, nel caso la richiesta di verifica arrivi dopo.
+            Repo.noteIncomingCall(number)
             respondToCall(details, CallResponse.Builder().build())
             return
         }

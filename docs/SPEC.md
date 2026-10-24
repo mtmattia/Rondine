@@ -994,7 +994,8 @@ non riceve lo squillo né l'SMS, che arrivano alla SIM vera: la risposta della S
 dalla chiave vera, e la chiave falsa non passa mai la prova. Resta solo chi ha in mano la SIM
 (furto o duplicato), come per ogni verifica via telefono.
 
-Messaggi nella chat (MLS, depositi silenziosi):
+Messaggi nella chat (MLS, con sveglia: il telefono verificato deve aspettarsi lo squillo, e chi
+verifica aspetta l'esito):
 - chi verifica: `{"type": "verify_request", "v": 1, "id", "method": "ring" | "sms"}`;
 - chi è verificato: `{"type": "verify_reply", "v": 1, "id", "calls": [{"at", "caller"}]}`
   (squillo), `{"type": "verify_reply", "v": 1, "id", "code": "12345678"}` (SMS), oppure
@@ -1007,13 +1008,18 @@ ricevute valgono 15 minuti, al massimo 20 alla volta.
 
 1. **Squillo** (metodo principale; gratis, un tocco).
    - Chi verifica deve avere il **suo** numero nel profilo (la prova è che la chiamata arrivi da
-     lì). Manda la richiesta e dopo 1 s chiama il numero, chiudendo dopo 4 s; annota l'istante.
+     lì). Manda la richiesta e dopo 6 s (il tempo che la sveglia arrivi) chiama il numero,
+     chiudendo dopo 4 s; annota l'istante.
    - Il telefono chiamato risponde con le chiamate arrivate (al massimo 5): ora e impronta del
      numero chiamante, mai il numero.
      - **Filtro chiamate** (Android 10+, anche versione Play): se Rondine è l'app di filtro
        chiamate, nei 30 s dopo la richiesta la prima chiamata in arrivo viene rifiutata **prima
        che squilli**, senza notifica né chiamata persa, e risponde subito. Le altre chiamate
-       passano come sempre.
+       passano come sempre; il filtro ricorda in memoria quelle degli ultimi 2 minuti, così se la
+       richiesta arriva dopo lo squillo risponde con quelle dell'ultimo minuto.
+     - L'app prepara il telefono **all'avvio** (anche dopo un aggiornamento) e dalle Impostazioni:
+       filtro chiamate e, nella versione libera, i permessi; se Android li blocca senza chiederli
+       (app installata fuori dallo store) spiega come sbloccarli.
      - **Registro chiamate** (versione libera, con il permesso): guarda le chiamate arrivate da
        10 s prima a 60 s dopo la richiesta.
      - **Niente dei due** (iPhone, versione Play senza filtro): risponde `unable` e chi verifica

@@ -205,7 +205,21 @@ object Repo {
     /** Quando ho chiesto l'ultima volta di scegliere la password (millisecondi). */
     var passwordAskedAt: Long
         get() = prefs().getLong("password_chiesta", 0)
-        set(v) { prefs().edit().putLong("password_chiesta", v).apply() }
+        set(v) {
+            prefs().edit().putLong("password_chiesta", v).apply()
+            passwordAsked.value = v
+        }
+
+    /** Come [passwordAskedAt], osservabile: gli altri inviti aspettano che quello si chiuda. */
+    val passwordAsked = MutableStateFlow(0L)
+
+    /** Quando ho chiesto l'ultima volta i permessi della verifica con squillo (millisecondi). */
+    var verifySetupAskedAt: Long
+        get() = prefs().getLong("verifica_chiesta", 0)
+        set(v) { prefs().edit().putLong("verifica_chiesta", v).apply() }
+
+    /** Apri l'invito a preparare la verifica con squillo (dalle Impostazioni). */
+    val verifySetupOpen = MutableStateFlow(false)
 
     /** Quando è stato fatto l'ultimo backup (millisecondi), 0 se mai. */
     var lastBackup: Long
@@ -331,6 +345,22 @@ object Repo {
     /** Quando è arrivata l'ultima richiesta di squillo non ancora usata dal filtro chiamate. */
     @Volatile private var ringExpectedAt = 0L
 
+    /** Chiamate in arrivo viste dal filtro negli ultimi minuti (ora in ms, numero): solo in
+     *  memoria, per rispondere a una richiesta di verifica arrivata dopo lo squillo. */
+    private val recentCalls = ArrayDeque<Pair<Long, String>>()
+
+    fun noteIncomingCall(number: String) {
+        synchronized(recentCalls) {
+            val now = System.currentTimeMillis()
+            recentCalls.addLast(now to number)
+            while (recentCalls.isNotEmpty() && now - recentCalls.first().first > 120_000L) recentCalls.removeFirst()
+        }
+    }
+
+    private fun callsSince(ms: Long): List<uniffi.rondine_ffi.RingCall> = synchronized(recentCalls) {
+        recentCalls.filter { it.first >= ms }.map { uniffi.rondine_ffi.RingCall((it.first / 1000).toULong(), it.second) }
+    }
+
     /** Il filtro chiamate deve prendere questa chiamata? Sì una volta, nei 30 s dopo la richiesta. */
     fun expectingRing(): Boolean {
         val at = ringExpectedAt
@@ -349,7 +379,16 @@ object Repo {
             val name = chats.value.firstOrNull { it.contact.id == r.contactId }?.contact?.name ?: "Un contatto"
             when (r.method) {
                 "squillo" -> when {
-                    verify.isScreener(app) -> ringExpectedAt = System.currentTimeMillis()
+                    verify.isScreener(app) -> {
+                        // La richiesta può arrivare dopo lo squillo (sveglia lenta): rispondo con
+                        // le chiamate dell'ultimo minuto; se non ce ne sono, aspetto lo squillo.
+                        val recent = callsSince(System.currentTimeMillis() - 60_000L)
+                        if (recent.isNotEmpty()) {
+                            scope.launch { try { client().answerRings(recent) } catch (_: RondineException) {} }
+                        } else {
+                            ringExpectedAt = System.currentTimeMillis()
+                        }
+                    }
                     verify.canReceiveRing(app) -> {
                         val since = System.currentTimeMillis()
                         scope.launch { verify.watchRings(app, since) }

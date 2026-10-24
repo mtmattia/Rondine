@@ -257,6 +257,7 @@ class MainActivity : ComponentActivity() {
 
         io.github.mtmattia.rondine.ui.PasswordPrompt()
         io.github.mtmattia.rondine.ui.VerifyPermissionPrompt()
+        io.github.mtmattia.rondine.ui.VerifySetupPrompt()
 
         invite?.let { link ->
             AlertDialog(

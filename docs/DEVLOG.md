@@ -477,3 +477,9 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-24 — Versione 0.1.17 (versionCode 18); nodo del PC aggiornato (caselle abbandonate, `/seen`).
 - 2026-10-24 — App: tolta la verifica del proprio numero via SMS del nodo ("Verifica adesso il tuo numero", "Verifica con un SMS" nelle Impostazioni, codice e numero protetto): con la §14 il numero lo verificano gli amici con lo squillo.
 - 2026-10-24 — Versione 0.1.18 (versionCode 19).
+- 2026-10-25 — Bug della verifica con squillo: la richiesta partiva silenziosa e non svegliava il
+  telefono da verificare, quindi nessuno aspettava lo squillo e chi verificava restava fermo
+  sull'attesa. Ora richiesta e risposta svegliano, lo squillo parte dopo 6 s, il filtro chiamate
+  ricorda le chiamate degli ultimi 2 minuti (risponde anche se la richiesta arriva dopo), e l'app
+  chiede filtro chiamate e permessi all'avvio, con le istruzioni se Android li blocca. Test
+  `la_richiesta_di_verifica_sveglia_il_telefono`; provato sull'emulatore il percorso dei permessi.

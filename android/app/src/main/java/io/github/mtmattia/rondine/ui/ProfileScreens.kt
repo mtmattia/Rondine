@@ -625,22 +625,16 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                     maps = !maps
                     MapTiles.setEnabled(context, maps)
                 }
-                val screenerIntent = io.github.mtmattia.rondine.verify.PhoneVerify.screenerRequest(context)
-                var screener by remember { mutableStateOf(io.github.mtmattia.rondine.verify.PhoneVerify.isScreener(context)) }
-                val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                    screener = io.github.mtmattia.rondine.verify.PhoneVerify.isScreener(context)
-                }
-                if (screenerIntent != null || screener) {
-                    SettingRow(
-                        Icons.Filled.PhoneCallback,
-                        "Verifica silenziosa del numero",
-                        if (screener) {
-                            "Attiva: lo squillo di chi ti verifica non suona; le altre chiamate passano come sempre"
-                        } else {
-                            "Tocca per scegliere Rondine come filtro chiamate: lo squillo di verifica arriva senza suonare"
-                        },
-                    ) { screenerIntent?.let { roleLauncher.launch(it) } }
-                }
+                val ready = verifyReady(context)
+                SettingRow(
+                    Icons.Filled.PhoneCallback,
+                    "Verifica del numero con squillo",
+                    if (ready) {
+                        "Pronta: lo squillo di chi ti verifica non suona e Rondine risponde da sola"
+                    } else {
+                        "Da preparare: tocca per il filtro chiamate e i permessi"
+                    },
+                ) { Repo.verifySetupOpen.value = true }
                 var mesh by remember { mutableStateOf(p.mesh) }
                 SettingRow(
                     Icons.Filled.Hub,

@@ -150,3 +150,138 @@ fun VerifyContactDialog(contactId: String, name: String, phone: String?, canRing
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
     )
 }
+
+/** Tutti i permessi della verifica con squillo e SMS (versione libera, SPEC §14.1). */
+private val ALL_VERIFY_PERMISSIONS = arrayOf(
+    android.Manifest.permission.CALL_PHONE,
+    android.Manifest.permission.ANSWER_PHONE_CALLS,
+    android.Manifest.permission.READ_CALL_LOG,
+    android.Manifest.permission.SEND_SMS,
+    android.Manifest.permission.RECEIVE_SMS,
+)
+
+/** Questo telefono è pronto a fare e ricevere la verifica con squillo? */
+fun verifyReady(context: android.content.Context): Boolean {
+    val verify = io.github.mtmattia.rondine.verify.PhoneVerify
+    if (!verify.canReceiveRing(context)) return false
+    return !verify.full || verify.granted(context, ALL_VERIFY_PERMISSIONS)
+}
+
+private fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+/**
+ * All'avvio (anche dopo un aggiornamento) e dalle Impostazioni: prepara il telefono alla
+ * verifica del numero con uno squillo (SPEC §14.1). Prima il filtro chiamate, così lo squillo di
+ * chi ti verifica arriva in silenzio; poi, nella versione libera, i permessi. Se Android li blocca
+ * senza chiedere (app installata fuori dallo store), spiega come sbloccarli. Se rimandi, lo
+ * richiede dopo un giorno.
+ */
+@Composable
+fun VerifySetupPrompt() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val verify = io.github.mtmattia.rondine.verify.PhoneVerify
+    val profile by Repo.profile.collectAsState()
+    val hasPassword by Repo.hasPassword.collectAsState()
+    val forced by Repo.verifySetupOpen.collectAsState()
+    // Si ridisegna quando l'invito della password si chiude.
+    Repo.passwordAsked.collectAsState().value
+    var dismissed by remember { mutableStateOf(false) }
+    var blocked by remember { mutableStateOf<List<String>>(emptyList()) }
+    var done by remember { mutableStateOf(verifyReady(context)) }
+
+    fun finish() {
+        Repo.verifySetupAskedAt = System.currentTimeMillis()
+        Repo.verifySetupOpen.value = false
+        dismissed = true
+        done = verifyReady(context)
+        Repo.notice.value = if (done) {
+            "Pronto: chi verifica il tuo numero ti fa uno squillo, e Rondine risponde da sola."
+        } else {
+            "Senza questi permessi la verifica del tuo numero passa da un SMS."
+        }
+    }
+
+    val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        val activity = context.findActivity()
+        // Negati senza che Android abbia mostrato niente: bloccati (impostazioni con restrizioni).
+        val silent = res.filterValues { !it }.keys.filter { p ->
+            activity != null && !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, p)
+        }
+        if (silent.isNotEmpty()) blocked = silent else finish()
+    }
+    fun askPermissions() {
+        val missing = ALL_VERIFY_PERMISSIONS.filter { !verify.granted(context, arrayOf(it)) }
+        if (verify.full && missing.isNotEmpty()) perms.launch(missing.toTypedArray()) else finish()
+    }
+    val role = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { askPermissions() }
+
+    if (blocked.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { blocked = emptyList(); finish() },
+            title = { Text("Permessi bloccati da Android") },
+            text = {
+                Text(
+                    "Android non ha nemmeno chiesto alcuni permessi (chiamate o SMS): succede con le app " +
+                        "installate fuori dallo store. Apri le informazioni dell'app, tocca ⋮ in alto e " +
+                        "\"Consenti impostazioni con restrizioni\", poi in Autorizzazioni attiva Telefono, " +
+                        "Registri chiamate e SMS.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    blocked = emptyList()
+                    context.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            android.net.Uri.fromParts("package", context.packageName, null),
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                    finish()
+                }) { Text("Apri le informazioni dell'app") }
+            },
+            dismissButton = { TextButton(onClick = { blocked = emptyList(); finish() }) { Text("Più tardi") } },
+        )
+        return
+    }
+
+    val due = System.currentTimeMillis() - Repo.verifySetupAskedAt > 24L * 60 * 60 * 1000
+    // Prima la password, se il suo dialogo è sullo schermo adesso: una cosa alla volta.
+    val passwordShowing = hasPassword == false &&
+        System.currentTimeMillis() - Repo.passwordAskedAt >= 24L * 60 * 60 * 1000
+    if (!forced && (dismissed || done || !due || profile == null || passwordShowing)) return
+    AlertDialog(
+        onDismissRequest = { Repo.verifySetupAskedAt = System.currentTimeMillis(); Repo.verifySetupOpen.value = false; dismissed = true },
+        title = { Text("Verifica del numero con uno squillo") },
+        text = {
+            Text(
+                "I tuoi contatti possono confermare che questa chiave ha davvero la tua SIM, con uno " +
+                    "squillo di 4 secondi a cui Rondine risponde da sola. Per riceverlo in silenzio, " +
+                    "scegli Rondine come app di filtro chiamate: prende solo lo squillo di chi ti " +
+                    "verifica, nei 30 secondi dopo la sua richiesta, e lascia passare tutte le altre " +
+                    "chiamate." + if (verify.full) {
+                        " Poi servono i permessi per chiamare, leggere le chiamate perse e gli SMS di " +
+                            "verifica: Rondine guarda solo quelli, e niente esce dal telefono."
+                    } else {
+                        ""
+                    },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val intent = verify.screenerRequest(context)
+                if (intent != null && !verify.isScreener(context)) role.launch(intent) else askPermissions()
+            }) { Text("Attiva") }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                Repo.verifySetupAskedAt = System.currentTimeMillis()
+                Repo.verifySetupOpen.value = false
+                dismissed = true
+            }) { Text("Più tardi") }
+        },
+    )
+}

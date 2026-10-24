@@ -83,7 +83,7 @@ object PhoneVerify {
             progress("SMS mandato: aspetto la risposta del suo telefono")
             return
         }
-        progress("Squillo in corso…")
+        progress("Avviso il suo telefono, poi faccio uno squillo…")
         delay((plan.delays.firstOrNull()?.toLong() ?: 1L) * 1000)
         Repo.client().recordRing(plan.id, (System.currentTimeMillis() / 1000).toULong())
         call(context, plan.number)

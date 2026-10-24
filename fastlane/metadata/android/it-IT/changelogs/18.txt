@@ -1,0 +1,1 @@
+Quando un contatto reinstalla l'app e cambia chiave resta una chat sola, con l'avviso "La chiave è cambiata: verifica la chat per sicurezza" e il pulsante per verificarla con uno squillo, un SMS o il codice di sicurezza. I messaggi rimasti a metà ripartono da soli appena la chiave è verificata.

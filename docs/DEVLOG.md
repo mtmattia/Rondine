@@ -474,3 +474,4 @@ Una riga per modifica: data, cosa è cambiato.
   `chiave_nuova_senza_verifica_una_chat_sola_con_avviso`,
   `chiave_cambiata_verificata_riparte_da_sola`,
   `contatto_verificato_con_chiave_nuova_va_riverificato`.
+- 2026-10-24 — Versione 0.1.17 (versionCode 18); nodo del PC aggiornato (caselle abbandonate, `/seen`).

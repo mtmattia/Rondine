@@ -1,0 +1,1 @@
+When a contact reinstalls the app and their key changes, there is still a single chat, with the notice "The key has changed: verify the chat for safety" and a button to verify it with a ring, an SMS or the safety code. Messages left halfway are resent automatically once the key is verified.

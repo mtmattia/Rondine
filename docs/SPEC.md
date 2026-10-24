@@ -613,6 +613,12 @@ finché non passa da SMS, QR o numero di sicurezza.
 (gli ultimi 4 byte avanzano). Ogni gruppo, letto come intero big-endian modulo 100000, dà
 5 cifre: 60 cifre in tutto, uguali sui due telefoni.
 
+
+**Avvisi sulla chiave.** Un contatto trovato attraverso un nodo (nome utente, numero) ha la chiave
+che quel nodo ha dato: finché non si confronta il numero di sicurezza l'app lo dice. Se un contatto
+nuovo ha lo stesso nome utente o numero di un contatto già noto con un'altra chiave, il client
+ricorda la chiave vecchia (`previous_key`) e l'app avvisa che il codice di sicurezza è cambiato,
+come quando qualcuno reinstalla l'app, o come farebbe un nodo che prova a mettersi in mezzo.
 ## 11. API del nodo (`/v1`)
 
 | Metodo e percorso | Auth | Cosa fa |
@@ -716,7 +722,11 @@ saprebbe mai dove trovare un contatto senza nodo che l'ha aggiunto dopo essersi 
 3. Se il nodo non risponde: consegna diretta agli indirizzi dell'ultimo "sono collegato".
 4. Se neanche quella va: il messaggio resta in coda sul telefono (spunta "in attesa") **e** parte
    nella mesh (§12.5).
-5. Finché non arriva la conferma di consegna (§7.2), la coda ritenta (stesso ordine) ogni
+5. Un testo consegnato per una via diretta (rete locale o buco nel NAT) aspetta la conferma di
+   consegna (§7.2) per 2 minuti; se non arriva, la stessa busta riparte dal nodo, una volta (chi la
+   riceve due volte la scarta, §12.6). Una via diretta può rispondere "ok" e non consegnare: un
+   impostore in rete locale, o l'app chiusa prima di elaborarla.
+6. Finché non arriva la conferma di consegna (§7.2), la coda ritenta (stesso ordine) ogni
    5 minuti, e subito quando arriva un "sono collegato" o il contatto compare in rete locale.
    La coda di ciò che non è un testo (conferme, relay) si butta dopo un giorno.
 

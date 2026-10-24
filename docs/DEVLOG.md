@@ -362,3 +362,11 @@ Una riga per modifica: data, cosa è cambiato.
   ✗ con il motivo); senza staffette deposito diretto segnato `unsealed` (lucchetto aperto
   nell'app, scelta di Mattia). 2 test nel core, 5 di accettazione con due nodi veri. Secondo nodo
   sul Mac come staffetta per il nodo del PC.
+- 2026-10-24 — Contro un nodo o un vicino malevolo: (2) un testo consegnato per una via diretta
+  senza conferma entro 2 minuti riparte dal nodo (`unconfirmed`, test con un finto telefono in rete
+  locale che risponde "ok" e butta via); (3) avvisi sulla chiave: banner "trovato attraverso il
+  nodo, verifica" per i contatti da nome o rubrica non verificati, e "codice di sicurezza cambiato"
+  quando un contatto nuovo ha lo stesso nome o numero di uno noto con un'altra chiave
+  (`previous_key`, test con reinstallazione e recupero del nome). Provato il banner
+  sull'emulatore. Nodo sul Mac attivo (launchd `it.rondinenodo`, `tailscale serve` 443) come
+  staffetta del PC; prova vera tra due profili sul nodo del PC: consegna sigillata via Mac.

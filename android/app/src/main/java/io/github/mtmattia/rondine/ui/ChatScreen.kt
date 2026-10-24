@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -921,6 +922,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                 .background(colors.wallpaper)
                 .imePadding(),
         ) {
+            if (!isGroup && c != null) KeyBanner(c, onVerify = onHeader)
             Box(Modifier.weight(1f)) {
                 Wallpaper(colors.wallpaperDot)
                 // L'ultimo messaggio è l'elemento 0 (lista rovesciata). Si scende da soli quando
@@ -1231,6 +1233,45 @@ private fun CenterChip(label: String) {
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * Avvisi sulla chiave del contatto (SPEC §10): codice di sicurezza cambiato, oppure contatto
+ * trovato attraverso il nodo (nome utente o numero) e non ancora verificato. Si chiude con la ✕
+ * fino alla prossima apertura della chat; sparisce del tutto quando il contatto è verificato.
+ */
+@Composable
+private fun KeyBanner(c: uniffi.rondine_ffi.ContactInfo, onVerify: () -> Unit) {
+    var closed by remember(c.id) { mutableStateOf(false) }
+    if (c.verified || closed) return
+    val changed = c.previousKey != null
+    val viaNode = c.source == "nome" || c.source == "rubrica"
+    if (!changed && !viaNode) return
+    val text = if (changed) {
+        "Il codice di sicurezza di ${c.name} è cambiato. Di solito vuol dire che ha reinstallato " +
+            "l'app, ma potrebbe essere qualcuno che si spaccia per lui o per lei: verificalo."
+    } else {
+        "Hai trovato ${c.name} attraverso il nodo. Per essere sicuro che sia davvero lui o lei, " +
+            "confrontate il codice di sicurezza."
+    }
+    Surface(
+        color = if (changed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (changed) Icons.Filled.Warning else Icons.Filled.Lock, null, Modifier.size(20.dp),
+                tint = if (changed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text, Modifier.weight(1f), fontSize = 13.sp,
+                color = if (changed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            TextButton(onClick = onVerify) { Text("Verifica") }
+            IconButton(onClick = { closed = true }) { Icon(Icons.Filled.Close, "Chiudi", Modifier.size(18.dp)) }
         }
     }
 }

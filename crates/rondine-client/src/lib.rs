@@ -256,6 +256,8 @@ pub struct Client {
     slow_lan: std::sync::Mutex<HashMap<PublicKey, u64>>,
     /// Chiavi di sigillo e staffette dei nodi (SPEC §6.3): URL → (chiave, staffette, quando).
     seal_cache: std::sync::Mutex<SealCache>,
+    /// Quanto aspettare la conferma di un testo consegnato direttamente (SPEC §12.4).
+    confirm_wait: u64,
     /// Lavori della mesh raccolti durante l'elaborazione, eseguiti alla fine di `sync`.
     relay_jobs: Vec<RelayJob>,
     /// Eventi e azioni dei gruppi raccolti durante l'elaborazione (SPEC §7.4).
@@ -294,6 +296,9 @@ struct RelayMsg {
 
 /// Per quanto valgono offerta e risposta del buco nel NAT (SPEC §12.8).
 const PUNCH_TTL_SECS: u64 = 120;
+/// Dopo quanto un testo consegnato per una via diretta, senza conferma, riparte dal nodo.
+const CONFIRM_WAIT_SECS: u64 = 120;
+
 type SealCache = HashMap<String, (Option<rondine_core::seal::SealConfig>, Vec<String>, u64)>;
 
 /// Per quanto si ricordano chiave di sigillo e staffette di un nodo.
@@ -406,6 +411,7 @@ impl Client {
                 contacts: Vec::new(),
                 messages: Vec::new(),
                 outbox: Vec::new(),
+                unconfirmed: Vec::new(),
                 phone_verified: false,
                 retired: Vec::new(),
                 push_endpoint: None,
@@ -438,6 +444,7 @@ impl Client {
             want_offer: Default::default(),
             slow_lan: Default::default(),
             seal_cache: Default::default(),
+            confirm_wait: CONFIRM_WAIT_SECS,
             relay_jobs: Vec::new(),
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
@@ -472,6 +479,7 @@ impl Client {
                 contacts: Vec::new(),
                 messages: Vec::new(),
                 outbox: Vec::new(),
+                unconfirmed: Vec::new(),
                 phone_verified: false,
                 retired: Vec::new(),
                 push_endpoint: None,
@@ -504,6 +512,7 @@ impl Client {
             want_offer: Default::default(),
             slow_lan: Default::default(),
             seal_cache: Default::default(),
+            confirm_wait: CONFIRM_WAIT_SECS,
             relay_jobs: Vec::new(),
         };
         client.save()?;
@@ -943,6 +952,28 @@ impl Client {
     /// "inviato".
     async fn flush_outbox(&mut self) -> Vec<Event> {
         let t = now();
+        // Consegnati direttamente ma mai confermati: si rimandano dal nodo, una volta.
+        for o in std::mem::take(&mut self.state.unconfirmed) {
+            if t < o.next_try {
+                self.state.unconfirmed.push(o);
+                continue;
+            }
+            let card = self
+                .state
+                .contacts
+                .iter()
+                .find(|c| c.identity == o.to)
+                .map(|c| c.card.clone());
+            if let Some(card) = card
+                && !matches!(self.deliver_by_node(&card, &o.blob).await, Ok(Some(_)))
+            {
+                // Nemmeno il nodo: resta nella coda normale, che ritenta da sola.
+                self.state.outbox.push(Outgoing {
+                    next_try: t + RETRY_SECS,
+                    ..o
+                });
+            }
+        }
         let mut keep = Vec::new();
         let mut sent = Vec::new();
         for mut o in std::mem::take(&mut self.state.outbox) {
@@ -1021,6 +1052,7 @@ impl Client {
             want_offer: Default::default(),
             slow_lan: Default::default(),
             seal_cache: Default::default(),
+            confirm_wait: CONFIRM_WAIT_SECS,
             relay_jobs: Vec::new(),
         })
     }
@@ -1469,8 +1501,10 @@ impl Client {
                 addrs: Vec::new(),
                 phone_verified_by: None,
                 muted: false,
+                previous_key: None,
             });
         }
+        self.note_key_change(&info.identity);
         self.start_chat(&info.identity).await?;
         self.save()?;
         // Chat nuova: il contatto deve sapere dove trovarmi, anche se ero già acceso.
@@ -1641,6 +1675,25 @@ impl Client {
         Ok(None)
     }
 
+    /// Consegna solo attraverso il nodo del contatto (per i testi consegnati direttamente e mai
+    /// confermati).
+    async fn deliver_by_node(&self, card: &SignedCard, blob: &str) -> Result<Option<Route>> {
+        let info = verify_card(card)?;
+        let Some((node, inbox, permit)) = info.mailbox() else {
+            return Ok(None);
+        };
+        Ok(Some(
+            self.deposit_node(node, inbox, permit, blob, Kind::Normal)
+                .await?,
+        ))
+    }
+
+    /// Quanto aspettare la conferma di un testo consegnato direttamente prima di rimandarlo dal
+    /// nodo (per i test; di solito 2 minuti).
+    pub fn set_confirm_wait(&mut self, secs: u64) {
+        self.confirm_wait = secs;
+    }
+
     /// Deposito nel nodo di un contatto, sigillato attraverso una staffetta (SPEC §6.3); se non
     /// c'è nessuna staffetta, diretto e segnato "senza sigillo". Un nodo senza sigillo è scartato.
     async fn deposit_node(
@@ -1796,6 +1849,20 @@ impl Client {
             // Passata dal nodo: si prova ad aprire il collegamento diretto (SPEC §12.8).
             if matches!(route, Route::Node | Route::NodeUnsealed) && kind == Kind::Normal {
                 self.want_offer.insert(info.identity);
+            }
+            // Una via diretta non garantisce la consegna (impostore in rete locale, app chiusa
+            // prima di elaborarla): si aspetta la conferma, poi si riprova dal nodo.
+            if route == Route::Direct
+                && let Some(id) = message_id
+            {
+                let t = now();
+                self.state.unconfirmed.push(Outgoing {
+                    to: info.identity,
+                    blob: blob.clone(),
+                    message_id: Some(id.to_string()),
+                    queued_at: t,
+                    next_try: t + self.confirm_wait,
+                });
             }
             return Ok(route);
         }
@@ -1987,6 +2054,30 @@ impl Client {
         }
         self.save()?;
         Ok(msg)
+    }
+
+    /// Un contatto nuovo ha lo stesso nome utente o numero di un altro con un'altra chiave?
+    /// Allora il codice di sicurezza è cambiato: lo si ricorda per avvisare (SPEC §10).
+    pub(crate) fn note_key_change(&mut self, id: &PublicKey) {
+        let Some(new) = self.state.contacts.iter().find(|c| &c.identity == id) else {
+            return;
+        };
+        let (username, phone) = (new.username.clone(), new.phone.clone());
+        let old = self
+            .state
+            .contacts
+            .iter()
+            .filter(|c| &c.identity != id)
+            .find(|c| {
+                (username.is_some() && c.username == username)
+                    || (phone.is_some() && c.phone == phone)
+            })
+            .map(|c| c.identity);
+        if let Some(old) = old
+            && let Some(c) = self.contact_mut(id)
+        {
+            c.previous_key = Some(old);
+        }
     }
 
     /// Il contatto a cui scrivere, con la chat già avviata.
@@ -3318,7 +3409,9 @@ impl Client {
                     addrs: Vec::new(),
                     phone_verified_by: None,
                     muted: false,
+                    previous_key: None,
                 });
+                self.note_key_change(&from);
             }
         }
         Ok(events)
@@ -3522,6 +3615,9 @@ impl Client {
                 // Consegnato (magari da un'altra via): la coda per quei messaggi non serve più.
                 self.state
                     .outbox
+                    .retain(|o| o.message_id.as_ref().is_none_or(|id| !ids.contains(id)));
+                self.state
+                    .unconfirmed
                     .retain(|o| o.message_id.as_ref().is_none_or(|id| !ids.contains(id)));
                 let mut changed = Vec::new();
                 for m in self

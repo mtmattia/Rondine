@@ -97,6 +97,8 @@ pub struct ContactInfo {
     pub photo: Option<String>,
     /// Le sue "Info" attive (SPEC §7.7).
     pub about: Option<String>,
+    /// La chiave che aveva prima con lo stesso nome o numero: codice di sicurezza cambiato.
+    pub previous_key: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -497,6 +499,7 @@ fn contact_info(c: &Contact) -> ContactInfo {
         .into(),
         photo: None,
         about: None,
+        previous_key: c.previous_key.map(|k| k.to_b64()),
         phone_verified_by: c.phone_verified_by.clone(),
         muted: c.muted,
     }

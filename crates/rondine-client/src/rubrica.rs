@@ -201,8 +201,10 @@ impl Client {
                     addrs: Vec::new(),
                     phone_verified_by: verified_by.clone(),
                     muted: false,
+                    previous_key: None,
                 });
             }
+            self.note_key_change(&info.identity);
             // Coppia: ci siamo trovati in due, la chat la avvia la chiave più bassa (SPEC §9).
             // Numero verificato: l'altro non sa niente di me, la chat parte quando scrivo.
             let needs_chat = verified_by.is_none()

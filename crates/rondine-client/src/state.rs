@@ -46,6 +46,10 @@ pub struct Contact {
     /// Notifiche silenziate per questa chat (solo sul telefono).
     #[serde(default)]
     pub muted: bool,
+    /// Un altro contatto aveva già lo stesso nome utente o numero con un'altra chiave: il codice
+    /// di sicurezza è cambiato (app reinstallata, o qualcuno che si spaccia per lui).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_key: Option<PublicKey>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -235,6 +239,10 @@ pub struct State {
     /// Buste in attesa di una via per il contatto (SPEC §12.4).
     #[serde(default)]
     pub outbox: Vec<Outgoing>,
+    /// Testi consegnati per una via diretta e non ancora confermati: senza conferma entro
+    /// `next_try` ripartono dal nodo (SPEC §12.4).
+    #[serde(default)]
+    pub unconfirmed: Vec<Outgoing>,
     /// Il mio numero è verificato via SMS dal mio nodo (SPEC §13).
     #[serde(default)]
     pub phone_verified: bool,

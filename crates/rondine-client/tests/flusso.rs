@@ -2234,3 +2234,76 @@ async fn il_permesso_non_dice_al_nodo_chi_scrive() -> R {
     }
     Ok(())
 }
+
+/// Un impostore in rete locale accetta il messaggio e lo butta: senza la conferma di consegna,
+/// il messaggio riparte dal nodo (SPEC §12.4).
+#[tokio::test]
+async fn senza_conferma_il_messaggio_riparte_dal_nodo() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    silvia.sync().await?;
+
+    // Il finto telefono di Silvia: risponde 202 e non consegna niente.
+    let fake = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let fake_addr = fake.local_addr()?;
+    let app = axum::Router::new().route(
+        "/lan/v1/deliver",
+        axum::routing::post(|| async { axum::http::StatusCode::ACCEPTED }),
+    );
+    tokio::spawn(async move { axum::serve(fake, app).await });
+    mattia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mattia.add_lan_peer(silvia.identity(), fake_addr);
+    mattia.set_confirm_wait(1);
+
+    let m = mattia.send_text(&silvia.identity(), "arrivi?").await?;
+    assert_eq!(m.status, Delivery::Sent);
+    assert!(
+        texts(&silvia.sync().await?).is_empty(),
+        "l'impostore l'ha buttato"
+    );
+
+    // Passato il tempo senza la seconda spunta, la sincronizzazione lo rimanda dal nodo.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    mattia.sync().await?;
+    assert_eq!(texts(&silvia.sync().await?), ["arrivi?"]);
+    // Arrivata la conferma, non riparte più.
+    mattia.sync().await?;
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    mattia.sync().await?;
+    assert!(texts(&silvia.sync().await?).is_empty());
+    let stato = mattia
+        .messages_with(&silvia.identity())
+        .iter()
+        .find(|x| x.id == m.id)
+        .map(|x| x.status);
+    assert_eq!(stato, Some(Delivery::Delivered));
+    Ok(())
+}
+
+#[tokio::test]
+async fn codice_di_sicurezza_cambiato_si_nota() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let host = rondine_core::username::node_host(&node)?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    verify_phone(&mut mattia, &state, "340 111 2233").await?;
+    mattia.claim_username("mattia").await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let c = silvia.add(&format!("mattia@{host}")).await?;
+    assert_eq!(c.source, Source::Nome);
+    assert!(!c.verified);
+    assert!(c.previous_key.is_none());
+
+    // Mattia reinstalla l'app: chiave nuova, si riprende il nome col numero.
+    let mut nuovo = profile(&tmp, "Mattia2", &node).await?;
+    verify_phone(&mut nuovo, &state, "340 111 2233").await?;
+    nuovo.claim_username("mattia").await?;
+    let c = silvia.add(&format!("mattia@{host}")).await?;
+    assert_eq!(c.identity, nuovo.identity());
+    assert_eq!(c.previous_key, Some(mattia.identity()));
+    Ok(())
+}

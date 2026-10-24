@@ -1,0 +1,1 @@
+Rubrica: trova i contatti anche con centinaia di numeri e sceglie sempre il profilo più recente. Chi reinstalla con il numero verificato continua la stessa chat, e i messaggi rimasti a metà ripartono da soli. Una chiave nuova senza conferma diventa una chat a parte "(!) nome", che si unisce dopo la verifica.

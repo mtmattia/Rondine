@@ -430,3 +430,4 @@ Una riga per modifica: data, cosa è cambiato.
   come "(!) nome" con un avviso, e si unisce appena la chiave si conferma (SMS o codice di
   persona). Test `chiave_nuova_con_numero_verificato_continua_la_stessa_chat`,
   `chiave_nuova_senza_verifica_e_una_chat_a_parte` e `chat_a_parte_si_unisce_dopo_la_verifica`.
+- 2026-10-24 — Versione 0.1.15 (versionCode 16).

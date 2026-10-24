@@ -1,0 +1,1 @@
+Address book: finds contacts even with hundreds of numbers and always picks the most recent profile. Someone who reinstalls with a verified number continues the same chat, and undelivered messages are resent automatically. A new unconfirmed key becomes a separate "(!) name" chat, merged after verification.

@@ -23,6 +23,8 @@ pub struct Net {
     http: reqwest::Client,
     /// Per le consegne dirette tra telefoni (SPEC §12.2): tempi brevi, chi non c'è non risponde.
     direct: reqwest::Client,
+    /// Per il tentativo diretto prima del nodo (SPEC §12.4): chi è vicino risponde subito.
+    direct_fast: reqwest::Client,
     /// Per foto e documenti (SPEC §6.2): fino a 64 MiB, anche su reti lente.
     files: reqwest::Client,
 }
@@ -39,6 +41,11 @@ impl Net {
             .connect_timeout(std::time::Duration::from_secs(2))
             .timeout(std::time::Duration::from_secs(10))
             .build()?;
+        let direct_fast = reqwest::Client::builder()
+            .tls_backend_preconfigured(tls_config()?)
+            .connect_timeout(std::time::Duration::from_millis(800))
+            .timeout(std::time::Duration::from_millis(1500))
+            .build()?;
         let files = reqwest::Client::builder()
             .tls_backend_preconfigured(tls_config()?)
             .connect_timeout(std::time::Duration::from_secs(30))
@@ -48,14 +55,28 @@ impl Net {
         Ok(Self {
             http,
             direct,
+            direct_fast,
             files,
         })
     }
 
     /// Consegna diretta di una busta (b64) a un telefono (SPEC §12.2).
     pub async fn deliver_direct(&self, to: std::net::SocketAddr, blob: &str) -> Result<()> {
-        let res = self
-            .direct
+        self.deliver_with(&self.direct, to, blob).await
+    }
+
+    /// Come [`Net::deliver_direct`], ma si arrende in fretta: è il tentativo prima del nodo.
+    pub async fn deliver_direct_fast(&self, to: std::net::SocketAddr, blob: &str) -> Result<()> {
+        self.deliver_with(&self.direct_fast, to, blob).await
+    }
+
+    async fn deliver_with(
+        &self,
+        client: &reqwest::Client,
+        to: std::net::SocketAddr,
+        blob: &str,
+    ) -> Result<()> {
+        let res = client
             .post(format!("http://{to}/lan/v1/deliver"))
             .json(&serde_json::json!({ "blob": blob }))
             .send()

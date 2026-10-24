@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Schedule
@@ -121,11 +123,23 @@ fun dayLabel(d: LocalDate): String {
     }
 }
 
-/** Spunte di un messaggio inviato: ✓ inviato, ✓✓ consegnato, ✓✓ verdi letto. */
+/** Colore della freccetta "in invio". */
+private val SendingBlue = Color(0xFF1E88E5)
+
+/** Spunte di un messaggio inviato: ↑ blu in invio, 🕓 in coda, ✓ inviato, ✓✓ consegnato, ✓✓ verdi letto, ✗ non inviato. */
 @Composable
-fun MessageTicks(status: MessageStatus, tint: Color, size: Dp) {
+fun MessageTicks(status: MessageStatus, tint: Color, size: Dp, sending: Boolean = false) {
+    if (sending) {
+        // Appena scritto, il client lo sta mandando: freccetta blu.
+        Icon(Icons.Filled.ArrowUpward, "In invio", Modifier.size(size), tint = SendingBlue)
+        return
+    }
     when (status) {
-        MessageStatus.PENDING -> Icon(Icons.Filled.Schedule, "In attesa della rete locale", Modifier.size(size), tint = tint)
+        MessageStatus.FAILED -> Icon(
+            Icons.Filled.Close, "Non inviato: tocca per riprovare", Modifier.size(size),
+            tint = MaterialTheme.colorScheme.error,
+        )
+        MessageStatus.PENDING -> Icon(Icons.Filled.Schedule, "In coda: parte quando il contatto è raggiungibile", Modifier.size(size), tint = tint)
         MessageStatus.SENT -> Icon(Icons.Filled.Done, "Inviato", Modifier.size(size), tint = tint)
         MessageStatus.DELIVERED -> Icon(Icons.Filled.DoneAll, "Consegnato", Modifier.size(size), tint = tint)
         MessageStatus.READ ->

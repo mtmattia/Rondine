@@ -70,6 +70,9 @@ pub struct ChatMessage {
     /// Id del messaggio a cui risponde (SPEC §7.1b).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
+    /// Perché non è partito (stato `Failed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Posizione di un messaggio, fissa o in tempo reale (SPEC §7.6).
@@ -140,6 +143,8 @@ mod opt_b64 {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Delivery {
+    /// Non inviato: il nodo l'ha rifiutato o c'è stato un errore; il motivo è in `error`.
+    Failed,
     /// In coda sul telefono: il contatto non è raggiungibile (SPEC §12.3).
     Pending,
     #[default]

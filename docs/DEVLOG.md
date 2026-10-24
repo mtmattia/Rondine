@@ -334,3 +334,12 @@ Una riga per modifica: data, cosa è cambiato.
   Nuovo `scripts/pubblica.sh`: pubblica dal PC in 2-3 minuti invece di 25 (firma verificata con
   apksigner); la pubblicazione automatica si ferma se la Release ha già gli APK e completa quelle
   vuote. APK della 0.1.13 compilato sul PC identico a quello di GitHub (sha256).
+- 2026-10-24 — Bug trovato da Mattia (0.1.13 → 0.1.12): il messaggio restava fermo nella casella
+  e partiva dopo un po'. Causa: dalla 0.1.13 la rete locale viene prima del nodo, e un telefono
+  con l'app in pausa accetta la connessione senza rispondere (attesa fino a 10 s); in più
+  l'offerta del buco nel NAT partiva durante l'invio. Ora il tentativo diretto prima del nodo
+  aspetta al massimo 1,5 s e quel contatto passa poi dal nodo per 5 minuti; l'offerta parte alla
+  `sync` dopo. Stato nuovo `Failed` con il motivo (`error`) e `retry_message`: il messaggio
+  rifiutato resta nella chat con una ✗ rossa, toccandolo "Mancato invio" con la causa e Riprova
+  (CLI `rondine riprova`). L'app mostra subito il testo con una freccetta blu "in invio" e
+  svuota la casella. 3 test nuovi; provato sull'emulatore (✗, finestra, Riprova).

@@ -138,6 +138,8 @@ import uniffi.rondine_ffi.GroupInfo
 import uniffi.rondine_ffi.GroupMessageInfo
 import uniffi.rondine_ffi.LocationInfo
 import uniffi.rondine_ffi.MessageStatus
+import kotlinx.coroutines.sync.withLock
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import uniffi.rondine_ffi.RondineException
 
 /** Con chi si parla: una persona o un gruppo. La schermata è la stessa. */
@@ -163,6 +165,10 @@ data class UiMessage(
     val senderName: String?,
     /** Id del messaggio citato. */
     val replyTo: String? = null,
+    /** Perché non è partito (spunta ✗). */
+    val error: String? = null,
+    /** Appena scritto, il client lo sta ancora mandando (freccetta blu). */
+    val sending: Boolean = false,
 )
 
 /** Risposta a un aggiornamento (SPEC §7.10): la citazione mostra l'aggiornamento, finché esiste. */
@@ -174,7 +180,7 @@ private fun statusQuote(id: String): UiMessage? {
 }
 
 private fun Message.ui() =
-    UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null, replyTo)
+    UiMessage(id, outgoing, body, ts, read, status, attachment, location, if (outgoing) "io" else contactId, null, replyTo, error)
 private fun GroupMessageInfo.ui() =
     UiMessage(id, outgoing, body, ts, read, null, attachment, location, if (outgoing) "io" else senderId, senderName, replyTo)
 
@@ -220,6 +226,12 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     val revision by Repo.revision.collectAsState()
     var contact by remember { mutableStateOf<ContactInfo?>(null) }
     var messages by remember { mutableStateOf<List<UiMessage>>(emptyList()) }
+    /** Testi appena scritti, mostrati "in invio" finché il client non li ha salvati. */
+    val sendingNow = remember { androidx.compose.runtime.mutableStateListOf<UiMessage>() }
+    /** Gli invii partono uno alla volta, nell'ordine in cui si scrivono. */
+    val sendLock = remember { kotlinx.coroutines.sync.Mutex() }
+    /** Messaggio non inviato toccato: finestra "Mancato invio". */
+    var failed by remember { mutableStateOf<UiMessage?>(null) }
     // Il testo che si sta scrivendo: lo stato del campo è l'unica fonte (copiarlo avanti e indietro
     // in una stringa perdeva lettere scrivendo veloce).
     val field = rememberTextFieldState()
@@ -287,6 +299,33 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
         } catch (e: RondineException) {
             snackbar.showSnackbar(e.userMessage)
         }
+    }
+
+    failed?.let { m ->
+        AlertDialog(
+            onDismissRequest = { failed = null },
+            title = { Text("Mancato invio") },
+            text = { Text("Il messaggio non è stato inviato.\n\nCausa: ${m.error ?: "sconosciuta"}") },
+            confirmButton = {
+                TextButton(onClick = {
+                    failed = null
+                    scope.launch {
+                        try {
+                            val client = Repo.client()
+                            val res = client.retryMessage(m.id)
+                            messages = client.messages(contactId).map { it.ui() }
+                            Repo.refresh()
+                            if (res.status == MessageStatus.FAILED) {
+                                snackbar.showSnackbar("Ancora non inviato: ${res.error ?: "errore sconosciuto"}")
+                            }
+                        } catch (e: RondineException) {
+                            snackbar.showSnackbar(e.userMessage)
+                        }
+                    }
+                }) { Text("Riprova") }
+            },
+            dismissButton = { TextButton(onClick = { failed = null }) { Text("Annulla") } },
+        )
     }
 
     /** Manda un file alla persona o al gruppo. */
@@ -884,7 +923,9 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                 // L'ultimo messaggio è l'elemento 0 (lista rovesciata). Si scende da soli quando
                 // mando io, o quando arriva qualcosa mentre sono già in fondo.
                 val listState = rememberLazyListState()
-                val last = messages.lastOrNull()
+                // I messaggi appena scritti compaiono subito, "in invio", finché il client li salva.
+                val shown = messages + sendingNow
+                val last = shown.lastOrNull()
                 // Alla prima apertura si parte dal fondo: prima dei messaggi la lista ha solo
                 // l'avviso sulla cifratura, e resterebbe agganciata a quello (in cima).
                 var atBottomOnce by remember { mutableStateOf(false) }
@@ -893,8 +934,8 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                 var seen by remember { mutableStateOf(0) }
                 LaunchedEffect(last?.id) {
                     if (last == null) return@LaunchedEffect
-                    val added = (messages.size - seen).coerceAtLeast(0)
-                    seen = messages.size
+                    val added = (shown.size - seen).coerceAtLeast(0)
+                    seen = shown.size
                     if (!atBottomOnce) {
                         listState.scrollToItem(0)
                         atBottomOnce = true
@@ -910,7 +951,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                     // Le chat corte stanno in basso, vicino alla barra di scrittura.
                     verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.Bottom),
                 ) {
-                    items(buildItems(messages), key = {
+                    items(buildItems(shown), key = {
                         when (it) {
                             is ChatItem.Msg -> it.m.id
                             is ChatItem.Day -> "day-${it.label}"
@@ -948,6 +989,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                         }
                                     }
                                 },
+                                onFailedTap = { failed = item.m },
                                 onStickerTap = { path ->
                                     scope.launch {
                                         stickerToSave = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -1030,21 +1072,35 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                     },
                     onSend = {
                         val body = text.trim()
-                        if (body.isEmpty() || sending) return@InputBar
-                        sending = true
+                        if (body.isEmpty()) return@InputBar
+                        val r = replyTo?.id
+                        // Subito nella chat con la freccetta blu, e la casella si svuota: l'invio va
+                        // avanti per conto suo.
+                        val temp = UiMessage(
+                            "invio-${System.nanoTime()}", true, body, (System.currentTimeMillis() / 1000).toULong(),
+                            true, MessageStatus.PENDING, null, null, "io", null, r, sending = true,
+                        )
+                        sendingNow.add(temp)
+                        field.clearText()
+                        replyTo = null
                         scope.launch {
-                            try {
-                                val r = replyTo?.id
-                                if (isGroup) Repo.client().sendGroupReply(contactId, body, r)
-                                else Repo.client().sendReply(contactId, body, r)
-                                field.clearText()
-                                replyTo = null
-                                Repo.refresh()
-                            } catch (e: RondineException) {
-                                snackbar.showSnackbar("Non inviato: ${e.userMessage}")
-                            } finally {
-                                sending = false
+                            sendLock.withLock {
+                                try {
+                                    val client = Repo.client()
+                                    if (isGroup) client.sendGroupReply(contactId, body, r)
+                                    else client.sendReply(contactId, body, r)
+                                    messages = if (isGroup) client.groupMessages(contactId).map { it.ui() }
+                                    else client.messages(contactId).map { it.ui() }
+                                } catch (e: RondineException) {
+                                    // Non è nemmeno partito (per esempio contatto bloccato): il testo
+                                    // torna nella casella, se è ancora vuota.
+                                    if (field.text.isEmpty()) field.setTextAndPlaceCursorAtEnd(body)
+                                    snackbar.showSnackbar("Non inviato: ${e.userMessage}")
+                                } finally {
+                                    sendingNow.remove(temp)
+                                }
                             }
+                            Repo.refresh()
                         }
                     },
                 )
@@ -1213,6 +1269,7 @@ private fun Bubble(
     onOpenLocation: (uniffi.rondine_ffi.LocationInfo) -> Unit,
     onStopLocation: () -> Unit,
     onStickerTap: (String) -> Unit,
+    onFailedTap: () -> Unit,
 ) {
     val colors = LocalChatColors.current
     val big = 12.dp
@@ -1227,7 +1284,12 @@ private fun Bubble(
             .fillMaxWidth()
             .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent)
             .combinedClickable(
-                onClick = { if (selecting) onSelect() },
+                onClick = {
+                    when {
+                        selecting -> onSelect()
+                        m.status == MessageStatus.FAILED -> onFailedTap()
+                    }
+                },
                 onLongClick = onSelect,
             )
             .padding(top = if (firstOfRun) 6.dp else 0.dp),
@@ -1254,7 +1316,7 @@ private fun Bubble(
                     val st = m.status
                     if (m.outgoing && st != null) {
                         Spacer(Modifier.width(3.dp))
-                        MessageTicks(st, colors.bubbleMeta, 15.dp)
+                        MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
                     }
                 }
             }
@@ -1282,7 +1344,7 @@ private fun Bubble(
                     val st = m.status
                     if (m.outgoing && st != null) {
                         Spacer(Modifier.width(3.dp))
-                        MessageTicks(st, colors.bubbleMeta, 15.dp)
+                        MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
                     }
                 }
             }
@@ -1328,7 +1390,7 @@ private fun Bubble(
                     val st = m.status
                     if (m.outgoing && st != null) {
                         Spacer(Modifier.width(3.dp))
-                        MessageTicks(st, colors.bubbleMeta, 15.dp)
+                        MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
                     }
                 }
                 if (m.body.isNotBlank() || (a == null && loc == null)) {

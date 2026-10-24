@@ -115,6 +115,8 @@ pub struct Message {
     pub location: Option<LocationInfo>,
     /// Id del messaggio a cui risponde (SPEC §7.1b).
     pub reply_to: Option<String>,
+    /// Perché non è partito (stato `Failed`).
+    pub error: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -144,6 +146,8 @@ pub struct AttachmentInfo {
 
 #[derive(uniffi::Enum, Clone, Copy, PartialEq, Eq)]
 pub enum MessageStatus {
+    /// Non inviato: il motivo è in `Message.error`.
+    Failed,
     /// In coda sul telefono finché il contatto non è in rete locale.
     Pending,
     Sent,
@@ -154,6 +158,7 @@ pub enum MessageStatus {
 impl From<Delivery> for MessageStatus {
     fn from(d: Delivery) -> Self {
         match d {
+            Delivery::Failed => MessageStatus::Failed,
             Delivery::Pending => MessageStatus::Pending,
             Delivery::Sent => MessageStatus::Sent,
             Delivery::Delivered => MessageStatus::Delivered,
@@ -536,6 +541,7 @@ fn message(m: &ChatMessage) -> Message {
             updated_at: l.updated_at,
         }),
         reply_to: m.reply_to.clone(),
+        error: m.error.clone(),
     }
 }
 
@@ -1222,6 +1228,14 @@ impl Rondine {
     pub async fn set_photo(&self, jpeg: Option<Vec<u8>>) -> Result<()> {
         self.run(move |c| Box::pin(async move { Ok(c.set_photo(jpeg).await?) }))
             .await
+    }
+
+    /// Riprova un testo non inviato (stato `Failed`).
+    pub async fn retry_message(&self, message_id: String) -> Result<Message> {
+        self.run(move |c| {
+            Box::pin(async move { Ok(message(&c.retry_message(&message_id).await?)) })
+        })
+        .await
     }
 
     /// Cambia il mio nome (SPEC §7.7).

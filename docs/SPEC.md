@@ -630,7 +630,9 @@ saprebbe mai dove trovare un contatto senza nodo che l'ha aggiunto dopo essersi 
 
 ### 12.4 Ordine di consegna
 1. Collegamento diretto vivo: la connessione QUIC aperta con il buco nel NAT (§12.8), poi
-   l'indirizzo trovato con mDNS (o dato a mano).
+   l'indirizzo trovato con mDNS (o dato a mano). Qui si aspetta al massimo 1,5 s: un telefono
+   con l'app in pausa accetta la connessione ma non risponde, e per 5 minuti quel contatto passa
+   prima dal nodo.
 2. Deposito nel nodo del contatto (se il suo biglietto ne ha uno).
 3. Se il nodo non risponde: consegna diretta agli indirizzi dell'ultimo "sono collegato".
 4. Se neanche quella va: il messaggio resta in coda sul telefono (spunta "in attesa") **e** parte

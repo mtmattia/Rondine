@@ -246,6 +246,12 @@ pub struct Client {
     punch_jobs: Vec<PunchJob>,
     /// Server STUN del mio nodo e quando li ho chiesti.
     stun_cache: Option<(Vec<std::net::SocketAddr>, u64)>,
+    /// Contatti a cui offrire il collegamento diretto alla prossima `sync` (non durante l'invio,
+    /// per non rallentarlo).
+    want_offer: std::collections::HashSet<PublicKey>,
+    /// Contatti che in rete locale non hanno risposto (app in pausa?): fino a quando si passa
+    /// prima dal nodo (SPEC §12.4).
+    slow_lan: std::sync::Mutex<HashMap<PublicKey, u64>>,
     /// Lavori della mesh raccolti durante l'elaborazione, eseguiti alla fine di `sync`.
     relay_jobs: Vec<RelayJob>,
     /// Eventi e azioni dei gruppi raccolti durante l'elaborazione (SPEC §7.4).
@@ -284,8 +290,28 @@ struct RelayMsg {
 
 /// Per quanto valgono offerta e risposta del buco nel NAT (SPEC §12.8).
 const PUNCH_TTL_SECS: u64 = 120;
+/// Per quanto un contatto che in rete locale non ha risposto passa prima dal nodo.
+const SLOW_LAN_SECS: u64 = 300;
 /// Per quanto si ricordano i server STUN del nodo.
 const STUN_CACHE_SECS: u64 = 3600;
+
+/// Stato di un messaggio appena mandato: in coda, inviato, o non partito con il motivo.
+fn apply_route(msg: &mut ChatMessage, res: Result<Route>) {
+    match res {
+        Ok(Route::Queued) => {
+            msg.status = Delivery::Pending;
+            msg.error = None;
+        }
+        Ok(_) => {
+            msg.status = Delivery::Sent;
+            msg.error = None;
+        }
+        Err(e) => {
+            msg.status = Delivery::Failed;
+            msg.error = Some(e.to_string());
+        }
+    }
+}
 
 /// Ogni quanto la coda ritenta una consegna (SPEC §12.4), e quanto tiene ciò che non è un testo.
 const RETRY_SECS: u64 = 300;
@@ -381,6 +407,8 @@ impl Client {
             punch: punch::Punch::default(),
             punch_jobs: Vec::new(),
             stun_cache: None,
+            want_offer: Default::default(),
+            slow_lan: Default::default(),
             relay_jobs: Vec::new(),
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
@@ -444,6 +472,8 @@ impl Client {
             punch: punch::Punch::default(),
             punch_jobs: Vec::new(),
             stun_cache: None,
+            want_offer: Default::default(),
+            slow_lan: Default::default(),
             relay_jobs: Vec::new(),
         };
         client.save()?;
@@ -959,6 +989,8 @@ impl Client {
             punch: punch::Punch::default(),
             punch_jobs: Vec::new(),
             stun_cache: None,
+            want_offer: Default::default(),
+            slow_lan: Default::default(),
             relay_jobs: Vec::new(),
         })
     }
@@ -1543,10 +1575,22 @@ impl Client {
             return Ok(Some(Route::Direct));
         }
         let lan_peer = self.lan.as_ref().and_then(|l| l.peer(&id));
+        let t = now();
+        let slow = self
+            .slow_lan
+            .lock()
+            .map(|m| m.get(&id).is_some_and(|&until| until > t))
+            .unwrap_or(false);
         if let Some(addr) = lan_peer
-            && self.net.deliver_direct(addr, blob).await.is_ok()
+            && !slow
         {
-            return Ok(Some(Route::Direct));
+            if self.net.deliver_direct_fast(addr, blob).await.is_ok() {
+                return Ok(Some(Route::Direct));
+            }
+            // Non risponde in fretta: per un po' si passa prima dal nodo.
+            if let Ok(mut m) = self.slow_lan.lock() {
+                m.insert(id, t + SLOW_LAN_SECS);
+            }
         }
         if let Some((node, inbox, permit)) = info.mailbox() {
             let res = self
@@ -1596,7 +1640,7 @@ impl Client {
         if let Some(route) = self.try_deliver(card, &blob, kind).await? {
             // Passata dal nodo: si prova ad aprire il collegamento diretto (SPEC §12.8).
             if route == Route::Node && kind == Kind::Normal {
-                self.offer_direct(&info.identity, false).await;
+                self.want_offer.insert(info.identity);
             }
             return Ok(route);
         }
@@ -1731,6 +1775,7 @@ impl Client {
             attachment: None,
             location: None,
             reply_to: reply_to.map(str::to_string),
+            error: None,
         };
         let app = AppMessage::Text {
             v: 1,
@@ -1740,16 +1785,49 @@ impl Client {
             reply: msg.reply_to.clone(),
         };
         let mut msg = msg;
-        if self
+        let res = self
             .send_app_with(&contact, &app, Kind::Normal, Some(&msg.id))
-            .await?
-            == Route::Queued
-        {
-            msg.status = Delivery::Pending;
-        }
+            .await;
+        apply_route(&mut msg, res);
         // Chi riceve il messaggio smette da solo di mostrare "sta scrivendo".
         self.typing_sent.remove(to);
         self.state.messages.push(msg.clone());
+        self.save()?;
+        Ok(msg)
+    }
+
+    /// Riprova un testo non partito (stato `Failed`), con lo stesso id: se arriva due volte,
+    /// chi lo riceve lo tiene una volta sola.
+    pub async fn retry_message(&mut self, id: &str) -> Result<ChatMessage> {
+        let msg = self
+            .state
+            .messages
+            .iter()
+            .find(|m| m.id == id && m.outgoing && m.status == Delivery::Failed)
+            .cloned()
+            .ok_or_else(|| Error::NotFound("nessun messaggio da riprovare".into()))?;
+        if msg.attachment.is_some() || msg.location.is_some() {
+            return Err(Error::Invalid(
+                "si possono riprovare solo i messaggi di testo".into(),
+            ));
+        }
+        let contact = self.chat_contact(&msg.contact).await?;
+        let app = AppMessage::Text {
+            v: 1,
+            id: msg.id.clone(),
+            ts: msg.ts,
+            body: msg.body.clone(),
+            reply: msg.reply_to.clone(),
+        };
+        let res = self
+            .send_app_with(&contact, &app, Kind::Normal, Some(&msg.id))
+            .await;
+        let mut msg = msg;
+        apply_route(&mut msg, res);
+        if let Some(m) = self.state.messages.iter_mut().find(|m| m.id == msg.id) {
+            m.status = msg.status;
+            m.error = msg.error.clone();
+        }
         self.save()?;
         Ok(msg)
     }
@@ -1802,6 +1880,7 @@ impl Client {
             status: Delivery::Sent,
             location: None,
             reply_to: None,
+            error: None,
             attachment: Some(attachment),
         };
         if self
@@ -2095,6 +2174,7 @@ impl Client {
             status: Delivery::Sent,
             location: None,
             reply_to: None,
+            error: None,
             attachment: Some(attachment),
         };
         self.typing.remove(&sender);
@@ -2150,6 +2230,7 @@ impl Client {
                 updated_at: ts,
             }),
             reply_to: None,
+            error: None,
         };
         if self
             .send_app_with(
@@ -2300,6 +2381,7 @@ impl Client {
                 updated_at: l.ts,
             }),
             reply_to: None,
+            error: None,
         };
         self.typing.remove(&sender);
         self.state.messages.push(m.clone());
@@ -2867,6 +2949,9 @@ impl Client {
             }
         }
         // Offerte e risposte per il collegamento diretto (SPEC §12.8).
+        for id in std::mem::take(&mut self.want_offer) {
+            self.offer_direct(&id, false).await;
+        }
         self.run_punch_jobs().await;
         // Azioni dei gruppi raccolte durante l'elaborazione (annunci, uscite, revoche).
         events.extend(self.run_pending().await);
@@ -3142,6 +3227,7 @@ impl Client {
                     attachment: None,
                     location: None,
                     reply_to: reply,
+                    error: None,
                 };
                 self.typing.remove(&sender);
                 self.state.messages.push(m.clone());

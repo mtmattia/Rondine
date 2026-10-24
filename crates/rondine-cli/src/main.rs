@@ -183,6 +183,8 @@ enum Cmd {
     Verifica { contatto: String },
     /// Blocca un contatto.
     Blocca { contatto: String },
+    /// Riprova un messaggio non inviato (✗), con l'inizio del suo id come lo mostra `leggi`.
+    Riprova { messaggio: String },
     /// Apre un collegamento diretto via internet con un contatto, anche dietro NAT (SPEC §12.8),
     /// e resta in ascolto a ricevere finché non si preme Ctrl+C.
     Diretto { contatto: String },
@@ -457,6 +459,7 @@ fn describe(c: &Contact) -> String {
 /// Spunte come nell'app: ✓ inviato, ✓✓ consegnato, ✓✓ letto (verdi nell'app).
 fn ticks(status: Delivery) -> &'static str {
     match status {
+        Delivery::Failed => "✗ non inviato",
         Delivery::Pending => "🕓",
         Delivery::Sent => "✓",
         Delivery::Delivered => "✓✓",
@@ -1224,8 +1227,17 @@ async fn main() -> anyhow::Result<()> {
         }
         Cmd::Scrivi { contatto, testo } => {
             let id = c.find_contact(&contatto)?.identity;
-            c.send_text(&id, &testo.join(" ")).await?;
-            println!("Inviato.");
+            report_sent(&c.send_text(&id, &testo.join(" ")).await?)?;
+        }
+        Cmd::Riprova { messaggio } => {
+            let id = c
+                .state()
+                .messages
+                .iter()
+                .find(|m| m.status == Delivery::Failed && m.id.starts_with(&messaggio))
+                .map(|m| m.id.clone())
+                .context("nessun messaggio non inviato con quell'id (lo mostra `rondine leggi`)")?;
+            report_sent(&c.retry_message(&id).await?)?;
         }
         Cmd::Sincronizza => {
             let s = c.sync_all().await?;
@@ -1387,8 +1399,7 @@ async fn rete(c: &mut Client, porta: u16, vicini: &[String], secondi: u64) -> an
                         "scrivi" => {
                             let (who, text) = rest.split_once(' ').context("scrivi <contatto> <testo>")?;
                             let id = c.find_contact(who)?.identity;
-                            let m = c.send_text(&id, text).await?;
-                            println!("{}", if m.status == Delivery::Pending { "In coda: parte quando è in rete." } else { "Inviato." });
+                            report_sent(&c.send_text(&id, text).await?)?;
                         }
                         "aggiungi" => println!("Aggiunto: {}", describe(&c.add(rest).await?)),
                         other => println!("comando sconosciuto: {other}"),
@@ -1404,4 +1415,18 @@ async fn rete(c: &mut Client, porta: u16, vicini: &[String], secondi: u64) -> an
             }
         }
     }
+}
+
+/// Com'è andato un invio: inviato, in coda, o non partito (errore, con il motivo).
+fn report_sent(m: &rondine_client::ChatMessage) -> anyhow::Result<()> {
+    match m.status {
+        Delivery::Failed => anyhow::bail!(
+            "non inviato: {} (riprova con `rondine riprova {}`)",
+            m.error.as_deref().unwrap_or("errore sconosciuto"),
+            m.id.chars().take(8).collect::<String>()
+        ),
+        Delivery::Pending => println!("In coda: parte quando è in rete."),
+        _ => println!("Inviato."),
+    }
+    Ok(())
 }

@@ -184,12 +184,84 @@ async fn bloccare_un_contatto_ferma_i_suoi_messaggi() -> R {
     mattia.block(&molesto.identity()).await?;
     // Revocato anche l'invito originale, il molesto non ha più permessi validi.
     mattia.reset_invite().await?;
-    let err = molesto
-        .send_text(&mattia.identity(), "ancora io")
-        .await
-        .err()
-        .ok_or("il nodo doveva rifiutare")?;
-    assert_eq!(err.node_code(), Some("forbidden"));
+    // Il nodo rifiuta: il messaggio resta nella chat, non inviato, con il motivo.
+    let m = molesto.send_text(&mattia.identity(), "ancora io").await?;
+    assert_eq!(m.status, Delivery::Failed);
+    let why = m.error.clone().ok_or("manca il motivo")?;
+    assert!(why.contains("403"), "{why}");
+    let kept = molesto
+        .messages_with(&mattia.identity())
+        .iter()
+        .find(|x| x.id == m.id)
+        .map(|x| x.status);
+    assert_eq!(kept, Some(Delivery::Failed));
+    // Riprova: ancora rifiutato.
+    let again = molesto.retry_message(&m.id).await?;
+    assert_eq!(again.status, Delivery::Failed);
+    // Un messaggio già inviato non si riprova.
+    assert!(mattia.retry_message("nessuno").await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn riprova_dopo_un_nuovo_invito() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    // Mattia cambia l'invito: il permesso che Silvia ha in mano non vale più.
+    mattia.reset_invite().await?;
+    let m = silvia.send_text(&mattia.identity(), "ci sei?").await?;
+    assert_eq!(m.status, Delivery::Failed);
+    // Silvia riapre il link nuovo, poi riprova: parte, e arriva una volta sola.
+    silvia.add(&mattia.invite_link()?).await?;
+    let ok = silvia.retry_message(&m.id).await?;
+    assert_eq!(ok.status, Delivery::Sent);
+    assert!(ok.error.is_none());
+    assert_eq!(texts(&mattia.sync().await?), ["ci sei?"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn telefono_in_rete_locale_che_non_risponde_non_blocca_l_invio() -> R {
+    let node = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    silvia.add(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+
+    // Come un telefono con l'app in pausa: accetta la connessione ma non risponde mai.
+    let hole = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = hole.local_addr()?;
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((s, _)) = hole.accept().await {
+            held.push(s);
+        }
+    });
+    mattia.start_lan("127.0.0.1:0".parse()?, false).await?;
+    mattia.add_lan_peer(silvia.identity(), addr);
+
+    let t = std::time::Instant::now();
+    let m = mattia.send_text(&silvia.identity(), "uno").await?;
+    assert!(
+        t.elapsed() < std::time::Duration::from_secs(3),
+        "{:?}",
+        t.elapsed()
+    );
+    assert_eq!(m.status, Delivery::Sent);
+    // Poi per un po' quel contatto passa subito dal nodo.
+    let t = std::time::Instant::now();
+    mattia.send_text(&silvia.identity(), "due").await?;
+    assert!(
+        t.elapsed() < std::time::Duration::from_secs(1),
+        "{:?}",
+        t.elapsed()
+    );
+    assert_eq!(texts(&silvia.sync().await?), ["uno", "due"]);
     Ok(())
 }
 

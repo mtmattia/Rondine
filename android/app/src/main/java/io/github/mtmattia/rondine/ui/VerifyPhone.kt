@@ -101,53 +101,77 @@ fun VerifyPhonePrompt() {
 }
 
 /**
- * Un contatto sta verificando il mio numero (SPEC §14.1) e mancano i permessi per rispondere da
- * solo (versione libera): leggere le chiamate perse dello squillo e l'SMS col codice.
+ * Un contatto ha provato a verificare il mio numero e questo telefono non sapeva rispondere da
+ * solo (SPEC §14.1): si propone il filtro chiamate (squillo in silenzio, anche nella versione
+ * Play) e, nella versione libera, i permessi per registro chiamate e SMS.
  */
 @Composable
 fun VerifyPermissionPrompt() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val verify = io.github.mtmattia.rondine.verify.PhoneVerify
     val need by Repo.verifyNeedsPermission.collectAsState()
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+    val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         Repo.verifyNeedsPermission.value = false
     }
+    val role = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (verify.full && !verify.granted(context, verify.verifiedPermissions)) {
+            perms.launch(verify.verifiedPermissions)
+        } else {
+            Repo.verifyNeedsPermission.value = false
+        }
+    }
     if (!need) return
+    val screener = verify.screenerRequest(context)
     AlertDialog(
         onDismissRequest = { Repo.verifyNeedsPermission.value = false },
         title = { Text("Ti stanno verificando") },
         text = {
             Text(
-                "Un contatto sta verificando il tuo numero con uno squillo o un SMS. Per rispondere da " +
-                    "solo, Rondine deve poter vedere le chiamate perse e gli SMS di verifica: guarda solo " +
-                    "l'ora delle chiamate di questi minuti e gli SMS che contengono rondine:verifica/. " +
-                    "Niente esce dal telefono, tranne la risposta nella chat cifrata.",
+                "Un contatto vuole verificare il tuo numero con uno squillo. Per riceverlo in silenzio, " +
+                    "scegli Rondine come app di filtro chiamate: prende solo lo squillo di chi ti verifica, " +
+                    "nei 30 secondi dopo la sua richiesta, e lascia passare tutte le altre chiamate. " +
+                    "Stavolta gli abbiamo detto di usare un SMS.",
             )
         },
         confirmButton = {
             TextButton(onClick = {
-                ask.launch(io.github.mtmattia.rondine.verify.PhoneVerify.verifiedPermissions)
-            }) { Text("Consenti") }
+                when {
+                    screener != null -> role.launch(screener)
+                    verify.full -> perms.launch(verify.verifiedPermissions)
+                    else -> Repo.verifyNeedsPermission.value = false
+                }
+            }) { Text("Attiva") }
         },
         dismissButton = { TextButton(onClick = { Repo.verifyNeedsPermission.value = false }) { Text("Non ora") } },
     )
 }
 
 /**
- * Verifica del numero di un contatto (SPEC §14.1): squillo (versione libera) o SMS dalla mia SIM.
- * Il numero è quello in rubrica.
+ * Verifica del numero di un contatto (SPEC §14.1): uno squillo dal mio numero (versione libera)
+ * o un SMS dalla mia SIM. Il suo numero è quello in rubrica; lo squillo vuole anche il mio.
  */
 @Composable
-fun VerifyContactDialog(contactId: String, name: String, phone: String?, onDismiss: () -> Unit) {
+fun VerifyContactDialog(contactId: String, name: String, phone: String?, canRing: Boolean?, onDismiss: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val verify = io.github.mtmattia.rondine.verify.PhoneVerify
+    val profile by Repo.profile.collectAsState()
     var number by remember { mutableStateOf(phone ?: "") }
-    var method by remember { mutableStateOf(if (verify.full) "squillo" else "sms") }
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
-        if (res.values.all { it }) {
-            Repo.verifyContact(contactId, method, number.ifBlank { null })
-            onDismiss()
-        } else {
-            Repo.notice.value = "Senza i permessi la verifica non parte"
+    var mine by remember { mutableStateOf(profile?.phone ?: "") }
+    var method by remember { mutableStateOf(if (verify.canRing() && canRing != false) "squillo" else "sms") }
+    val scope = rememberCoroutineScope()
+    fun start() {
+        scope.launch {
+            try {
+                if (method == "squillo" && profile?.phone == null) Repo.client().setPhone(mine)
+                Repo.verifyContact(contactId, method, number)
+                onDismiss()
+            } catch (e: RondineException) {
+                Repo.notice.value = e.userMessage
+            }
         }
+    }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        if (res.values.all { it }) start() else Repo.notice.value = "Senza i permessi la verifica non parte"
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -155,8 +179,9 @@ fun VerifyContactDialog(contactId: String, name: String, phone: String?, onDismi
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Il tuo telefono chiama o scrive questo numero, e quello di $name risponde nella chat " +
-                        "cifrata. Se torna, questa chiave ha davvero la sua SIM. Il nodo non vede niente.",
+                    "Il tuo telefono fa uno squillo o manda un SMS a questo numero, e quello di $name " +
+                        "risponde nella chat cifrata. Se torna, questa chiave ha davvero la sua SIM. Il " +
+                        "nodo non vede niente.",
                     fontSize = 14.sp,
                 )
                 OutlinedTextField(
@@ -164,28 +189,34 @@ fun VerifyContactDialog(contactId: String, name: String, phone: String?, onDismi
                     label = { Text("Il suo numero") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                 )
-                if (verify.full) {
+                if (verify.canRing() && canRing != false) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(method == "squillo", { method = "squillo" })
-                        Text("Tre squilli (gratis, chiudo prima che risponda)", fontSize = 14.sp)
+                        Text("Uno squillo (gratis, chiudo prima che risponda)", fontSize = 14.sp)
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(method == "sms", { method = "sms" })
                     Text("Un SMS con un codice (dalla tua tariffa)", fontSize = 14.sp)
                 }
+                if (method == "squillo" && profile?.phone == null) {
+                    OutlinedTextField(
+                        mine, { mine = it }, Modifier.fillMaxWidth(),
+                        label = { Text("Il tuo numero") }, singleLine = true,
+                        supportingText = { Text("Lo squillo parte da qui: $name lo riconosce") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(enabled = number.isNotBlank(), onClick = {
-                val perms = verify.verifierPermissions(method)
-                if (verify.granted(context, perms)) {
-                    Repo.verifyContact(contactId, method, number)
-                    onDismiss()
-                } else {
-                    ask.launch(perms)
-                }
-            }) { Text("Verifica") }
+            TextButton(
+                enabled = number.isNotBlank() && (method != "squillo" || profile?.phone != null || mine.isNotBlank()),
+                onClick = {
+                    val perms = verify.verifierPermissions(method)
+                    if (verify.granted(context, perms)) start() else ask.launch(perms)
+                },
+            ) { Text("Verifica") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
     )

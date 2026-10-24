@@ -1,5 +1,7 @@
 package io.github.mtmattia.rondine.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Block
@@ -50,6 +52,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.PhoneCallback
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Notifications
@@ -288,7 +291,7 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
                 }
             }
             if (verifyPhone) {
-                VerifyContactDialog(contactId, c.name, c.phone) { verifyPhone = false }
+                VerifyContactDialog(contactId, c.name, c.phone, c.canRing) { verifyPhone = false }
             }
             if (!c.verified) {
                 Button(onClick = {
@@ -634,6 +637,22 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 ) {
                     maps = !maps
                     MapTiles.setEnabled(context, maps)
+                }
+                val screenerIntent = io.github.mtmattia.rondine.verify.PhoneVerify.screenerRequest(context)
+                var screener by remember { mutableStateOf(io.github.mtmattia.rondine.verify.PhoneVerify.isScreener(context)) }
+                val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+                    screener = io.github.mtmattia.rondine.verify.PhoneVerify.isScreener(context)
+                }
+                if (screenerIntent != null || screener) {
+                    SettingRow(
+                        Icons.Filled.PhoneCallback,
+                        "Verifica silenziosa del numero",
+                        if (screener) {
+                            "Attiva: lo squillo di chi ti verifica non suona; le altre chiamate passano come sempre"
+                        } else {
+                            "Tocca per scegliere Rondine come filtro chiamate: lo squillo di verifica arriva senza suonare"
+                        },
+                    ) { screenerIntent?.let { roleLauncher.launch(it) } }
                 }
                 var mesh by remember { mutableStateOf(p.mesh) }
                 SettingRow(

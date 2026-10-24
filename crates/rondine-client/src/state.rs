@@ -56,6 +56,9 @@ pub struct Contact {
     /// Numero che ho verificato io, con uno squillo o un SMS, per questa chiave (SPEC §14.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone_checked: Option<String>,
+    /// Sa ricevere uno squillo di verifica? `None` finché non si sa (SPEC §14.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_ring: Option<bool>,
 }
 
 /// Quanto è sicuro che la chiave di un contatto sia davvero sua (SPEC §10).

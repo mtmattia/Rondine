@@ -117,27 +117,47 @@ pub enum AppMessage {
         id: String,
         method: VerifyMethod,
     },
-    /// La prova dal telefono verificato: gli istanti delle chiamate perse (squillo) o il codice
-    /// arrivato per SMS (SPEC §14.1).
+    /// La prova dal telefono verificato (SPEC §14.1): le chiamate arrivate (squillo), il codice
+    /// arrivato per SMS, o `unable` se questo telefono non sa ricevere uno squillo di verifica.
     #[serde(rename = "verify_reply")]
     VerifyReply {
         v: u32,
         id: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        at: Vec<u64>,
+        calls: Vec<RingSeen>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         code: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        unable: bool,
     },
     /// Un tipo che questa versione non conosce, da una versione più nuova: si ignora (SPEC §7).
     #[serde(other)]
     Unknown,
 }
 
+/// Una chiamata arrivata durante una verifica (SPEC §14.1): quando, e l'impronta del numero che
+/// ha chiamato (non il numero).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct RingSeen {
+    pub at: u64,
+    pub caller: String,
+}
+
+/// Impronta del numero che chiama, legata alla verifica: `b64(blake3("rondine/v1/verify-caller"
+/// || id || numero E.164)[..16])`. Chi verifica la ricalcola dal suo numero.
+pub fn caller_print(id: &str, number_e164: &str) -> String {
+    let mut h = blake3::Hasher::new();
+    h.update(b"rondine/v1/verify-caller");
+    h.update(id.as_bytes());
+    h.update(number_e164.as_bytes());
+    crate::b64::encode(&h.finalize().as_bytes()[..16])
+}
+
 /// Come si verifica un numero tra amici (SPEC §14.1).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum VerifyMethod {
-    /// Due chiamate a istanti casuali, chiuse prima della risposta.
+    /// Uno squillo dalla SIM di chi verifica, chiuso prima della risposta.
     Ring,
     /// Un SMS con un codice dalla SIM di chi verifica.
     Sms,

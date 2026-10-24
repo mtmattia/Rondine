@@ -308,6 +308,13 @@ object Repo {
             try {
                 val plan = client().startVerify(contactId, method, number)
                 io.github.mtmattia.rondine.verify.PhoneVerify.run(app, plan) { verifyProgress.value = it }
+                // Senza risposta entro due minuti si smette di aspettare.
+                val waiting = verifyProgress.value
+                kotlinx.coroutines.delay(120_000)
+                if (verifyProgress.value == waiting && waiting != null) {
+                    verifyProgress.value = null
+                    notice.value = "Nessuna risposta dal suo telefono: riprova più tardi, o confrontate il codice di sicurezza."
+                }
             } catch (e: RondineException) {
                 verifyProgress.value = null
                 notice.value = "Verifica non partita: ${e.userMessage}"
@@ -327,26 +334,50 @@ object Repo {
 
     private var earlyVerifySms: Pair<String, Long>? = null
 
+    /** Quando è arrivata l'ultima richiesta di squillo non ancora usata dal filtro chiamate. */
+    @Volatile private var ringExpectedAt = 0L
+
+    /** Il filtro chiamate deve prendere questa chiamata? Sì una volta, nei 30 s dopo la richiesta. */
+    fun expectingRing(): Boolean {
+        val at = ringExpectedAt
+        if (at == 0L || System.currentTimeMillis() - at > 30_000L) return false
+        ringExpectedAt = 0L
+        return true
+    }
+
     private fun onVerify(
         requests: List<uniffi.rondine_ffi.VerifyRequestInfo>,
         checks: List<uniffi.rondine_ffi.PhoneCheckInfo>,
+        fallbacks: List<uniffi.rondine_ffi.VerifyFallbackInfo>,
     ) {
         val verify = io.github.mtmattia.rondine.verify.PhoneVerify
         for (r in requests) {
             val name = chats.value.firstOrNull { it.contact.id == r.contactId }?.contact?.name ?: "Un contatto"
-            if (verify.full && !verify.granted(app, verify.verifiedPermissions)) verifyNeedsPermission.value = true
-            if (!verify.full) notice.value = "$name sta verificando il tuo numero: quando arriva il suo SMS, tocca il link."
             when (r.method) {
-                "squillo" -> {
-                    val since = System.currentTimeMillis()
-                    scope.launch { verify.watchRings(app, r.id, since) }
+                "squillo" -> when {
+                    verify.isScreener(app) -> ringExpectedAt = System.currentTimeMillis()
+                    verify.canReceiveRing(app) -> {
+                        val since = System.currentTimeMillis()
+                        scope.launch { verify.watchRings(app, since) }
+                    }
+                    else -> {
+                        // Non so ricevere lo squillo: chi verifica passa all'SMS.
+                        scope.launch { try { client().answerUnable(r.id) } catch (_: RondineException) {} }
+                        verifyNeedsPermission.value = true
+                    }
                 }
-                "sms" -> earlyVerifySms?.let { (text, at) ->
-                    earlyVerifySms = null
-                    if (System.currentTimeMillis() - at < 15 * 60_000L) answerVerifySms(text)
+                "sms" -> {
+                    if (verify.full && !verify.granted(app, verify.verifiedPermissions)) verifyNeedsPermission.value = true
+                    if (!verify.full) notice.value = "$name sta verificando il tuo numero: quando arriva il suo SMS, tocca il link."
+                    earlyVerifySms?.let { (text, at) ->
+                        earlyVerifySms = null
+                        if (System.currentTimeMillis() - at < 15 * 60_000L) answerVerifySms(text)
+                    }
                 }
             }
         }
+        // Non sa ricevere lo squillo: si verifica con un SMS, da sé.
+        for (f in fallbacks) verifyContact(f.contactId, "sms", f.number)
         for (c in checks) {
             verifyProgress.value = null
             val name = chats.value.firstOrNull { it.contact.id == c.contactId }?.contact?.name ?: "il contatto"
@@ -381,7 +412,7 @@ object Repo {
                 refresh()
             }
             io.github.mtmattia.rondine.call.CallManager.onSignals(res.calls)
-            onVerify(res.verifyRequests, res.phoneChecks)
+            onVerify(res.verifyRequests, res.phoneChecks, res.verifyFallbacks)
             autoBackup()
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty()) {
                 val foreground = ProcessLifecycleOwner.get().lifecycle.currentState

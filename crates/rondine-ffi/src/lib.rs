@@ -95,6 +95,8 @@ pub struct ContactInfo {
     pub phone_verified_by: Option<String>,
     /// Numero che ho verificato io, con uno squillo o un SMS (SPEC §14.1).
     pub phone_checked: Option<String>,
+    /// Sa ricevere uno squillo di verifica? `None` finché non si sa.
+    pub can_ring: Option<bool>,
     /// Notifiche silenziate.
     pub muted: bool,
     /// Foto del profilo (percorso), se l'ha mandata.
@@ -480,6 +482,24 @@ pub struct SyncResult {
     pub verify_requests: Vec<VerifyRequestInfo>,
     /// Esiti delle verifiche del numero che ho avviato.
     pub phone_checks: Vec<PhoneCheckInfo>,
+    /// Contatti che non sanno ricevere uno squillo: verificarli con un SMS a questo numero.
+    pub verify_fallbacks: Vec<VerifyFallbackInfo>,
+}
+
+/// Il contatto non sa ricevere uno squillo di verifica (SPEC §14.1).
+#[derive(uniffi::Record, Clone)]
+pub struct VerifyFallbackInfo {
+    pub contact_id: String,
+    pub number: String,
+}
+
+/// Una chiamata arrivata mentre qualcuno verifica il mio numero.
+#[derive(uniffi::Record, Clone)]
+pub struct RingCall {
+    /// Secondi unix.
+    pub at: u64,
+    /// Il numero come lo mostra il telefono.
+    pub number: String,
 }
 
 /// Un contatto sta per verificare il mio numero (SPEC §14.1).
@@ -565,6 +585,7 @@ fn contact_info(c: &Contact) -> ContactInfo {
         previous_key: c.previous_key.map(|k| k.to_b64()),
         phone_verified_by: c.phone_verified_by.clone(),
         phone_checked: c.phone_checked.clone(),
+        can_ring: c.can_ring,
         muted: c.muted,
         trust: match c.trust() {
             Trust::InPerson => "persona",
@@ -1619,9 +1640,21 @@ impl Rondine {
             .collect())
     }
 
-    /// Risponde a uno squillo con gli istanti delle chiamate perse (secondi unix).
-    pub async fn answer_ring(&self, id: String, at: Vec<u64>) -> Result<()> {
-        self.run(move |c| Box::pin(async move { Ok(c.answer_ring(&id, &at).await?) }))
+    /// Risponde agli squilli di verifica in attesa con le chiamate arrivate. Quante risposte.
+    pub async fn answer_rings(&self, calls: Vec<RingCall>) -> Result<u32> {
+        let calls: Vec<(u64, String)> = calls.into_iter().map(|c| (c.at, c.number)).collect();
+        self.run(move |c| {
+            Box::pin(async move {
+                let n = c.answer_rings(&calls).await?;
+                Ok(u32::try_from(n).unwrap_or(u32::MAX))
+            })
+        })
+        .await
+    }
+
+    /// Questo telefono non sa ricevere uno squillo: chi verifica passa all'SMS.
+    pub async fn answer_unable(&self, id: String) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.answer_unable(&id).await?) }))
             .await
     }
 
@@ -1734,6 +1767,7 @@ impl Rondine {
             statuses_changed: false,
             verify_requests: Vec::new(),
             phone_checks: Vec::new(),
+            verify_fallbacks: Vec::new(),
         };
         for e in synced.groups {
             match e {
@@ -1799,6 +1833,12 @@ impl Rondine {
                     contact_id: contact.to_b64(),
                     method: method_name(method),
                 }),
+                Event::VerifyFallback { contact, number } => {
+                    out.verify_fallbacks.push(VerifyFallbackInfo {
+                        contact_id: contact.to_b64(),
+                        number,
+                    })
+                }
                 Event::PhoneChecked { contact, ok } => out.phone_checks.push(PhoneCheckInfo {
                     contact_id: contact.to_b64(),
                     ok,

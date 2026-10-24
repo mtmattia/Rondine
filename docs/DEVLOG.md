@@ -462,3 +462,8 @@ Una riga per modifica: data, cosa è cambiato.
   permessi per chiamare, chiudere, leggere chiamate perse e SMS (ricevitore degli SMS di
   verifica); versione Play con SMS dall'app dei messaggi e link `rondine:verifica/`. Test in
   `tests/verifica.rs`.
+- 2026-10-24 — Verifica con **uno squillo solo** (SPEC §14.1): la prova è l'impronta del numero
+  che chiama (legata alla verifica) più l'ora con il ritardo di rete, non più tre squilli a tempi
+  casuali. Chi è verificato lo riceve in silenzio se Rondine è il suo filtro chiamate (anche
+  versione Play), se no dal registro chiamate; senza nessuno dei due risponde `unable` e chi
+  verifica passa da sé all'SMS. L'attesa dell'esito finisce dopo 2 minuti.

@@ -223,6 +223,11 @@ pub enum Event {
         contact: PublicKey,
         ok: bool,
     },
+    /// Il contatto non sa ricevere uno squillo di verifica: si verifica con un SMS.
+    VerifyFallback {
+        contact: PublicKey,
+        number: String,
+    },
 }
 
 /// Per dove è passata una busta (SPEC §12.3).
@@ -1554,6 +1559,7 @@ impl Client {
                 previous_key: None,
                 chat_deleted: false,
                 phone_checked: None,
+                can_ring: None,
             });
         }
         self.note_key_change(&info.identity);
@@ -3578,6 +3584,7 @@ impl Client {
                     previous_key: None,
                     chat_deleted: false,
                     phone_checked: None,
+                    can_ring: None,
                 });
                 self.note_key_change(&from);
             }
@@ -3674,9 +3681,13 @@ impl Client {
             AppMessage::VerifyRequest { id, method, .. } => {
                 Ok(self.received_verify_request(sender, id, method))
             }
-            AppMessage::VerifyReply { id, at, code, .. } => {
-                Ok(self.received_verify_reply(sender, &id, &at, code.as_deref()))
-            }
+            AppMessage::VerifyReply {
+                id,
+                calls,
+                code,
+                unable,
+                ..
+            } => Ok(self.received_verify_reply(sender, &id, &calls, code.as_deref(), unable)),
             // Da una versione più nuova: non si sa cosa sia, si lascia perdere senza errori.
             AppMessage::Unknown => Ok(Vec::new()),
             AppMessage::Typing { active, ts, .. } => {

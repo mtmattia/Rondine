@@ -973,8 +973,8 @@ Obiettivo: chi gestisce un nodo non vede **chi scrive a chi**, **quanto** si scr
 di telefono**. Oggi (§6, §9, §13) vede la quantità e la dimensione dei messaggi depositati, il
 permesso di ogni mittente, gli IP e, verificando, il numero in chiaro.
 
-Ordine dei metodi per il numero, deciso con Mattia: **squillo**, poi **SMS tra amici**, poi **QR di
-persona**. Niente gateway SMS e niente registro dei numeri sul nodo.
+Ordine dei metodi per il numero, deciso con Mattia: **uno squillo**, poi **SMS tra amici**, poi **QR
+di persona**. Niente gateway SMS e niente registro dei numeri sul nodo.
 
 ### 14.1 Il numero lo verificano gli amici, non il nodo
 
@@ -999,33 +999,42 @@ dalla chiave vera, e la chiave falsa non passa mai la prova. Resta solo chi ha i
 (furto o duplicato), come per ogni verifica via telefono.
 
 Messaggi nella chat (MLS, depositi silenziosi):
-- chi verifica: `{"type": "verify_request", "v": 1, "id", "method": "ring" | "sms"}`. Non dice
-  quando partono le chiamate né il codice;
-- chi è verificato: `{"type": "verify_reply", "v": 1, "id", "at": [secondi unix…]}` (squillo) o
-  `{"type": "verify_reply", "v": 1, "id", "code": "12345678"}` (SMS).
+- chi verifica: `{"type": "verify_request", "v": 1, "id", "method": "ring" | "sms"}`;
+- chi è verificato: `{"type": "verify_reply", "v": 1, "id", "calls": [{"at", "caller"}]}`
+  (squillo), `{"type": "verify_reply", "v": 1, "id", "code": "12345678"}` (SMS), oppure
+  `{"type": "verify_reply", "v": 1, "id", "unable": true}` se non sa ricevere uno squillo.
 
-Chi verifica accetta una risposta solo dalla chiave che stava verificando, una volta sola, entro
-15 minuti. Le richieste ricevute valgono 15 minuti, al massimo 20 alla volta.
+`caller` è l'**impronta** del numero che ha chiamato, legata alla verifica:
+`b64(blake3("rondine/v1/verify-caller" || id || numero E.164)[..16])`. Chi verifica accetta una
+risposta solo dalla chiave che stava verificando, una volta sola, entro 15 minuti; le richieste
+ricevute valgono 15 minuti, al massimo 20 alla volta.
 
-1. **Squillo** (metodo principale; gratis e automatico).
-   - Chi verifica chiama il numero **3 volte**, chiudendo dopo 4 s: la prima dopo 3–60 s a caso,
-     le altre 10–60 s a caso dopo la precedente. Annota l'istante di partenza di ogni chiamata.
-   - Il telefono chiamato guarda nel registro le chiamate in arrivo (perse o rifiutate) dei 3
-     minuti dopo la richiesta e risponde con i loro istanti (al massimo 5).
-   - Chi verifica accetta se c'è un istante che arriva dopo la sua prima chiamata con un ritardo
-     tra −2 e +10 s (la rete mobile impiega qualche secondo a far squillare, e gli orologi
-     differiscono di poco) e se gli altri tornano alla **stessa distanza dal primo** entro 2 s.
-     Indovinarli a caso riesce circa una volta su 1500.
-   - Serve il permesso di chiamare (e di chiudere la chiamata) a chi verifica, e di leggere il
-     registro chiamate a chi è verificato: ci sono nella versione libera (F-Droid, GitHub). Dove
-     mancano (versione Play, iPhone) si usa l'SMS.
-2. **SMS tra amici** (alternativa).
+1. **Squillo** (metodo principale; gratis, un tocco).
+   - Chi verifica deve avere il **suo** numero nel profilo (la prova è che la chiamata arrivi da
+     lì). Manda la richiesta e dopo 1 s chiama il numero, chiudendo dopo 4 s; annota l'istante.
+   - Il telefono chiamato risponde con le chiamate arrivate (al massimo 5): ora e impronta del
+     numero chiamante, mai il numero.
+     - **Filtro chiamate** (Android 10+, anche versione Play): se Rondine è l'app di filtro
+       chiamate, nei 30 s dopo la richiesta la prima chiamata in arrivo viene rifiutata **prima
+       che squilli**, senza notifica né chiamata persa, e risponde subito. Le altre chiamate
+       passano come sempre.
+     - **Registro chiamate** (versione libera, con il permesso): guarda le chiamate arrivate da
+       10 s prima a 60 s dopo la richiesta.
+     - **Niente dei due** (iPhone, versione Play senza filtro): risponde `unable` e chi verifica
+       passa da sé all'SMS, ricordandoselo per la volta dopo.
+   - Chi verifica accetta se una chiamata ha l'impronta del suo numero ed è arrivata tra −2 e
+     +10 s dopo la sua (la rete mobile impiega qualche secondo a far squillare). Chi si mette nel
+     mezzo con una chiave falsa non riceve la chiamata: dovrebbe indovinare il numero di chi
+     verifica. Limite: chi conosce quel numero e si mette nel mezzo proprio in quei secondi.
+   - Permessi: chiamare e chiudere la chiamata a chi verifica (versione libera).
+2. **SMS tra amici** (alternativa, e per iPhone).
    - Chi verifica sceglie un codice a caso di 8 cifre e lo manda **dalla sua SIM** al numero:
      "Rondine: <nome> ti chiede di confermare il tuo numero. Codice 12345678
      rondine:verifica/12345678". Nella versione libera l'app lo manda da sé; altrimenti apre
      l'app dei messaggi con il testo già scritto.
    - Il telefono che lo riceve lo riconosce (versione libera: legge gli SMS in arrivo; altrimenti
-     si tocca il link) e manda il codice nella chat a chi ha chiesto una verifica via SMS.
+     si tocca il link) e manda il codice nella chat a chi ha chiesto una verifica via SMS. Se
+     l'SMS arriva prima della richiesta, lo tiene da parte per 15 minuti.
 3. **QR di persona** (§10): la garanzia più forte, senza telefono né operatore.
 
 Esito: il contatto passa al grado **"numero verificato da te"** (§10), per quella chiave e quel

@@ -195,8 +195,8 @@ enum Cmd {
     Sicurezza { contatto: String },
     /// Segna un contatto come verificato.
     Verifica { contatto: String },
-    /// Verifica il numero di un contatto (SPEC §14.1): con due squilli (predefinito) o con un SMS
-    /// dalla tua SIM. Stampa cosa fare; il numero è quello in rubrica.
+    /// Verifica il numero di un contatto (SPEC §14.1): con uno squillo dal tuo numero
+    /// (predefinito) o con un SMS dalla tua SIM. Stampa cosa fare; il numero è quello in rubrica.
     VerificaNumero {
         contatto: String,
         #[arg(long)]
@@ -208,8 +208,11 @@ enum Cmd {
     VerificaSquillato { id: String, istante: Option<u64> },
     /// Richieste di verifica del tuo numero ancora aperte.
     VerificaRichieste,
-    /// Risponde a uno squillo con gli istanti delle chiamate perse (secondi unix).
-    VerificaRispondi { id: String, istanti: Vec<u64> },
+    /// Risponde agli squilli di verifica in attesa con le chiamate arrivate, scritte come
+    /// `istante:numero` (secondi unix e numero come lo mostra il telefono).
+    VerificaSquilli { chiamate: Vec<String> },
+    /// Questo telefono non sa ricevere uno squillo: chi verifica passa all'SMS.
+    VerificaNonPosso { id: String },
     /// Un SMS di verifica arrivato (il testo intero, o solo il codice).
     VerificaSms { testo: String },
     /// Blocca un contatto.
@@ -629,14 +632,21 @@ fn print_events(events: &[Event], client: &Client) {
                 let who = contact_name(client, contact);
                 match method {
                     VerifyMethod::Ring => println!(
-                        "☏ {who} sta per verificare il tuo numero con due squilli: \
-                         `rondine verifica-rispondi {id} <istante> <istante>`"
+                        "☏ {who} sta per verificare il tuo numero con uno squillo: \
+                         `rondine verifica-squilli <istante>:<numero>` (richiesta {id})"
                     ),
                     VerifyMethod::Sms => println!(
                         "☏ {who} sta per verificare il tuo numero con un SMS: \
                          `rondine verifica-sms <testo o codice>`"
                     ),
                 }
+            }
+            Event::VerifyFallback { contact, number } => {
+                let who = contact_name(client, contact);
+                println!(
+                    "☏ {who} non può ricevere uno squillo: `rondine verifica-numero {} --sms --numero {number}`",
+                    contact.short()
+                );
             }
             Event::PhoneChecked { contact, ok } => {
                 let who = contact_name(client, contact);
@@ -1438,12 +1448,9 @@ async fn main() -> anyhow::Result<()> {
             match &p.sms_text {
                 Some(text) => println!("Manda dalla tua SIM a {}:\n{text}", p.number),
                 None => println!(
-                    "Chiama {} due volte, dopo {} s e dopo {} s da adesso, chiudendo prima che \
-                     risponda; ogni volta `rondine verifica-squillato {}`.",
-                    p.number,
-                    p.delays.first().copied().unwrap_or_default(),
-                    p.delays.get(1).copied().unwrap_or_default(),
-                    p.id
+                    "Fai uno squillo a {} (chiudi prima che risponda) e annotalo con \
+                     `rondine verifica-squillato {}`.",
+                    p.number, p.id
                 ),
             }
         }
@@ -1465,9 +1472,20 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}  {}  {how}", r.id, contact_name(&c, &r.from));
             }
         }
-        Cmd::VerificaRispondi { id, istanti } => {
-            c.answer_ring(&id, &istanti).await?;
-            println!("Risposta mandata.");
+        Cmd::VerificaSquilli { chiamate } => {
+            let mut calls = Vec::new();
+            for ch in chiamate {
+                let (at, number) = ch
+                    .split_once(':')
+                    .ok_or_else(|| anyhow::anyhow!("scrivi istante:numero, non `{ch}`"))?;
+                calls.push((at.parse::<u64>()?, number.to_string()));
+            }
+            let n = c.answer_rings(&calls).await?;
+            println!("Risposta mandata a {n} contatti.");
+        }
+        Cmd::VerificaNonPosso { id } => {
+            c.answer_unable(&id).await?;
+            println!("Detto: verifica con un SMS.");
         }
         Cmd::VerificaSms { testo } => {
             let n = if testo.trim().chars().all(|ch| ch.is_ascii_digit()) {

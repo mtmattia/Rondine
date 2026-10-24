@@ -168,5 +168,16 @@
                 <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
             </intent-filter>
         </service>
+        <!-- Filtro chiamate (SPEC §14.1): prende in silenzio solo lo squillo di chi verifica il
+             mio numero, nei 30 s dopo la sua richiesta. Si attiva scegliendo Rondine come app di
+             filtro chiamate. -->
+        <service
+            android:name=".verify.RingScreening"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

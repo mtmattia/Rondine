@@ -82,13 +82,6 @@ impl Contact {
             Trust::None
         }
     }
-
-    /// Ha il nome utente o il numero di un contatto che conoscevo con un'altra chiave, e niente
-    /// lo conferma (né SMS né codice di sicurezza): può essere chi ha preso quel numero. L'app
-    /// lo mostra come chat a parte, "(!) nome" (SPEC §10).
-    pub fn flagged(&self) -> bool {
-        self.previous_key.is_some() && self.trust() == Trust::None
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

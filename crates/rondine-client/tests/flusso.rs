@@ -2416,7 +2416,7 @@ async fn chiave_nuova_con_numero_verificato_continua_la_stessa_chat() -> R {
         .ok_or("manca il contatto")?;
     assert_eq!(c.previous_key, Some(mattia.identity()));
     assert!(c.favorite);
-    assert!(!c.flagged());
+    assert_ne!(c.trust(), Trust::None);
 
     // Una sola chat, con i messaggi di prima.
     let chats = silvia.chats();
@@ -2432,98 +2432,76 @@ async fn chiave_nuova_con_numero_verificato_continua_la_stessa_chat() -> R {
     Ok(())
 }
 
-/// Chiave nuova che niente conferma (né SMS né codice di sicurezza), per esempio chi ha preso il
-/// numero o il nome di un amico: chat a parte, segnalata "(!)", e la chat vera resta com'è.
+/// Chiave nuova che niente conferma (qui: il nome utente passato a un'altra chiave): resta una
+/// chat sola, sulla chiave nuova, con l'avviso "chiave cambiata"; ciò che la vecchia non aveva
+/// ricevuto non riparte da solo finché la chiave nuova non è verificata (SPEC §10).
 #[tokio::test]
-async fn chiave_nuova_senza_verifica_e_una_chat_a_parte() -> R {
-    let node = start_node().await?;
+async fn chiave_nuova_senza_verifica_una_chat_sola_con_avviso() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let host = rondine_core::username::node_host(&node)?;
     let tmp = TempDir::new()?;
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
-    mattia.set_phone("3401112233")?;
+    mattia.claim_username("mattia").await?;
     let mut silvia = profile(&tmp, "Silvia", &node).await?;
-    silvia.set_phone("3402223344")?;
-    mattia.scan_address_book(&["3402223344".into()]).await?;
-    silvia.scan_address_book(&["3401112233".into()]).await?;
-    let vero = mattia.identity();
+    let vero = silvia.add(&format!("mattia@{host}")).await?.identity;
     silvia.send_text(&vero, "ci sei?").await?;
 
-    // Qualcuno con il numero di Mattia, senza SMS: pubblica in rubrica dopo di lui.
-    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    let mut altro = profile(&tmp, "Mattia3", &node).await?;
-    altro.set_phone("3401112233")?;
-    altro.scan_address_book(&["3402223344".into()]).await?;
-    silvia.scan_address_book(&["3401112233".into()]).await?;
+    // Il nome scade e lo prende un'altra chiave.
+    state.set_name_ttl(1);
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    let mut nuovo = profile(&tmp, "Mattia2", &node).await?;
+    nuovo.claim_username("mattia").await?;
+    let c = silvia.add(&format!("mattia@{host}")).await?;
 
-    assert_eq!(silvia.chats().len(), 2);
-    let sospetto = silvia
-        .contacts()
-        .iter()
-        .find(|c| c.identity == altro.identity())
+    // Una chat sola, sulla chiave nuova, non verificata e con la chiave vecchia ricordata.
+    assert_eq!(silvia.chats().len(), 1);
+    assert_eq!(c.previous_key, Some(vero));
+    assert_eq!(c.trust(), Trust::None);
+    let msgs: Vec<_> = silvia
+        .messages_with(&nuovo.identity())
+        .into_iter()
         .cloned()
-        .ok_or("manca il contatto")?;
-    assert_eq!(sospetto.previous_key, Some(vero));
-    assert!(sospetto.flagged());
-    assert!(silvia.messages_with(&altro.identity()).is_empty());
-    // La chat vera non si tocca: il messaggio resta a Mattia.
-    let m = &silvia.messages_with(&vero)[0];
-    assert_eq!(m.body, "ci sei?");
-    assert_ne!(m.status, Delivery::Failed);
-    assert!(texts(&altro.sync().await?).is_empty());
+        .collect();
+    assert_eq!(msgs.len(), 1);
+    // Il messaggio rimasto a metà non va da solo a una chiave non verificata.
+    assert_eq!(msgs[0].status, Delivery::Failed);
+    silvia.sync().await?;
+    assert!(texts(&nuovo.sync().await?).is_empty());
+    // Toccando Riprova si manda alla chiave nuova.
+    silvia.retry_message(&msgs[0].id).await?;
+    assert_eq!(texts(&nuovo.sync().await?), ["ci sei?"]);
     Ok(())
 }
 
-/// La chat a parte si unisce più tardi, se la chiave nuova si dimostra vera: codice di sicurezza
-/// confrontato di persona, o numero verificato via SMS.
+/// Dopo il cambio di chiave, la verifica (di persona) toglie l'avviso e fa ripartire da sé ciò
+/// che era rimasto a metà.
 #[tokio::test]
-async fn chat_a_parte_si_unisce_dopo_la_verifica() -> R {
+async fn chiave_cambiata_verificata_riparte_da_sola() -> R {
     let (node, state) = start_node_with_state().await?;
+    state.set_name_ttl(1);
+    let host = rondine_core::username::node_host(&node)?;
     let tmp = TempDir::new()?;
+    let mut vecchio = profile(&tmp, "vecchio", &node).await?;
+    vecchio.claim_username("mattia").await?;
     let mut silvia = profile(&tmp, "Silvia", &node).await?;
-    silvia.set_phone("3402223344")?;
-    for (i, by_sms) in [(1, false), (2, true)] {
-        let number = format!("34011122{i:02}");
-        let mut vecchio = profile(&tmp, &format!("vecchio{i}"), &node).await?;
-        vecchio.set_phone(&number)?;
-        vecchio.scan_address_book(&["3402223344".into()]).await?;
-        silvia
-            .scan_address_book(std::slice::from_ref(&number))
-            .await?;
-        let old = vecchio.identity();
-        silvia.send_text(&old, "ci sei?").await?;
+    let old = silvia.add(&format!("mattia@{host}")).await?.identity;
+    silvia.send_text(&old, "ci sei?").await?;
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    let mut nuovo = profile(&tmp, "nuovo", &node).await?;
+    nuovo.claim_username("mattia").await?;
+    silvia.add(&format!("mattia@{host}")).await?;
+    assert!(silvia.contacts().iter().all(|c| c.identity != old));
 
-        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-        let mut nuovo = profile(&tmp, &format!("nuovo{i}"), &node).await?;
-        nuovo.set_phone(&number)?;
-        nuovo.scan_address_book(&["3402223344".into()]).await?;
-        silvia
-            .scan_address_book(std::slice::from_ref(&number))
-            .await?;
-        assert!(!silvia.messages_with(&old).is_empty(), "ancora a parte");
-
-        if by_sms {
-            // Verifica il numero: la prossima ricerca in rubrica lo trova confermato.
-            verify_phone(&mut nuovo, &state, &number).await?;
-            silvia
-                .scan_address_book(std::slice::from_ref(&number))
-                .await?;
-        } else {
-            silvia.mark_verified(&nuovo.identity())?;
-        }
-        assert!(silvia.messages_with(&old).is_empty(), "{i}: chat non unita");
-        assert!(silvia.contacts().iter().all(|c| c.identity != old));
-        let msgs = silvia.messages_with(&nuovo.identity());
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0].body, "ci sei?");
-        if by_sms {
-            assert_eq!(texts(&nuovo.sync().await?), ["ci sei?"]);
-        }
-    }
+    silvia.mark_verified(&nuovo.identity())?;
+    silvia.sync().await?;
+    assert_eq!(texts(&nuovo.sync().await?), ["ci sei?"]);
     Ok(())
 }
 
-/// Un contatto verificato di persona non si sostituisce da solo: restano due chat e l'avviso.
+/// Anche un contatto verificato di persona resta una chat sola, ma la chiave nuova parte non
+/// verificata: l'avviso chiede di rifare la verifica.
 #[tokio::test]
-async fn contatto_verificato_non_si_sostituisce() -> R {
+async fn contatto_verificato_con_chiave_nuova_va_riverificato() -> R {
     let (node, state) = start_node_with_state().await?;
     let host = rondine_core::username::node_host(&node)?;
     let tmp = TempDir::new()?;
@@ -2539,7 +2517,8 @@ async fn contatto_verificato_non_si_sostituisce() -> R {
     nuovo.claim_username("mattia").await?;
     let c = silvia.add(&format!("mattia@{host}")).await?;
     assert_eq!(c.previous_key, Some(mattia.identity()));
-    assert_eq!(silvia.chats().len(), 2);
+    assert!(!c.verified);
+    assert_eq!(silvia.chats().len(), 1);
     Ok(())
 }
 

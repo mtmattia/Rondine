@@ -2127,10 +2127,9 @@ impl Client {
     }
 
     /// Un contatto nuovo ha lo stesso nome utente o numero di un altro con un'altra chiave?
-    /// Allora il codice di sicurezza è cambiato: lo si ricorda per avvisare. La chat di prima
-    /// continua con la chiave nuova solo se questa è confermata (numero verificato via SMS, o
-    /// codice confrontato di persona, l'unico che vale anche contro una vecchia chiave verificata
-    /// di persona); altrimenti resta una chat a parte, segnalata, finché non lo diventa (SPEC §10).
+    /// Allora la chiave è cambiata (di solito: app reinstallata senza backup). Come su WhatsApp
+    /// resta una chat sola, che passa alla chiave più recente; l'app avvisa "chiave cambiata:
+    /// verifica la chat" finché la chiave nuova non è verificata (SPEC §10).
     pub(crate) fn note_key_change(&mut self, id: &PublicKey) {
         let Some(new) = self.state.contacts.iter().find(|c| &c.identity == id) else {
             return;
@@ -2138,7 +2137,6 @@ impl Client {
         let (username, phone) = (new.username.clone(), new.phone.clone());
         let issued = |c: &Contact| verify_card(&c.card).map(|i| i.issued_at).unwrap_or(0);
         let new_issued = issued(new);
-        let (proven, in_person) = (new.trust() != Trust::None, new.verified);
         let Some(old) = self
             .state
             .contacts
@@ -2156,18 +2154,27 @@ impl Client {
             c.previous_key = Some(old.identity);
         }
         // Solo verso la chiave più recente: un messaggio tardivo della vecchia non torna indietro.
-        if proven && (!old.verified || in_person) && new_issued >= issued(&old) {
+        if new_issued >= issued(&old) {
             self.merge_contact(&old, id);
         }
     }
 
-    /// Rimanda alla chiave nuova i messaggi che la vecchia non aveva ricevuto (SPEC §10).
+    /// Rimanda alla chiave nuova i messaggi che la vecchia non aveva ricevuto, appena la chiave
+    /// nuova è verificata (SPEC §10): prima restano "non inviati", con Riprova.
     pub(crate) async fn resend_after_key_change(&mut self) {
+        let verified: Vec<PublicKey> = self
+            .state
+            .contacts
+            .iter()
+            .filter(|c| c.trust() != Trust::None)
+            .map(|c| c.identity)
+            .collect();
         let ids: Vec<String> = self
             .state
             .messages
             .iter()
             .filter(|m| m.status == Delivery::Failed && m.error.as_deref() == Some(KEY_CHANGED))
+            .filter(|m| verified.contains(&m.contact))
             .filter(|m| m.attachment.is_none() && m.location.is_none())
             .map(|m| m.id.clone())
             .collect();

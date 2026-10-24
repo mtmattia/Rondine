@@ -663,19 +663,15 @@ che quel nodo ha dato: finché non si confronta il numero di sicurezza l'app lo 
 nuovo ha lo stesso nome utente o numero di un contatto già noto con un'altra chiave, il client
 ricorda la chiave vecchia (`previous_key`) e l'app avvisa che il codice di sicurezza è cambiato,
 come quando qualcuno reinstalla l'app, o come farebbe un nodo che prova a mettersi in mezzo.
-Se la chiave nuova ha il numero verificato via SMS (§13), il biglietto è più recente di quello
-vecchio e la chiave vecchia non era verificata di persona, non nasce una seconda chat: la chat di prima (messaggi, chiamate, messaggi
-programmati, preferito, silenzioso, bloccato) passa alla chiave nuova e il contatto vecchio si
-toglie. I messaggi che la chiave vecchia non ha confermato (in coda o con una spunta sola) non li
-leggerà più nessuno: le buste in coda per la chiave vecchia si scartano e i messaggi di testo
-ripartono da soli verso la nuova (allegati e posizioni restano "non inviati", con Riprova).
-Se invece niente conferma la chiave nuova (né SMS né codice di sicurezza), per esempio perché
-qualcuno ha preso il numero o il nome di un amico, resta una **chat a parte**, segnalata: l'app e
-la CLI mostrano "(!) nome" e un avviso, e la chat con la chiave vecchia non si tocca. Le due chat
-si uniscono più tardi, appena la chiave nuova si conferma: numero verificato via SMS (alla
-prossima ricerca in rubrica) o codice di sicurezza confrontato di persona, che vale anche quando
-la chiave vecchia era a sua volta verificata di persona. Una chiave verificata di persona non si sostituisce da
-sola: restano due chat e l'avviso.
+Come su WhatsApp resta **una chat sola**: se il biglietto nuovo è più recente di quello vecchio,
+la chat di prima (messaggi, chiamate, messaggi programmati, preferito, silenzioso, bloccato) passa
+alla chiave nuova e il contatto vecchio si toglie. La chiave nuova parte **non verificata**, anche
+se la vecchia era verificata di persona: l'app mostra "La chiave di <nome> è cambiata: verifica la
+chat per sicurezza" con il pulsante per verificarla (squillo o SMS, §14.1, o codice di sicurezza),
+e l'avviso sparisce quando la verifica riesce. I messaggi che la chiave vecchia non ha confermato
+(in coda o con una spunta sola) non li leggerà più nessuno: le buste in coda per la chiave vecchia
+si scartano e i messaggi restano "non inviati"; quelli di testo ripartono da soli verso la chiave
+nuova appena è verificata (prima, con Riprova). Allegati e posizioni restano "non inviati".
 
 **Gradi di fiducia.** Ogni contatto ne ha uno, mostrato dall'app (icona e testo) e dalla CLI:
 1. **verificato di persona**: codice di sicurezza confrontato (QR o 60 cifre). Non ci si fida di

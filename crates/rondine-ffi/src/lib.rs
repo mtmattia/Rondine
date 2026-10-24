@@ -562,12 +562,7 @@ fn contact_info(c: &Contact) -> ContactInfo {
     ContactInfo {
         id: c.identity.to_b64(),
         short_id: c.identity.short(),
-        // Stesso nome o numero di un contatto noto, con una chiave che niente conferma.
-        name: if c.flagged() {
-            format!("(!) {}", c.display_name)
-        } else {
-            c.display_name.clone()
-        },
+        name: c.display_name.clone(),
         username: c.username.clone(),
         phone: c.phone.clone(),
         verified: c.verified,

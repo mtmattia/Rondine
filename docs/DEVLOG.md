@@ -468,3 +468,9 @@ Una riga per modifica: data, cosa è cambiato.
   versione Play), se no dal registro chiamate; senza nessuno dei due risponde `unable` e chi
   verifica passa da sé all'SMS. L'attesa dell'esito finisce dopo 2 minuti.
 - 2026-10-24 — Versione 0.1.16 (versionCode 17).
+- 2026-10-24 — Chiave cambiata: sempre una chat sola (niente più chat a parte "(!)"), con
+  l'avviso "La chiave di X è cambiata: verifica la chat per sicurezza" finché non è verificata;
+  i messaggi rimasti a metà ripartono da soli solo dopo la verifica. Test
+  `chiave_nuova_senza_verifica_una_chat_sola_con_avviso`,
+  `chiave_cambiata_verificata_riparte_da_sola`,
+  `contatto_verificato_con_chiave_nuova_va_riverificato`.

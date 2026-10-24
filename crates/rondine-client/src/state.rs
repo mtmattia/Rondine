@@ -59,6 +59,12 @@ pub struct Contact {
     /// Sa ricevere uno squillo di verifica? `None` finché non si sa (SPEC §14.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub can_ring: Option<bool>,
+    /// Usa il nodo senza memoria (avviso e tubo, SPEC §14.2): l'ha detto con `caps`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tube: bool,
+    /// Gli ho già detto che lo uso anch'io.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub caps_sent: bool,
 }
 
 /// Quanto è sicuro che la chiave di un contatto sia davvero sua (SPEC §10).
@@ -125,6 +131,8 @@ pub enum Via {
     Direct,
     /// Depositato nel nodo.
     Node,
+    /// Passato nel tubo del nodo, in tempo reale e senza essere conservato (SPEC §14.3).
+    Tube,
 }
 
 /// Posizione di un messaggio, fissa o in tempo reale (SPEC §7.6).
@@ -351,6 +359,21 @@ pub struct State {
     /// Richieste di verifica del mio numero arrivate dai contatti (SPEC §14.1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verify_requests: Vec<crate::verify::VerifyRequest>,
+    /// Nodo senza memoria (SPEC §14.2): ai contatti che lo usano anche loro arrivano solo
+    /// avvisi, e i messaggi passano in diretto o nel tubo. L'app lo accende.
+    #[serde(default)]
+    pub memoryless: bool,
+    /// Gettoni anonimi per bussare ai contatti (SPEC §14.4).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tokens: Vec<StoredToken>,
+}
+
+/// Un gettone per depositare nella casella `inbox` del nodo `node`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct StoredToken {
+    pub node: String,
+    pub inbox: String,
+    pub token: rondine_core::token::Token,
 }
 
 /// Una chiamata nel registro (SPEC §7.9).

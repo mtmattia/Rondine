@@ -64,6 +64,11 @@ impl Inbox {
     pub(crate) fn len(&self) -> usize {
         self.queue.lock().map(|v| v.len()).unwrap_or(0)
     }
+
+    /// Sveglia chi aspetta senza aggiungere buste (per esempio: il tubo è pronto).
+    pub(crate) fn poke(&self) {
+        self.notify.notify_one();
+    }
 }
 
 /// Aspetta le buste dirette senza tenere occupato il client (per l'app: appena ne arriva una,

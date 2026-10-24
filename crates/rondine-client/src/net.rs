@@ -165,6 +165,33 @@ impl Net {
         self.call_with(method, base, path, body, &[]).await
     }
 
+    /// Un pacchetto nel tubo `id` del nodo (SPEC §14.3).
+    pub async fn tube_put(&self, base: &str, id: &str, frame: Vec<u8>) -> Result<()> {
+        let req = self
+            .http
+            .put(Self::url(base, &format!("/v1/tube/{id}")))
+            .header("content-type", "application/octet-stream")
+            .body(frame);
+        self.send(req).await?;
+        Ok(())
+    }
+
+    /// I pacchetti del tubo `id`, aspettando fino a `wait` secondi che ne arrivi uno.
+    pub async fn tube_get(&self, base: &str, id: &str, wait: u64) -> Result<Vec<Vec<u8>>> {
+        #[derive(serde::Deserialize)]
+        struct Frames {
+            frames: Vec<String>,
+        }
+        let req = self
+            .http
+            .get(Self::url(base, &format!("/v1/tube/{id}?wait={wait}")));
+        let f: Frames = parse(&self.send(req).await?)?;
+        f.frames
+            .iter()
+            .map(|b| rondine_core::b64::decode(b).map_err(Into::into))
+            .collect()
+    }
+
     /// Come [`Net::call`], con intestazioni in più.
     pub async fn call_with<B: Serialize>(
         &self,

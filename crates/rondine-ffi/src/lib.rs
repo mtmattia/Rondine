@@ -129,7 +129,7 @@ pub struct Message {
     pub error: Option<String>,
     /// Consegnato senza sigillo (SPEC §6.3): il nodo del contatto ha visto il mio IP.
     pub unsealed: bool,
-    /// Da dove è passato (SPEC §14.5): "diretto", "nodo" o "" se non si sa.
+    /// Da dove è passato (SPEC §14.5): "diretto", "nodo", "tubo" o "" se non si sa.
     pub via: String,
 }
 
@@ -637,6 +637,7 @@ fn message(m: &ChatMessage) -> Message {
         via: match m.via {
             Some(Via::Direct) => "diretto",
             Some(Via::Node) => "nodo",
+            Some(Via::Tube) => "tubo",
             None => "",
         }
         .into(),
@@ -1662,6 +1663,11 @@ impl Rondine {
             })
         })
         .await
+    }
+
+    /// Accende o spegne il nodo senza memoria (SPEC §14.2): l'app lo accende all'avvio.
+    pub async fn set_memoryless(&self, on: bool) -> Result<()> {
+        Ok(self.with(move |c| c.set_memoryless(on)).await?)
     }
 
     /// Accende o spegne la mesh tra amici (SPEC §12.5).

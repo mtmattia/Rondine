@@ -5,6 +5,7 @@ mod files;
 mod phone;
 mod push;
 mod store;
+mod tube;
 mod web;
 
 use std::collections::HashMap;
@@ -127,6 +128,9 @@ struct Inner {
     relay_targets: Mutex<HashMap<String, (bool, u64)>>,
     deposits_direct: std::sync::atomic::AtomicU64,
     deposits_sealed: std::sync::atomic::AtomicU64,
+    deposits_token: std::sync::atomic::AtomicU64,
+    /// Tubi (SPEC §14.3): solo in memoria.
+    tubes: tube::Tubes,
 }
 
 /// Quanti depositi sono arrivati diretti e quanti sigillati (per i test, SPEC §6.3).
@@ -134,6 +138,8 @@ struct Inner {
 pub struct DepositStats {
     pub direct: u64,
     pub sealed: u64,
+    /// Pagati con un gettone anonimo invece che col permesso (SPEC §14.4).
+    pub with_token: u64,
 }
 
 /// Dopo quanto un nome di chi non usa più il nodo torna libero (SPEC §3.2).
@@ -164,6 +170,8 @@ impl AppState {
             relay_targets: Mutex::new(HashMap::new()),
             deposits_direct: std::sync::atomic::AtomicU64::new(0),
             deposits_sealed: std::sync::atomic::AtomicU64::new(0),
+            deposits_token: std::sync::atomic::AtomicU64::new(0),
+            tubes: tube::Tubes::default(),
             public_url: cfg.public_url.trim_end_matches('/').to_string(),
             host,
             node: cfg.node_key,
@@ -263,7 +271,17 @@ impl AppState {
         DepositStats {
             direct: self.0.deposits_direct.load(Relaxed),
             sealed: self.0.deposits_sealed.load(Relaxed),
+            with_token: self.0.deposits_token.load(Relaxed),
         }
+    }
+
+    /// Dimensioni delle buste in attesa in una casella (per i test, SPEC §14.2).
+    pub fn queued_sizes(&self, inbox: &str) -> Vec<usize> {
+        self.db()
+            .ok()
+            .and_then(|db| db.messages(inbox, 1000, now()).ok())
+            .map(|v| v.iter().map(|m| m.blob.len()).collect())
+            .unwrap_or_default()
     }
 
     /// La destinazione è un nodo Rondine con il sigillo? Ricordato per un'ora.
@@ -418,6 +436,8 @@ pub fn router(state: AppState) -> Router {
             get(files::fetch).delete(files::delete),
         )
         .route("/v1/inboxes/{inbox}/seen", get(inbox_seen))
+        .route("/v1/inboxes/{inbox}/tokens", post(issue_tokens))
+        .route("/v1/tube/{id}", put(tube::put).get(tube::get))
         .route("/v1/inboxes/{inbox}/keypackages", post(upload_keypackages))
         .route("/v1/inboxes/{inbox}/turn", get(turn_credentials))
         .route(
@@ -749,6 +769,51 @@ impl AppState {
     }
 }
 
+impl AppState {
+    /// Chiave dei gettoni anonimi di un'epoca (SPEC §14.4), dal seme del nodo.
+    fn token_key(&self, epoch: u64) -> ApiResult<rondine_core::token::TokenKey> {
+        rondine_core::token::TokenKey::for_epoch(&self.0.node.seed(), epoch)
+            .map_err(|_| ApiError::internal())
+    }
+
+    /// Un gettone valido per questa casella, dell'epoca attuale o della precedente, mai speso:
+    /// lo segna speso. Non dice a chi era stato dato.
+    fn spend_token(&self, inbox: &str, t: &rondine_core::token::Token) -> ApiResult<()> {
+        use rondine_core::token::{EPOCH_SECS, epoch};
+        let current = epoch(now());
+        if t.epoch + 1 < current || t.epoch > current || !self.token_key(t.epoch)?.check(inbox, t) {
+            return Err(ApiError::forbidden("gettone non valido"));
+        }
+        if !self
+            .db()?
+            .spend_token(&t.spent_id(), (t.epoch + 2) * EPOCH_SECS)?
+        {
+            return Err(ApiError::forbidden("gettone già usato"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+struct TokenRequestBody {
+    permit: SignedPermit,
+    blinded: Vec<String>,
+}
+
+/// `POST /v1/inboxes/{inbox}/tokens`: gettoni anonimi per depositare in questa casella, a chi
+/// ha un permesso (SPEC §14.4). Il nodo li firma alla cieca.
+async fn issue_tokens(
+    State(s): State<AppState>,
+    Path(inbox): Path<String>,
+    Json(req): Json<TokenRequestBody>,
+) -> ApiResult<Json<rondine_core::token::Issued>> {
+    s.check_permit(&req.permit, Some(&inbox), Scope::Deposit)?;
+    let key = s.token_key(rondine_core::token::epoch(now()))?;
+    key.issue(&req.blinded)
+        .map(Json)
+        .map_err(|e| ApiError::bad(e.to_string()))
+}
+
 /// Ultima sveglia mandata (o programmata) per una casella, e se ce n'è una in coda.
 #[derive(Default)]
 struct WakeSlot {
@@ -768,6 +833,13 @@ async fn info(State(s): State<AppState>) -> Json<serde_json::Value> {
     });
     if s.seal_on() {
         v["seal"] = s.0.seal_signed.clone();
+    }
+    // Nodo senza memoria (SPEC §14): tubo e gettoni anonimi.
+    v["tube"] = json!(true);
+    if let Ok(key) = s.token_key(rondine_core::token::epoch(now()))
+        && let Ok(signed) = rondine_core::Signed::sign(&s.0.node, &key.config())
+    {
+        v["tokens"] = json!(signed);
     }
     Json(v)
 }
@@ -897,7 +969,11 @@ async fn clear_push(
 
 #[derive(Serialize, Deserialize)]
 pub struct DepositRequest {
-    pub permit: SignedPermit,
+    /// Il permesso del contatto (SPEC §5), oppure un gettone anonimo (§14.4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permit: Option<SignedPermit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<rondine_core::token::Token>,
     pub blob: String,
     /// Effimero ("sta scrivendo"): niente sveglia, sparisce dopo poco se non ritirato.
     #[serde(default)]
@@ -925,7 +1001,17 @@ async fn deposit(
 
 /// Il deposito vero e proprio, diretto o arrivato sigillato (SPEC §6.3).
 fn store_deposit(s: &AppState, inbox: &str, req: DepositRequest) -> ApiResult<Deposited> {
-    s.check_permit(&req.permit, Some(inbox), Scope::Deposit)?;
+    match (&req.token, &req.permit) {
+        (Some(t), _) => {
+            s.spend_token(inbox, t)?;
+            s.0.deposits_token
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        (None, Some(p)) => {
+            s.check_permit(p, Some(inbox), Scope::Deposit)?;
+        }
+        (None, None) => return Err(ApiError::forbidden("serve un permesso o un gettone")),
+    }
     let blob = b64::decode(&req.blob)?;
     if blob.len() > MAX_MESSAGE_BYTES {
         return Err(ApiError::new(

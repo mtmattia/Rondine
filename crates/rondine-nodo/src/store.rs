@@ -106,6 +106,10 @@ CREATE TABLE IF NOT EXISTS name_passwords (
     failures INTEGER NOT NULL DEFAULT 0,
     fail_day INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS spent_tokens (
+    id TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
 ";
 
 /// Password del nome di un'identità (SPEC §3.4): il sale e `blake3(accesso)`, mai la password.
@@ -729,7 +733,22 @@ impl Store {
         )?;
         self.conn
             .execute("DELETE FROM board WHERE expires_at <= ?1", [to_i64(now)])?;
+        self.conn.execute(
+            "DELETE FROM spent_tokens WHERE expires_at <= ?1",
+            [to_i64(now)],
+        )?;
         Ok(())
+    }
+
+    // --- gettoni anonimi (SPEC §14.4) ---
+
+    /// Segna un gettone come speso; `false` se lo era già.
+    pub fn spend_token(&self, id: &str, expires_at: u64) -> Result<bool> {
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO spent_tokens (id, expires_at) VALUES (?1, ?2)",
+            params![id, to_i64(expires_at)],
+        )?;
+        Ok(n == 1)
     }
 }
 

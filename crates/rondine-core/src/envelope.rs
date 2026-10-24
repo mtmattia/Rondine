@@ -130,9 +130,41 @@ pub enum AppMessage {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         unable: bool,
     },
+    /// Avviso di giacenza (SPEC §14.2): "ho qualcosa per te, cercami". Il messaggio resta sul
+    /// telefono di chi bussa; da `id` derivano i tubi della sessione (§14.3). `pad` porta tutti
+    /// gli avvisi alla stessa lunghezza.
+    Knock {
+        v: u32,
+        id: String,
+        ts: u64,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        pad: String,
+    },
+    /// Cosa sa fare questo telefono (SPEC §14.2), es. `["tubo"]`.
+    Caps { v: u32, caps: Vec<String> },
     /// Un tipo che questa versione non conosce, da una versione più nuova: si ignora (SPEC §7).
     #[serde(other)]
     Unknown,
+}
+
+/// Lunghezza fissa del JSON di un avviso, riempimento compreso (SPEC §14.2).
+pub const KNOCK_LEN: usize = 160;
+
+/// Un avviso riempito fino a `KNOCK_LEN`.
+pub fn knock(id: &str, ts: u64) -> crate::Result<AppMessage> {
+    let bare = serde_json::to_vec(&AppMessage::Knock {
+        v: 1,
+        id: id.to_string(),
+        ts,
+        pad: "0".into(),
+    })?;
+    let fill = KNOCK_LEN.saturating_sub(bare.len()) + 1;
+    Ok(AppMessage::Knock {
+        v: 1,
+        id: id.to_string(),
+        ts,
+        pad: "0".repeat(fill),
+    })
 }
 
 /// Una chiamata arrivata durante una verifica (SPEC §14.1): quando, e l'impronta del numero che
@@ -361,6 +393,7 @@ impl AppMessage {
             AppMessage::Status(s) => s.v,
             AppMessage::StatusDelete { v, .. } | AppMessage::StatusSeen { v, .. } => *v,
             AppMessage::VerifyRequest { v, .. } | AppMessage::VerifyReply { v, .. } => *v,
+            AppMessage::Knock { v, .. } | AppMessage::Caps { v, .. } => *v,
             AppMessage::Unknown => crate::PROTOCOL_VERSION,
         }
     }
@@ -434,6 +467,15 @@ mod tests {
             }))?,
             r#"{"type":"call","v":1,"call":"c","op":"hangup","ts":5}"#
         );
+        Ok(())
+    }
+
+    #[test]
+    fn avvisi_tutti_lunghi_uguali() -> crate::Result<()> {
+        let a = serde_json::to_vec(&knock(&crate::b64::encode([1u8; 16]), 5)?)?;
+        let b = serde_json::to_vec(&knock(&crate::b64::encode([2u8; 16]), 1_800_000_000)?)?;
+        assert_eq!(a.len(), KNOCK_LEN);
+        assert_eq!(b.len(), KNOCK_LEN);
         Ok(())
     }
 }

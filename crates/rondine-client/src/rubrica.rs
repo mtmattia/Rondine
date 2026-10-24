@@ -211,6 +211,8 @@ impl Client {
                     chat_deleted: false,
                     phone_checked: None,
                     can_ring: None,
+                    tube: false,
+                    caps_sent: false,
                 });
             }
             self.note_key_change(&info.identity);

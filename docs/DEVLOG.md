@@ -370,3 +370,8 @@ Una riga per modifica: data, cosa è cambiato.
   (`previous_key`, test con reinstallazione e recupero del nome). Provato il banner
   sull'emulatore. Nodo sul Mac attivo (launchd `it.rondinenodo`, `tailscale serve` 443) come
   staffetta del PC; prova vera tra due profili sul nodo del PC: consegna sigillata via Mac.
+- 2026-10-24 — Gradi di fiducia (SPEC §10), proposti a Mattia dopo la domanda "e chi non
+  verifica il numero?": `Contact::trust()` → di persona, numero verificato, non verificato. CLI
+  (`[verificato di persona]`…), FFI `trust`, app: icona piena o vuota accanto al nome, riquadro
+  con la spiegazione nella pagina del numero di sicurezza, banner apposito per il numero
+  verificato. 1 test. Versione 0.1.14.

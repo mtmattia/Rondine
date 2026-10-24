@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rondine_client::{
     CallOp, CallStatus, ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent,
-    GroupMessage, NewFile, Source,
+    GroupMessage, NewFile, Source, Trust,
 };
 use rondine_core::PublicKey;
 use tokio::sync::Mutex;
@@ -99,6 +99,8 @@ pub struct ContactInfo {
     pub about: Option<String>,
     /// La chiave che aveva prima con lo stesso nome o numero: codice di sicurezza cambiato.
     pub previous_key: Option<String>,
+    /// Grado di fiducia (SPEC §10): "persona", "numero" o "nessuno".
+    pub trust: String,
 }
 
 #[derive(uniffi::Record, Clone)]
@@ -502,6 +504,12 @@ fn contact_info(c: &Contact) -> ContactInfo {
         previous_key: c.previous_key.map(|k| k.to_b64()),
         phone_verified_by: c.phone_verified_by.clone(),
         muted: c.muted,
+        trust: match c.trust() {
+            Trust::InPerson => "persona",
+            Trust::Phone => "numero",
+            Trust::None => "nessuno",
+        }
+        .into(),
     }
 }
 

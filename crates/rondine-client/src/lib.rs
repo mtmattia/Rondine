@@ -38,7 +38,7 @@ pub use rubrica::AddressBookMatch;
 pub use scheduled::{ScheduledMessage, ScheduledTarget};
 pub use state::{
     Attachment, CallRecord, CallStatus, ChatMessage, Contact, Delivery, GroupChat, GroupMember,
-    GroupMessage, GroupRef, Location, Outgoing, Source, State,
+    GroupMessage, GroupRef, Location, Outgoing, Source, State, Trust,
 };
 pub use status::StatusPost;
 

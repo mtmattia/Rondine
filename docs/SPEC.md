@@ -619,6 +619,16 @@ che quel nodo ha dato: finché non si confronta il numero di sicurezza l'app lo 
 nuovo ha lo stesso nome utente o numero di un contatto già noto con un'altra chiave, il client
 ricorda la chiave vecchia (`previous_key`) e l'app avvisa che il codice di sicurezza è cambiato,
 come quando qualcuno reinstalla l'app, o come farebbe un nodo che prova a mettersi in mezzo.
+
+**Gradi di fiducia.** Ogni contatto ne ha uno, mostrato dall'app (icona e testo) e dalla CLI:
+1. **verificato di persona**: codice di sicurezza confrontato (QR o 60 cifre). Non ci si fida di
+   nessuno.
+2. **numero verificato**: trovato col numero confermato via SMS (§13). Ci si fida del nodo che
+   firma il `PhoneClaim` e dell'operatore telefonico (duplicato della SIM).
+3. **non verificato**: link, nome utente o rubrica senza SMS. La chiave l'ha data qualcun altro.
+
+La crittografia è la stessa per tutti e tre: il grado dice solo quanto è sicuro che la chiave sia
+davvero di quella persona.
 ## 11. API del nodo (`/v1`)
 
 | Metodo e percorso | Auth | Cosa fa |

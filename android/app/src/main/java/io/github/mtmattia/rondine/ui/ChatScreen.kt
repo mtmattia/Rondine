@@ -70,7 +70,6 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -836,12 +835,9 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                if (c?.verified == true) {
+                                if (c != null && c.trust != "nessuno") {
                                     Spacer(Modifier.width(4.dp))
-                                    Icon(
-                                        Icons.Filled.Verified, "Verificato", Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
+                                    TrustBadge(c.trust)
                                 }
                             }
                             Text(
@@ -1252,6 +1248,9 @@ private fun KeyBanner(c: uniffi.rondine_ffi.ContactInfo, onVerify: () -> Unit) {
     val text = if (changed) {
         "Il codice di sicurezza di ${c.name} è cambiato. Di solito vuol dire che ha reinstallato " +
             "l'app, ma potrebbe essere qualcuno che si spaccia per lui o per lei: verificalo."
+    } else if (c.trust == "numero") {
+        "Il nodo ha confermato con un SMS il numero di ${c.name}. Per non doverti fidare nemmeno " +
+            "del nodo, confrontate il codice di sicurezza."
     } else {
         "Hai trovato ${c.name} attraverso il nodo. Per essere sicuro che sia davvero lui o lei, " +
             "confrontate il codice di sicurezza."

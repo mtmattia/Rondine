@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.outlined.Verified as VerifiedOutlined
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -192,3 +194,37 @@ fun withBigEmoji(text: String, emojiSize: androidx.compose.ui.unit.TextUnit): an
             }
         }
     }
+
+/**
+ * Grado di fiducia di un contatto (SPEC §10): "persona" (codice di sicurezza confrontato),
+ * "numero" (numero confermato via SMS dal nodo) o "nessuno".
+ */
+fun trustLabel(trust: String): String = when (trust) {
+    "persona" -> "verificato di persona"
+    "numero" -> "numero verificato"
+    else -> "non verificato"
+}
+
+/** Spiegazione del grado di fiducia, per la pagina del numero di sicurezza. */
+fun trustExplanation(trust: String, name: String): String = when (trust) {
+    "persona" -> "Avete confrontato il codice di sicurezza: è proprio $name, senza doverti fidare di nessuno."
+    "numero" -> "Il nodo ha confermato con un SMS che il numero è di $name. Ti fidi del nodo e dell'operatore " +
+        "telefonico: confrontate il codice di sicurezza per non doverti fidare di nessuno."
+    else -> "Nessuno ha confermato che questa chiave sia di $name. Confrontate il codice di sicurezza, " +
+        "di persona o con una chiamata."
+}
+
+/** Icona del grado di fiducia: piena di persona, vuota col numero, niente altrimenti. */
+@Composable
+fun TrustBadge(trust: String, size: Dp = 16.dp) {
+    when (trust) {
+        "persona" -> Icon(
+            Icons.Filled.Verified, trustLabel(trust), Modifier.size(size),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        "numero" -> Icon(
+            Icons.Outlined.VerifiedOutlined, trustLabel(trust), Modifier.size(size),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}

@@ -56,7 +56,6 @@ import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -255,13 +254,24 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (c.verified) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Verified, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Verificato", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TrustBadge(c.trust, 20.dp)
+                        if (c.trust != "nessuno") Spacer(Modifier.width(8.dp))
+                        Text(
+                            trustLabel(c.trust).replaceFirstChar { it.uppercase() },
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                    Text(
+                        trustExplanation(c.trust, c.name), fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
                 }
-            } else {
+            }
+            if (!c.verified) {
                 Button(onClick = {
                     scope.launch {
                         Repo.client().markVerified(contactId)

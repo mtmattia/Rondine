@@ -251,7 +251,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
                             listOfNotNull(
                                 if (local != null && local != c.name) "~${c.name}" else null,
                                 c.about ?: c.username?.let { "@$it" } ?: c.phone ?: c.shortId,
-                                if (c.phoneVerifiedBy != null) "numero verificato" else null,
+                                if (c.trust != "nessuno") trustLabel(c.trust) else null,
                             ).joinToString(" · "),
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

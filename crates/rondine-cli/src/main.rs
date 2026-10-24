@@ -6,7 +6,7 @@ use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 use rondine_client::{
     CallOp, CallStatus, ChatMessage, Client, Contact, Delivery, Event, GroupChat, GroupEvent,
-    NewFile,
+    NewFile, Trust,
 };
 use rondine_core::PublicKey;
 
@@ -448,10 +448,12 @@ fn describe(c: &Contact) -> String {
     }
     let stato = if c.blocked {
         "bloccato"
-    } else if c.verified {
-        "verificato"
     } else {
-        "non verificato"
+        match c.trust() {
+            Trust::InPerson => "verificato di persona",
+            Trust::Phone => "numero verificato",
+            Trust::None => "non verificato",
+        }
     };
     format!("{s}  [{stato}]  {}", c.identity.short())
 }

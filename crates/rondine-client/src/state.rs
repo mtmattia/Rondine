@@ -52,6 +52,29 @@ pub struct Contact {
     pub previous_key: Option<PublicKey>,
 }
 
+/// Quanto è sicuro che la chiave di un contatto sia davvero sua (SPEC §10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trust {
+    /// Codice di sicurezza confrontato (QR o 60 cifre): non ci si fida di nessuno.
+    InPerson,
+    /// Trovato col numero confermato via SMS: ci si fida del nodo che l'ha verificato.
+    Phone,
+    /// Link, nome utente o rubrica senza SMS: la chiave l'ha data qualcun altro.
+    None,
+}
+
+impl Contact {
+    pub fn trust(&self) -> Trust {
+        if self.verified {
+            Trust::InPerson
+        } else if self.phone_verified_by.is_some() {
+            Trust::Phone
+        } else {
+            Trust::None
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ChatMessage {
     pub id: String,

@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use rondine_client::{Client, Delivery, Event, NewFile, Source};
+use rondine_client::{Client, Delivery, Event, NewFile, Source, Trust};
 use rondine_core::Identity;
 use rondine_nodo::{AppState, Config, Store, WAKE_BODY};
 use tempfile::TempDir;
@@ -2305,5 +2305,36 @@ async fn codice_di_sicurezza_cambiato_si_nota() -> R {
     let c = silvia.add(&format!("mattia@{host}")).await?;
     assert_eq!(c.identity, nuovo.identity());
     assert_eq!(c.previous_key, Some(mattia.identity()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn tre_gradi_di_fiducia() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    let mut silvia = profile(&tmp, "Silvia", &node).await?;
+    let mut luca = profile(&tmp, "Luca", &node).await?;
+
+    // Un link può arrivare da chiunque: non verificato.
+    let c = luca.add(&mattia.invite_link()?).await?;
+    assert_eq!(c.trust(), Trust::None);
+
+    // Trovato col numero confermato via SMS: ci si fida del nodo.
+    mattia.request_phone("340 999 0011").await?;
+    mattia
+        .confirm_phone(&sms_code(&state, "+393409990011")?)
+        .await?;
+    let c = silvia.add("3409990011").await?;
+    assert_eq!(c.trust(), Trust::Phone);
+
+    // Codice di sicurezza confrontato: non ci si fida di nessuno.
+    silvia.mark_verified(&mattia.identity())?;
+    let c = silvia
+        .contacts()
+        .iter()
+        .find(|c| c.identity == mattia.identity())
+        .ok_or("contatto sparito")?;
+    assert_eq!(c.trust(), Trust::InPerson);
     Ok(())
 }

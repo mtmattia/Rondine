@@ -110,6 +110,8 @@ Il contenuto è già illeggibile. Restano da nascondere al gestore del nodo:
 - [ ] casella con una chiave sua invece della chiave d'identità (il nodo non lega casella e
       biglietto)
 - [ ] dimensioni dei messaggi arrotondate (padding) e ritiri a intervalli fissi
+- [x] avvisi sulla chiave e tre gradi di fiducia (di persona, numero, non verificato; SPEC §10)
+- [ ] Tor (Arti) nell'app e nodi come servizi onion: il nodo non vede nemmeno l'IP
 - [ ] nessun log degli IP nel nodo, scritto e verificabile
 
 ### M3 — Senza rete

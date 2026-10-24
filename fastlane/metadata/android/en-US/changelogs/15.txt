@@ -1,0 +1,1 @@
+The node no longer sees who writes to you: messages arrive sealed through a relay node (open padlock when there is none). Faster sending; messages that did not go out show a red ✗ with the reason and Retry. Warnings when a contact was found through the node or their security code changed. Three trust levels: verified in person, phone number verified, not verified.

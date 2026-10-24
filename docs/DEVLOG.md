@@ -436,3 +436,8 @@ Una riga per modifica: data, cosa è cambiato.
   messaggio, come su WhatsApp. "Svuota chat" la lascia nella lista. Test
   `elimina_chat_e_ricompare_con_un_messaggio`.
 - 2026-10-24 — App: appena salvato il numero (configurazione iniziale, Nuova chat, Impostazioni) compare "Verifica adesso il tuo numero", che manda subito l'SMS e chiede il codice (con la password se il numero è protetto).
+- 2026-10-24 — Bug: la rubrica agganciava il profilo abbandonato di chi aveva reinstallato senza
+  backup, se il profilo nuovo non aveva ancora pubblicato per quel numero. Il nodo dice il giorno
+  dell'ultima attività di una casella (`GET /v1/inboxes/{inbox}/seen`); la rubrica scarta i
+  profili fermi da più di 3 giorni e preferisce il più attivo. Test
+  `rubrica_non_aggancia_i_profili_abbandonati`.

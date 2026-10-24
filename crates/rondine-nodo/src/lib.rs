@@ -312,6 +312,13 @@ impl AppState {
     }
 
     /// Cambia per quanto chi ha la password del nome la tiene da fermo: serve ai test.
+    /// Fa sembrare ferme da `secs` secondi le caselle di `owner` (per i test).
+    pub fn backdate_owner(&self, owner: &PublicKey, secs: u64) {
+        if let Ok(db) = self.db() {
+            let _ = db.backdate_owner(&owner.to_b64(), now(), secs);
+        }
+    }
+
     pub fn set_name_lock(&self, secs: u64) {
         self.0
             .name_lock
@@ -410,6 +417,7 @@ pub fn router(state: AppState) -> Router {
             "/v1/inboxes/{inbox}/files/{id}",
             get(files::fetch).delete(files::delete),
         )
+        .route("/v1/inboxes/{inbox}/seen", get(inbox_seen))
         .route("/v1/inboxes/{inbox}/keypackages", post(upload_keypackages))
         .route("/v1/inboxes/{inbox}/turn", get(turn_credentials))
         .route(
@@ -446,6 +454,22 @@ pub fn router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES * 2))
         .layer(axum::middleware::from_fn(json_errors))
         .with_state(state)
+}
+
+/// `GET /v1/inboxes/{inbox}/seen`: il giorno dell'ultima attività del proprietario (SPEC §9). Chi
+/// ha il biglietto sa se la persona usa ancora quel profilo, a meno di un giorno.
+async fn inbox_seen(
+    State(s): State<AppState>,
+    Path(inbox): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let seen = s.db()?.inbox_seen(&inbox)?.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "unknown_inbox",
+            "casella sconosciuta",
+        )
+    })?;
+    Ok(Json(json!({ "seen": seen - seen % 86_400 })))
 }
 
 /// Anche gli errori prodotti da axum (corpo troppo grande, JSON non valido, rotta che non c'è)

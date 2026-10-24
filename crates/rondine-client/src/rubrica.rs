@@ -15,6 +15,9 @@ use crate::net::parse;
 use crate::state::{Contact, DiscoverySecret, Source};
 use crate::{BOARD_TTL_SECS, Client, Error, Result};
 
+/// Un profilo fermo da più di così non si trova in rubrica (SPEC §9).
+const STALE_SECS: u64 = 3 * 24 * 3600;
+
 /// Elementi per richiesta a lotti (SPEC §9).
 const BATCH: usize = 1000;
 /// Voci pubblicate per richiesta: ognuna porta un biglietto sigillato (circa 1,5 KB), e i nodi
@@ -317,7 +320,8 @@ impl Client {
             .filter_map(|s| s.loc.clone().map(|l| (l, s)))
             .collect();
         let locs: Vec<String> = by_loc.keys().cloned().collect();
-        let mut found: HashMap<String, SignedCard> = HashMap::new();
+        // Numero → biglietti validi trovati, con la data di ciascuno.
+        let mut candidates: HashMap<String, Vec<(u64, SignedCard)>> = HashMap::new();
         for board in &self.state.boards {
             for part in locs.chunks(BATCH) {
                 let Ok(bytes) = self
@@ -344,26 +348,67 @@ impl Client {
                     else {
                         continue;
                     };
-                    // Il biglietto più recente: chi reinstalla senza backup lascia in bacheca
-                    // anche la voce del profilo abbandonato, finché non scade.
-                    let card = entries
-                        .iter()
-                        .filter_map(|e| {
-                            let blob = e.verify(&loc).ok()?;
-                            let rec = discovery::open(&key, &blob).ok()?;
-                            let info = verify_card(&rec.card).ok()?;
-                            (rec.phone == s.number && info.identity != me)
-                                .then_some((info.issued_at, rec.card))
-                        })
-                        .max_by_key(|(issued_at, _)| *issued_at)
-                        .map(|(_, card)| card);
-                    if let Some(card) = card {
-                        found.entry(s.number.clone()).or_insert(card);
-                    }
+                    let cards = entries.iter().filter_map(|e| {
+                        let blob = e.verify(&loc).ok()?;
+                        let rec = discovery::open(&key, &blob).ok()?;
+                        let info = verify_card(&rec.card).ok()?;
+                        (rec.phone == s.number && info.identity != me)
+                            .then_some((info.issued_at, rec.card))
+                    });
+                    candidates
+                        .entry(s.number.clone())
+                        .or_default()
+                        .extend(cards);
                 }
             }
         }
-        found.into_iter().collect()
+        let mut found = Vec::new();
+        for (number, cards) in candidates {
+            if let Some(card) = self.pick_live(cards).await {
+                found.push((number, card));
+            }
+        }
+        found
+    }
+
+    /// Tra più biglietti per lo stesso numero, quello del profilo usato più di recente. Chi
+    /// reinstalla senza backup lascia in bacheca la voce del profilo abbandonato finché non
+    /// scade: un profilo fermo da più di `STALE_SECS` non si aggancia (SPEC §9).
+    async fn pick_live(&self, cards: Vec<(u64, SignedCard)>) -> Option<SignedCard> {
+        #[derive(serde::Deserialize)]
+        struct Seen {
+            seen: u64,
+        }
+        let cutoff = now().saturating_sub(STALE_SECS);
+        let mut best: Option<((u64, u64), SignedCard)> = None;
+        for (issued_at, card) in cards {
+            let Ok(info) = verify_card(&card) else {
+                continue;
+            };
+            // Senza nodo, o con un nodo che non lo sa dire, vale la data del biglietto.
+            let seen = match (&info.node, &info.inbox) {
+                (Some(node), Some(inbox)) => {
+                    match self
+                        .net
+                        .get::<Seen>(node, &format!("/v1/inboxes/{inbox}/seen"))
+                        .await
+                    {
+                        Ok(s) => s.seen,
+                        Err(Error::Node { code, .. }) if code == "unknown_inbox" => continue,
+                        Err(_) => issued_at,
+                    }
+                }
+                _ => issued_at,
+            };
+            if seen < cutoff {
+                continue;
+            }
+            let rank = (seen, issued_at);
+            if best.as_ref().is_none_or(|(r, _)| rank > *r) {
+                best = Some((rank, card));
+            }
+        }
+        best.map(|(_, card)| card)
     }
 
     /// Chi, tra questi numeri, ha verificato il suo: (numero, biglietto, nodo che l'ha

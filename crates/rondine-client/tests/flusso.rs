@@ -2614,3 +2614,38 @@ async fn elimina_chat_e_ricompare_con_un_messaggio() -> R {
     assert_eq!(mattia.chats().len(), 1);
     Ok(())
 }
+
+/// Bug: la rubrica agganciava il profilo abbandonato di chi aveva reinstallato (fermo da giorni),
+/// e i messaggi finivano in una casella che nessuno legge. Ora un profilo fermo da più di tre
+/// giorni non si trova; tra più profili vale quello usato più di recente.
+#[tokio::test]
+async fn rubrica_non_aggancia_i_profili_abbandonati() -> R {
+    let (node, state) = start_node_with_state().await?;
+    let tmp = TempDir::new()?;
+    let mut vecchia = profile(&tmp, "Silvia vecchia", &node).await?;
+    vecchia.set_phone("3402223344")?;
+    vecchia.scan_address_book(&["3401112233".into()]).await?;
+    // Silvia disinstalla senza backup: il profilo vecchio resta fermo.
+    state.backdate_owner(&vecchia.identity(), 6 * 24 * 3600);
+
+    let mut mattia = profile(&tmp, "Mattia", &node).await?;
+    mattia.set_phone("3401112233")?;
+    assert!(
+        mattia
+            .scan_address_book(&["3402223344".into()])
+            .await?
+            .is_empty(),
+        "il profilo abbandonato non va agganciato"
+    );
+
+    // Il profilo nuovo di Silvia pubblica: è lui che si trova.
+    let mut nuova = profile(&tmp, "Silvia nuova", &node).await?;
+    nuova.set_phone("3402223344")?;
+    nuova.scan_address_book(&["3401112233".into()]).await?;
+    let found = mattia.scan_address_book(&["3402223344".into()]).await?;
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].contact.identity, nuova.identity());
+    mattia.send_text(&nuova.identity(), "eccoti").await?;
+    assert_eq!(texts(&nuova.sync().await?), ["eccoti"]);
+    Ok(())
+}

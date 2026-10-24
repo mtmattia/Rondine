@@ -624,9 +624,13 @@ Due persone che hanno l'una il numero dell'altra si trovano da sole.
    Ed25519 derivata per luogo, `seed = blake3_keyed(seme_identità, "rondine/v1/board-owner" || loc)`,
    così le voci della stessa persona non si collegano tra loro.
 6. Chi cerca calcola gli stessi `loc` e `key`, legge le voci, decifra, scarta le proprie, controlla
-   che `phone` sia il numero che ha in rubrica e che il biglietto sia firmato. Se più voci valide
-   portano lo stesso numero (chi ha reinstallato senza backup lascia la voce del profilo vecchio
-   finché non scade), vale il biglietto con `issued_at` più recente. Il contatto trovato resta
+   che `phone` sia il numero che ha in rubrica e che il biglietto sia firmato. Chi reinstalla
+   senza backup lascia in bacheca la voce del profilo vecchio finché non scade: per ogni
+   biglietto il client chiede al suo nodo `GET /v1/inboxes/{inbox}/seen` → `{"seen": <giorno>}`
+   (inizio del giorno UTC dell'ultima attività del proprietario; `404 unknown_inbox` se la casella
+   non c'è più) e **scarta i profili fermi da più di 3 giorni**. Tra quelli rimasti vale il più
+   attivo, poi il biglietto con `issued_at` più recente. Senza nodo, o con un nodo che non sa
+   rispondere, vale la data del biglietto. Il contatto trovato resta
    **non verificato**.
 
 Limiti e scadenze: voce ≤ 4 KiB, al massimo 8 voci per luogo, durata massima 30 giorni.
@@ -717,6 +721,7 @@ non c'è): un errore in un altro formato vuol dire che l'indirizzo non è un nod
 | `GET /v1/names/{nome}/password` | — | `{salt}`, 404 se il nome non ha password |
 | `PUT /v1/board/{loc}` | firma nella voce | `{owner, blob, expires_at, sig}` |
 | `GET /v1/board/{loc}` | — | `[{owner, blob, expires_at}]` |
+| `GET /v1/inboxes/{inbox}/seen` | — | `{seen}`: giorno dell'ultima attività del proprietario (§9) |
 | `POST /v1/board/batch` | firma in ogni voce | `{put: [{loc, entry}]}` → `{stored}` (§9) |
 | `POST /v1/board/lookup` | — | `{locs}` → `{loc: [voci]}` (§9) |
 | `POST /v1/phone/lookup` | — | `{hashes}` → `{hash: {card, claim}}` (§13.3) |

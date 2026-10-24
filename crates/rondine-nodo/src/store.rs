@@ -188,6 +188,29 @@ impl Store {
         Ok(())
     }
 
+    /// Ultima attività del proprietario di una casella; `None` se la casella non c'è.
+    pub fn inbox_seen(&self, inbox: &str) -> Result<Option<u64>> {
+        let v: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(last_seen, created_at) FROM inboxes WHERE inbox = ?1",
+                [inbox],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(v.map(to_u64))
+    }
+
+    /// Sposta indietro di `secs` l'ultima attività delle caselle di `owner` (per i test).
+    pub fn backdate_owner(&self, owner: &str, now: u64, secs: u64) -> Result<()> {
+        let t = to_i64(now.saturating_sub(secs));
+        self.conn.execute(
+            "UPDATE inboxes SET last_seen = ?2, created_at = MIN(created_at, ?2) WHERE owner = ?1",
+            params![owner, t],
+        )?;
+        Ok(())
+    }
+
     /// Ultima attività di un'identità su questo nodo (la più recente delle sue caselle).
     pub fn last_seen_of(&self, identity: &str) -> Result<Option<u64>> {
         let v: Option<i64> = self.conn.query_row(

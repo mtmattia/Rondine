@@ -1,26 +1,28 @@
-//! Rubrica (SPEC §9, §13.3): si trova solo chi ha verificato il suo numero con un SMS, e cerca
-//! solo chi ha verificato il proprio. Il numero non è una prova da solo: chiunque potrebbe
-//! scriverlo.
+//! Rubrica: scoperta a coppie (SPEC §9) e numeri verificati (SPEC §13.3), a lotti.
 //!
-//! L'hash di ogni numero (Argon2id, lento apposta) si calcola in parallelo, fuori dal thread
-//! della rete, e si tiene nello stato: le ricerche successive non lo rifanno.
+//! I segreti di ogni numero (Argon2id, lenti apposta) si calcolano in parallelo, fuori dal
+//! thread della rete, e si tengono nello stato: le ricerche successive non li rifanno.
 
 use std::collections::HashMap;
 
 use reqwest::Method;
 use rondine_core::card::verify_card;
-use rondine_core::{PublicKey, SignedCard, now, phone};
+use rondine_core::discovery::{self, BoardEntry, DiscoveryRecord};
+use rondine_core::{PublicKey, SignedCard, b64, now, phone};
 use serde_json::json;
 
 use crate::net::parse;
 use crate::state::{Contact, DiscoverySecret, Source};
-use crate::{Client, Error, Result};
+use crate::{BOARD_TTL_SECS, Client, Error, Result};
 
 /// Un profilo fermo da più di così non si trova in rubrica (SPEC §9).
 const STALE_SECS: u64 = 3 * 24 * 3600;
 
 /// Elementi per richiesta a lotti (SPEC §9).
 const BATCH: usize = 1000;
+/// Voci pubblicate per richiesta: ognuna porta un biglietto sigillato (circa 1,5 KB), e i nodi
+/// fino alla 0.1.14 accettano corpi di 512 KB al massimo.
+const PUT_BATCH: usize = 100;
 
 /// Un numero della rubrica che corrisponde a qualcuno su Rondine.
 #[derive(Debug, Clone)]
@@ -32,20 +34,33 @@ pub struct AddressBookMatch {
     pub contact: Contact,
 }
 
-/// L'hash di un numero per l'elenco dei numeri verificati.
-fn compute(number: &str) -> Result<DiscoverySecret> {
+/// Cosa fare in una passata sulla rubrica.
+#[derive(Clone, Copy)]
+pub(crate) struct Mode {
+    pub publish: bool,
+    pub pairs: bool,
+    pub verified: bool,
+}
+
+/// Segreti di un numero: hash per i numeri verificati e, se ho un numero, luogo e chiave della
+/// coppia.
+fn compute(mine: Option<&str>, number: &str) -> Result<DiscoverySecret> {
+    let pair = match mine {
+        Some(m) => Some(discovery::pair_secrets(m, number)?),
+        None => None,
+    };
     Ok(DiscoverySecret {
         number: number.to_string(),
-        mine: None,
-        loc: None,
-        key: None,
+        mine: mine.map(str::to_string),
+        loc: pair.as_ref().map(|p| b64::encode(p.loc)),
+        key: pair.as_ref().map(|p| b64::encode(p.key)),
         phone_hash: phone::phone_hash(number)?,
         published_at: 0,
     })
 }
 
-/// Calcola gli hash mancanti su tutti i core.
-fn compute_all(numbers: Vec<String>) -> Vec<DiscoverySecret> {
+/// Calcola i segreti mancanti su tutti i core.
+fn compute_all(mine: Option<String>, numbers: Vec<String>) -> Vec<DiscoverySecret> {
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(2)
@@ -55,9 +70,10 @@ fn compute_all(numbers: Vec<String>) -> Vec<DiscoverySecret> {
         let handles: Vec<_> = numbers
             .chunks(chunk)
             .map(|part| {
+                let mine = mine.clone();
                 s.spawn(move || {
                     part.iter()
-                        .filter_map(|n| compute(n).ok())
+                        .filter_map(|n| compute(mine.as_deref(), n).ok())
                         .collect::<Vec<_>>()
                 })
             })
@@ -69,16 +85,32 @@ fn compute_all(numbers: Vec<String>) -> Vec<DiscoverySecret> {
     })
 }
 
+fn key32(b: &str) -> Option<[u8; 32]> {
+    b64::decode(b).ok()?.try_into().ok()
+}
+
 impl Client {
-    /// Cerca nella rubrica chi usa Rondine con il numero verificato. Serve aver verificato il
-    /// proprio: chi non mostra un numero vero non cerca quelli degli altri.
+    /// Cerca nella rubrica chi usa Rondine: chi mi ha a sua volta in rubrica (se ho messo il
+    /// mio numero, e allora pubblico anche il mio biglietto per loro) e chi ha verificato il
+    /// suo numero. Dice a quale numero corrisponde ciascuno.
     pub async fn scan_address_book(&mut self, numbers: &[String]) -> Result<Vec<AddressBookMatch>> {
+        self.rubrica(
+            numbers,
+            Mode {
+                publish: true,
+                pairs: true,
+                verified: true,
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn rubrica(
+        &mut self,
+        numbers: &[String],
+        mode: Mode,
+    ) -> Result<Vec<AddressBookMatch>> {
         self.require_node()?;
-        if !self.state.phone_verified {
-            return Err(Error::Invalid(
-                "verifica il tuo numero per trovare chi hai in rubrica".into(),
-            ));
-        }
         let mine = self
             .state
             .phone
@@ -97,13 +129,21 @@ impl Client {
         distinct.sort();
         distinct.dedup();
 
+        // Segreti: si calcola solo ciò che manca (o che vale per un mio numero di prima).
         let missing: Vec<String> = distinct
             .iter()
-            .filter(|n| !self.state.discovery_cache.iter().any(|c| &c.number == *n))
+            .filter(|n| {
+                !self
+                    .state
+                    .discovery_cache
+                    .iter()
+                    .any(|c| &c.number == *n && c.mine == mine)
+            })
             .cloned()
             .collect();
         if !missing.is_empty() {
-            let fresh = tokio::task::spawn_blocking(move || compute_all(missing))
+            let m = mine.clone();
+            let fresh = tokio::task::spawn_blocking(move || compute_all(m, missing))
                 .await
                 .map_err(|e| Error::Invalid(format!("calcolo interrotto: {e}")))?;
             for s in fresh {
@@ -116,13 +156,24 @@ impl Client {
             .state
             .discovery_cache
             .iter()
-            .filter(|c| distinct.contains(&c.number))
+            .filter(|c| distinct.contains(&c.number) && c.mine == mine)
             .map(|c| (c.number.clone(), c.clone()))
             .collect();
 
-        let mut cards: HashMap<String, (SignedCard, String)> = HashMap::new();
-        for (n, card, by) in self.find_verified(&secrets).await {
-            cards.insert(n, (card, by));
+        let mut cards: HashMap<String, (SignedCard, Option<String>)> = HashMap::new();
+        if mine.is_some() && mode.publish {
+            self.publish_batch(&secrets).await?;
+        }
+        if mine.is_some() && mode.pairs {
+            for (n, card) in self.find_pairs(&secrets).await {
+                cards.entry(n).or_insert((card, None));
+            }
+        }
+        if mode.verified {
+            // Il numero verificato vince: dice anche chi l'ha verificato.
+            for (n, card, by) in self.find_verified(&secrets).await {
+                cards.insert(n, (card, Some(by)));
+            }
         }
 
         let me = self.identity.public();
@@ -136,7 +187,9 @@ impl Client {
             }
             if let Some(c) = self.contact_mut(&info.identity) {
                 c.phone = Some(number.clone());
-                c.phone_verified_by = Some(verified_by.clone());
+                if verified_by.is_some() {
+                    c.phone_verified_by = verified_by.clone();
+                }
             } else {
                 self.state.contacts.push(Contact {
                     identity: info.identity,
@@ -152,14 +205,25 @@ impl Client {
                     added_at: now(),
                     favorite: false,
                     addrs: Vec::new(),
-                    phone_verified_by: Some(verified_by.clone()),
+                    phone_verified_by: verified_by.clone(),
                     muted: false,
                     previous_key: None,
                     chat_deleted: false,
                 });
             }
-            // L'altro non sa niente di me: la chat parte quando scrivo.
             self.note_key_change(&info.identity);
+            // Coppia: ci siamo trovati in due, la chat la avvia la chiave più bassa (SPEC §9).
+            // Numero verificato: l'altro non sa niente di me, la chat parte quando scrivo.
+            let needs_chat = verified_by.is_none()
+                && me < info.identity
+                && self
+                    .state
+                    .contacts
+                    .iter()
+                    .any(|c| c.identity == info.identity && c.groups.is_empty());
+            if needs_chat {
+                self.start_chat(&info.identity).await?;
+            }
             let Some(contact) = self
                 .state
                 .contacts
@@ -180,6 +244,131 @@ impl Client {
         self.resend_after_key_change().await;
         self.save()?;
         Ok(out)
+    }
+
+    /// Pubblica il mio biglietto per le coppie che non l'hanno da almeno metà della durata.
+    async fn publish_batch(&mut self, secrets: &HashMap<String, DiscoverySecret>) -> Result<()> {
+        let t = now();
+        let due: Vec<&DiscoverySecret> = secrets
+            .values()
+            .filter(|s| s.loc.is_some() && s.published_at + BOARD_TTL_SECS / 2 < t)
+            .collect();
+        if due.is_empty() {
+            return Ok(());
+        }
+        let permit = match &self.state.directory_permit {
+            Some(p) => p.clone(),
+            None => {
+                let p = self.new_permit("rubrica").await?;
+                self.state.directory_permit = Some(p.clone());
+                self.save()?;
+                p
+            }
+        };
+        let record = DiscoveryRecord {
+            v: 1,
+            phone: self.my_phone()?,
+            card: self.card_with(Some(&permit))?,
+        };
+        let expires_at = t + BOARD_TTL_SECS;
+        let mut puts = Vec::new();
+        let mut numbers = Vec::new();
+        for s in due {
+            let (Some(loc), Some(key)) = (
+                s.loc.as_deref().and_then(key32),
+                s.key.as_deref().and_then(key32),
+            ) else {
+                continue;
+            };
+            let owner = discovery::board_owner(&self.identity, &loc);
+            let entry =
+                BoardEntry::create(&owner, &loc, &discovery::seal(&key, &record)?, expires_at);
+            puts.push(json!({ "loc": b64::encode(loc), "entry": entry }));
+            numbers.push(s.number.clone());
+        }
+        for board in self.state.boards.clone() {
+            for part in puts.chunks(PUT_BATCH) {
+                self.net
+                    .call(
+                        Method::POST,
+                        &board,
+                        "/v1/board/batch",
+                        &json!({ "put": part }),
+                    )
+                    .await?;
+            }
+        }
+        for c in self
+            .state
+            .discovery_cache
+            .iter_mut()
+            .filter(|c| numbers.contains(&c.number))
+        {
+            c.published_at = t;
+        }
+        self.save()
+    }
+
+    /// Chi, tra questi numeri, mi ha a sua volta in rubrica: (numero, biglietto).
+    async fn find_pairs(
+        &self,
+        secrets: &HashMap<String, DiscoverySecret>,
+    ) -> Vec<(String, SignedCard)> {
+        let me = self.identity.public();
+        let by_loc: HashMap<String, &DiscoverySecret> = secrets
+            .values()
+            .filter_map(|s| s.loc.clone().map(|l| (l, s)))
+            .collect();
+        let locs: Vec<String> = by_loc.keys().cloned().collect();
+        // Numero → biglietti validi trovati, con la data di ciascuno.
+        let mut candidates: HashMap<String, Vec<(u64, SignedCard)>> = HashMap::new();
+        for board in &self.state.boards {
+            for part in locs.chunks(BATCH) {
+                let Ok(bytes) = self
+                    .net
+                    .call(
+                        Method::POST,
+                        board,
+                        "/v1/board/lookup",
+                        &json!({ "locs": part }),
+                    )
+                    .await
+                else {
+                    continue;
+                };
+                let Ok(map) = parse::<HashMap<String, Vec<BoardEntry>>>(&bytes) else {
+                    continue;
+                };
+                for (loc_b64, entries) in map {
+                    let Some(s) = by_loc.get(&loc_b64) else {
+                        continue;
+                    };
+                    let (Some(loc), Some(key)) =
+                        (key32(&loc_b64), s.key.as_deref().and_then(key32))
+                    else {
+                        continue;
+                    };
+                    let cards = entries.iter().filter_map(|e| {
+                        let blob = e.verify(&loc).ok()?;
+                        let rec = discovery::open(&key, &blob).ok()?;
+                        let info = verify_card(&rec.card).ok()?;
+                        (rec.phone == s.number && info.identity != me)
+                            .then_some((info.issued_at, rec.card))
+                    });
+                    candidates
+                        .entry(s.number.clone())
+                        .or_default()
+                        .extend(cards);
+                }
+            }
+        }
+        let mut found = Vec::new();
+        for (number, cards) in candidates {
+            if let Some(card) = self.pick_live(cards).await {
+                found.push((number, card));
+            }
+        }
+        found
     }
 
     /// Tra più biglietti per lo stesso numero, quello del profilo usato più di recente. Chi
@@ -248,7 +437,7 @@ impl Client {
                 nodes.push(b.clone());
             }
         }
-        let mut candidates: HashMap<String, Vec<(u64, SignedCard, String)>> = HashMap::new();
+        let mut out: HashMap<String, (SignedCard, String)> = HashMap::new();
         for node in nodes {
             let Ok(info) = self.net.get::<Info>(&node, "/v1/info").await else {
                 continue;
@@ -285,25 +474,12 @@ impl Client {
                     let same_node =
                         rondine_core::username::node_host(&claim.node).is_ok_and(|h| h == host);
                     if claim.phone_hash == hash && claim.identity == card.identity && same_node {
-                        candidates.entry(number.to_string()).or_default().push((
-                            card.issued_at,
-                            e.card,
-                            host.clone(),
-                        ));
+                        out.entry(number.to_string())
+                            .or_insert((e.card, host.clone()));
                     }
                 }
             }
         }
-        // Chi ha verificato e poi abbandonato il profilo non si aggancia.
-        let mut out = Vec::new();
-        for (number, list) in candidates {
-            let cards = list.iter().map(|(t, c, _)| (*t, c.clone())).collect();
-            if let Some(card) = self.pick_live(cards).await
-                && let Some((_, _, host)) = list.iter().find(|(_, c, _)| *c == card)
-            {
-                out.push((number, card, host.clone()));
-            }
-        }
-        out
+        out.into_iter().map(|(n, (c, h))| (n, c, h)).collect()
     }
 }

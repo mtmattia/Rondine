@@ -126,8 +126,10 @@ pub(crate) const PHOTOS_DIR: &str = "foto";
 pub(crate) const KEYPACKAGE_BATCH: usize = 20;
 /// Key package offerti in rete locale a chi avvia una chat (SPEC §12.2).
 const LAN_KEYPACKAGES: usize = 5;
+/// Durata delle voci in bacheca: si ripubblicano prima che scadano.
 /// Motivo dei messaggi rimasti alla chiave vecchia di un contatto (SPEC §10).
 const KEY_CHANGED: &str = "non consegnato: il contatto ha cambiato chiave";
+pub(crate) const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 
 /// Dove mettere un file troppo grande per stare nel messaggio (SPEC §7.5).
 pub(crate) enum FileDest<'a> {
@@ -579,8 +581,6 @@ impl Client {
             self.leave_node(&old_node, &old_inbox).await;
         }
         self.save()?;
-        // La password scelta prima va anche al nodo nuovo: protegge nome e numero (SPEC §3.4).
-        self.upload_name_password().await?;
         let contacts: Vec<Contact> = self
             .state
             .contacts
@@ -1196,22 +1196,9 @@ impl Client {
 
     // ---------- nome utente ----------
 
-    /// Registra `nome@mio-nodo` (SPEC §3.2). Serve la password: è l'unico modo di riprenderselo.
+    /// Registra `nome@mio-nodo` (SPEC §3.2).
     pub async fn claim_username(&mut self, name: &str) -> Result<String> {
-        self.require_node()?;
-        self.require_password()?;
         self.claim_username_with(name, None).await
-    }
-
-    /// Nome utente e numero si mostrano agli altri solo con una password (SPEC §3.4); senza,
-    /// si resta anonimi.
-    fn require_password(&self) -> Result<()> {
-        if self.state.password.is_none() {
-            return Err(Error::Invalid(
-                "prima scegli una password: protegge il tuo nome e il tuo numero".into(),
-            ));
-        }
-        Ok(())
     }
 
     /// Registra il nome, con la prova della password di chi lo teneva se c'è (SPEC §3.4). Se ho
@@ -1255,6 +1242,9 @@ impl Client {
         }
         self.state.public_permit = Some(permit);
         self.save()?;
+        if self.state.password.is_some() {
+            self.upload_name_password().await?;
+        }
         Ok(handle)
     }
 
@@ -3827,7 +3817,6 @@ impl Client {
     /// Chiede al mio nodo di mandarmi il codice per SMS.
     pub async fn request_phone(&mut self, number: &str) -> Result<String> {
         self.require_node()?;
-        self.require_password()?;
         let n = phone::normalize(number, phone::DEFAULT_COUNTRY)?;
         let path = format!("/v1/inboxes/{}/phone", self.state.inbox);
         self.net
@@ -3963,6 +3952,58 @@ impl Client {
             .phone
             .clone()
             .ok_or_else(|| Error::Invalid("imposta prima il tuo numero di telefono".into()))
+    }
+
+    fn normalize_numbers(&self, numbers: &[String], mine: &str) -> Vec<String> {
+        let mut out: Vec<String> = numbers
+            .iter()
+            .filter_map(|n| phone::normalize(n, phone::DEFAULT_COUNTRY).ok())
+            .filter(|n| n != mine)
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Pubblica il mio biglietto, cifrato, per ogni numero della rubrica (SPEC §9).
+    /// Restituisce per quanti numeri è pubblicato.
+    pub async fn publish_contacts(&mut self, numbers: &[String]) -> Result<usize> {
+        let mine = self.my_phone()?;
+        let n = self.normalize_numbers(numbers, &mine).len();
+        self.rubrica(
+            numbers,
+            rubrica::Mode {
+                publish: true,
+                pairs: false,
+                verified: false,
+            },
+        )
+        .await?;
+        Ok(n)
+    }
+
+    /// Cerca nelle bacheche chi, tra i numeri dati, mi ha a sua volta in rubrica.
+    /// I contatti trovati sono aggiunti come non verificati. Avvia la chat solo chi ha la
+    /// chiave più bassa, per non creare due gruppi.
+    pub async fn discover(&mut self, numbers: &[String]) -> Result<Vec<Contact>> {
+        self.my_phone()?;
+        let found = self
+            .rubrica(
+                numbers,
+                rubrica::Mode {
+                    publish: false,
+                    pairs: true,
+                    verified: false,
+                },
+            )
+            .await?;
+        let mut out: Vec<Contact> = Vec::new();
+        for m in found {
+            if !out.iter().any(|c| c.identity == m.contact.identity) {
+                out.push(m.contact);
+            }
+        }
+        Ok(out)
     }
 }
 

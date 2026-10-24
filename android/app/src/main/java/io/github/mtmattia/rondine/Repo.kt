@@ -357,11 +357,10 @@ object Repo {
         }
     }
 
-    /** Cerca nella rubrica chi usa Rondine col numero verificato, in background (sopravvive
-     *  all'uscita dalla schermata). I numeri restano sul telefono: al nodo vanno solo hash. */
+    /** Cerca nella rubrica chi usa Rondine, in background (sopravvive all'uscita dalla
+     *  schermata). I numeri restano sul telefono: al nodo vanno solo voci cifrate e hash. */
     fun scanAddressBook(numbers: List<String>) {
-        // Si cerca solo col proprio numero verificato (SPEC §9): prima c'è l'invito a verificarlo.
-        if (scanningAddressBook.value || numbers.isEmpty() || profile.value?.phoneVerified != true) return
+        if (scanningAddressBook.value || numbers.isEmpty()) return
         scanningAddressBook.value = true
         scope.launch {
             try {

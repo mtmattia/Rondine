@@ -9,8 +9,8 @@ use std::path::Path;
 
 use reqwest::Method;
 use rondine_core::envelope::AppMessage;
-use rondine_core::username::normalize_name;
-use rondine_core::{Identity, b64, backup, now, password, phone};
+use rondine_core::username::{Handle, normalize_name};
+use rondine_core::{Identity, b64, backup, now, password};
 use rondine_mls::Device;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -87,7 +87,8 @@ impl Client {
             .await
             .map_err(|e| Error::Invalid(format!("password non salvata: {e}")))??;
         let old = self.state.password.replace(keys);
-        if self.has_node()
+        if self.state.username.is_some()
+            && self.has_node()
             && let Err(e) = self.upload_name_password().await
         {
             self.state.password = old;
@@ -96,19 +97,19 @@ impl Client {
         self.save()
     }
 
-    /// Manda al mio nodo il sale e la verifica della password: proteggono il mio nome e il mio
-    /// numero verificato (SPEC §3.4).
+    /// Manda al nodo del nome il sale e la verifica della password.
     pub(crate) async fn upload_name_password(&mut self) -> Result<()> {
-        let Some(keys) = &self.state.password else {
+        let (Some(keys), Some(handle)) = (&self.state.password, &self.state.username) else {
             return Ok(());
         };
+        let name = Handle::parse(handle)?.name;
         let body = json!({ "salt": keys.salt, "verifier": keys.verifier()? });
         self.net
             .owner(
                 &self.identity,
                 Method::PUT,
                 &self.state.node,
-                &format!("/v1/inboxes/{}/password", self.state.inbox),
+                &format!("/v1/names/{name}/password"),
                 Some(&body),
             )
             .await?;
@@ -119,20 +120,10 @@ impl Client {
     async fn name_auth(&self, name: &str, pw: &str) -> Result<String> {
         self.require_node()?;
         let name = normalize_name(name.trim().trim_start_matches('@'))?;
-        self.password_auth(&format!("/v1/names/{name}/password"), pw)
-            .await
-    }
-
-    /// La prova della password di chi ha verificato il numero `number` sul mio nodo.
-    async fn phone_auth(&self, number: &str, pw: &str) -> Result<String> {
-        self.require_node()?;
-        let hash = phone::phone_hash(&phone::normalize(number, phone::DEFAULT_COUNTRY)?)?;
-        self.password_auth(&format!("/v1/phone/{hash}/password"), pw)
-            .await
-    }
-
-    async fn password_auth(&self, path: &str, pw: &str) -> Result<String> {
-        let found: NamePassword = self.net.get(&self.state.node, path).await?;
+        let found: NamePassword = self
+            .net
+            .get(&self.state.node, &format!("/v1/names/{name}/password"))
+            .await?;
         let salt = b64::decode(&found.salt)?;
         let pw = pw.to_string();
         let keys = tokio::task::spawn_blocking(move || password::keys(&pw, &salt))
@@ -148,17 +139,21 @@ impl Client {
     pub async fn recover_username(&mut self, name: &str, pw: &str) -> Result<String> {
         let auth = self.name_auth(name, pw).await?;
         let plain = name.trim().trim_start_matches('@').to_string();
+        let handle = self.claim_username_with(&plain, Some(&auth)).await?;
         self.set_password(pw).await?;
-        self.claim_username_with(&plain, Some(&auth)).await
+        Ok(handle)
     }
 
-    /// Conferma il numero anche se è protetto dalla password di chi lo aveva (SPEC §13.2): se
-    /// eri tu, è la tua password di prima.
-    pub async fn confirm_phone_with_password(&mut self, code: &str, pw: &str) -> Result<()> {
-        let number = self.my_phone()?;
-        let auth = self.phone_auth(&number, pw).await?;
-        self.confirm_phone_with(code, Some(&auth)).await?;
-        self.set_password(pw).await
+    /// Conferma il numero anche se è protetto dalla password di chi lo aveva (SPEC §13.2): `name`
+    /// è il suo nome utente su questo nodo.
+    pub async fn confirm_phone_with_password(
+        &mut self,
+        code: &str,
+        name: &str,
+        pw: &str,
+    ) -> Result<()> {
+        let auth = self.name_auth(name, pw).await?;
+        self.confirm_phone_with(code, Some(&auth)).await
     }
 
     /// Ripristina un backup in una cartella vuota. La rete serve solo dopo: alla prima

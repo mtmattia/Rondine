@@ -343,10 +343,11 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
     recoverPhoneCode?.let { code ->
         RecoverPasswordDialog(
             title = "Numero protetto",
-            text = "Questo numero è protetto dalla password di chi l'aveva. Se eri tu, scrivi la tua password.",
-            name = "-", askName = false, onDismiss = { recoverPhoneCode = null },
-        ) { _, pw ->
-            Repo.client().confirmPhoneWithPassword(code, pw)
+            text = "Questo numero è protetto dalla password di chi l'aveva. Se eri tu, scrivi il tuo nome utente " +
+                "e la password.",
+            name = "", askName = true, onDismiss = { recoverPhoneCode = null },
+        ) { n, pw ->
+            Repo.client().confirmPhoneWithPassword(code, n, pw)
             Repo.refresh()
             "Numero verificato"
         }
@@ -556,10 +557,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 ProfileRow(
                     Icons.Filled.AlternateEmail, "Nome utente", p.username?.let { "@$it" },
                     placeholder = "Scegline uno per farti trovare",
-                ) {
-                    // Il nome utente vuole la password: senza, la si sceglie insieme al nome.
-                    if (hasPassword == true) dialog = SettingsDialog.Username else passwordDialog = true
-                }
+                ) { dialog = SettingsDialog.Username }
                 ProfileRow(
                     Icons.Outlined.Phone, "Telefono",
                     p.phone?.let { if (p.phoneVerified) "$it · verificato ✓" else it },
@@ -774,10 +772,6 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                     if (!p.phoneVerified) {
                         TextButton(onClick = {
                             dialog = null
-                            if (hasPassword != true) {
-                                passwordDialog = true
-                                return@TextButton
-                            }
                             run {
                                 val n = Repo.client().requestPhone(p.phone!!)
                                 dialog = SettingsDialog.Code

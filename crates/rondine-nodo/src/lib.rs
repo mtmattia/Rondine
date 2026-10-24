@@ -115,6 +115,7 @@ struct Inner {
     ephemeral_ttl: std::sync::atomic::AtomicU64,
     /// Scadenza dei nomi inattivi, in secondi.
     name_ttl: std::sync::atomic::AtomicU64,
+    name_lock: std::sync::atomic::AtomicU64,
     /// Deposito sigillato (SPEC §6.3): chiave e la sua configurazione firmata per `/v1/info`.
     seal: rondine_core::seal::SealKey,
     seal_signed: serde_json::Value,
@@ -137,6 +138,9 @@ pub struct DepositStats {
 
 /// Dopo quanto un nome di chi non usa più il nodo torna libero (SPEC §3.2).
 pub const NAME_TTL_SECS: u64 = 180 * 24 * 3600;
+/// Chi ha la password del nome e ha usato il nodo negli ultimi 7 giorni tiene nome e numero anche
+/// contro un SMS (SPEC §3.4).
+pub const NAME_LOCK_SECS: u64 = 7 * 24 * 3600;
 /// Password del nome sbagliate al giorno, per nome.
 const MAX_PASSWORD_FAILURES: u32 = 10;
 
@@ -176,6 +180,7 @@ impl AppState {
             last_wake: Mutex::new(HashMap::new()),
             ephemeral_ttl: std::sync::atomic::AtomicU64::new(EPHEMERAL_TTL_SECS),
             name_ttl: std::sync::atomic::AtomicU64::new(NAME_TTL_SECS),
+            name_lock: std::sync::atomic::AtomicU64::new(NAME_LOCK_SECS),
             sms: Mutex::new(Vec::new()),
         })))
     }
@@ -306,11 +311,22 @@ impl AppState {
         self.0.name_ttl.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Cambia per quanto chi ha la password del nome la tiene da fermo: serve ai test.
     /// Fa sembrare ferme da `secs` secondi le caselle di `owner` (per i test).
     pub fn backdate_owner(&self, owner: &PublicKey, secs: u64) {
         if let Ok(db) = self.db() {
             let _ = db.backdate_owner(&owner.to_b64(), now(), secs);
         }
+    }
+
+    pub fn set_name_lock(&self, secs: u64) {
+        self.0
+            .name_lock
+            .store(secs, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn name_lock(&self) -> u64 {
+        self.0.name_lock.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Controlla la prova della password di `identity` (SPEC §3.4): al massimo 10 errori al
@@ -362,9 +378,8 @@ impl AppState {
         if db.name_password(identity)?.is_none() {
             return Ok(false);
         }
-        // Password dimenticata: si libera solo dopo `name_ttl` senza uso, come il nome.
         let last = db.last_seen_of(identity)?.unwrap_or(0);
-        Ok(last + self.name_ttl() > now())
+        Ok(last + self.name_lock() > now())
     }
 
     fn db(&self) -> Result<MutexGuard<'_, Store>, ApiError> {
@@ -403,8 +418,6 @@ pub fn router(state: AppState) -> Router {
             get(files::fetch).delete(files::delete),
         )
         .route("/v1/inboxes/{inbox}/seen", get(inbox_seen))
-        .route("/v1/inboxes/{inbox}/password", put(put_inbox_password))
-        .route("/v1/phone/{phone_hash}/password", get(get_phone_password))
         .route("/v1/inboxes/{inbox}/keypackages", post(upload_keypackages))
         .route("/v1/inboxes/{inbox}/turn", get(turn_credentials))
         .route(
@@ -1286,6 +1299,8 @@ async fn put_name(
                         "nome già in uso su questo nodo (se era tuo, verifica lo stesso numero di telefono)",
                     ));
                 }
+                // Password dimenticata: il numero basta se chi tiene il nome è fermo da 7 giorni.
+                Some(_) if same_phone && last + s.name_lock() <= t => {}
                 Some(_) => {
                     let auth = headers
                         .get("rondine-name-auth")
@@ -1350,49 +1365,6 @@ async fn put_name_password(
         Some(_) => Err(ApiError::forbidden("il nome non è tuo")),
         None => Err(ApiError::not_found("nome non registrato")),
     }
-}
-
-/// `PUT /v1/inboxes/{inbox}/password`: sale e verifica della password del proprietario
-/// (SPEC §3.4). Protegge il suo nome e il suo numero verificato, anche senza nome.
-async fn put_inbox_password(
-    State(s): State<AppState>,
-    Path(inbox): Path<String>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> ApiResult<StatusCode> {
-    let key = s.owner_of(&inbox, &headers, &method, &uri, &body)?;
-    let req: NamePasswordBody = parse_json(&body)?;
-    let verifier = req
-        .verifier
-        .filter(|v| b64::decode_array::<32>(v).is_ok())
-        .ok_or_else(|| ApiError::bad("verifica non valida"))?;
-    if b64::decode_array::<16>(&req.salt).is_err() {
-        return Err(ApiError::bad("sale non valido"));
-    }
-    s.db()?
-        .put_name_password(&key.to_b64(), &req.salt, &verifier)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// `GET /v1/phone/{phone_hash}/password`: il sale della password di chi ha verificato il numero.
-async fn get_phone_password(
-    State(s): State<AppState>,
-    Path(phone_hash): Path<String>,
-) -> ApiResult<Json<NamePasswordBody>> {
-    let db = s.db()?;
-    let pw = match db.identity_of_phone(&phone_hash)? {
-        Some(identity) => db.name_password(&identity)?,
-        None => None,
-    };
-    pw.map(|p| {
-        Json(NamePasswordBody {
-            salt: p.salt,
-            verifier: None,
-        })
-    })
-    .ok_or_else(|| ApiError::not_found("il numero non ha una password"))
 }
 
 /// `GET /v1/names/{nome}/password`: il sale, per ricavare la prova dalla password.

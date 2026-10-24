@@ -205,14 +205,8 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
                 }
             } else if (profile?.phone == null) {
                 item {
-                    ActionRow(Icons.Filled.Phone, "Metti il tuo numero", "Per trovare chi hai in rubrica serve il tuo, verificato") {
+                    ActionRow(Icons.Filled.Phone, "Metti il tuo numero", "Così ti trova anche chi ti ha in rubrica") {
                         dialog = AddDialog.Phone
-                    }
-                }
-            } else if (profile?.phoneVerified != true) {
-                item {
-                    ActionRow(Icons.Filled.Phone, "Verifica il tuo numero", "Con un SMS: solo così trovi chi hai in rubrica e loro trovano te") {
-                        Repo.askVerifyPhone.value = true
                     }
                 }
             }

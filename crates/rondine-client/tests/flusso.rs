@@ -25,17 +25,12 @@ async fn start_node() -> Result<String, Box<dyn std::error::Error>> {
     Ok(url)
 }
 
-/// Password dei profili di prova: senza, nome utente e numero non si possono avere (SPEC §3.4).
-const PW: &str = "una password lunga";
-
 async fn profile(
     dir: &TempDir,
     name: &str,
     node: &str,
 ) -> Result<Client, Box<dyn std::error::Error>> {
-    let mut c = Client::create(&dir.path().join(name), name, node).await?;
-    c.set_password(PW).await?;
-    Ok(c)
+    Ok(Client::create(&dir.path().join(name), name, node).await?)
 }
 
 fn texts(events: &[Event]) -> Vec<String> {
@@ -111,7 +106,7 @@ async fn nome_utente_univoco_per_nodo() -> R {
         .await
         .err()
         .ok_or("doveva fallire")?;
-    assert_eq!(err.node_code(), Some("name_protected"));
+    assert_eq!(err.node_code(), Some("name_taken"));
     assert_eq!(luca.state().username, None);
 
     // Luca trova Mattia col nome e gli scrive.
@@ -128,48 +123,42 @@ async fn nome_utente_univoco_per_nodo() -> R {
     Ok(())
 }
 
-/// Rubrica (SPEC §9): si trova chi ha verificato il numero, anche su un altro nodo, e cerca solo
-/// chi ha verificato il proprio.
 #[tokio::test]
-async fn rubrica_trova_i_numeri_verificati_su_nodi_diversi() -> R {
-    let ((n1, s1), (n2, s2)) = (
-        start_node_with_state().await?,
-        start_node_with_state().await?,
-    );
+async fn rubrica_reciproca_su_nodi_diversi() -> R {
+    let (n1, n2) = (start_node().await?, start_node().await?);
     let tmp = TempDir::new()?;
     let mut mattia = profile(&tmp, "Mattia", &n1).await?;
     let mut silvia = profile(&tmp, "Silvia", &n2).await?;
-    let mut anonimo = profile(&tmp, "Anonimo", &n1).await?;
+    let mut estraneo = profile(&tmp, "Estraneo", &n1).await?;
     // Una bacheca in comune basta per trovarsi.
-    mattia.add_board(&n2)?;
     silvia.add_board(&n1)?;
-    verify_phone(&mut mattia, &s1, "340 111 1111").await?;
-    verify_phone(&mut silvia, &s2, "+39 340 222 2222").await?;
 
-    // Senza numero verificato non si cerca, e un numero solo scritto non si trova.
-    let err = anonimo
-        .scan_address_book(&["3401111111".into()])
-        .await
-        .err()
-        .ok_or("ha cercato senza numero verificato")?;
-    assert!(err.to_string().contains("verifica"), "{err}");
-    anonimo.set_phone("340 333 3333")?;
+    mattia.set_phone("340 111 1111")?;
+    silvia.set_phone("+39 340 222 2222")?;
+    estraneo.set_phone("340 333 3333")?;
+
+    // Mattia e Silvia si hanno a vicenda in rubrica; l'estraneo ha Mattia ma non viceversa.
+    assert_eq!(mattia.publish_contacts(&["3402222222".into()]).await?, 1);
+    silvia.publish_contacts(&["3401111111".into()]).await?;
+    estraneo.publish_contacts(&["3401111111".into()]).await?;
+
+    let found = estraneo.discover(&["3401111111".into()]).await?;
     assert!(
-        mattia
-            .scan_address_book(&["3403333333".into()])
-            .await?
-            .is_empty()
+        found.is_empty(),
+        "chi non è nella rubrica di Mattia non deve trovarlo"
     );
 
-    let a = mattia.scan_address_book(&["340 222 2222".into()]).await?;
-    let b = silvia.scan_address_book(&["3401111111".into()]).await?;
+    let a = mattia.discover(&["340 222 2222".into()]).await?;
+    let b = silvia.discover(&["3401111111".into()]).await?;
     assert_eq!(a.len(), 1);
     assert_eq!(b.len(), 1);
-    assert_eq!(a[0].contact.display_name, "Silvia");
-    assert_eq!(a[0].contact.phone.as_deref(), Some("+393402222222"));
-    assert_eq!(a[0].contact.source, Source::Rubrica);
-    assert_eq!(a[0].contact.trust(), rondine_client::Trust::Phone);
+    assert_eq!(a[0].display_name, "Silvia");
+    assert_eq!(a[0].phone.as_deref(), Some("+393402222222"));
+    assert_eq!(b[0].source, Source::Rubrica);
 
+    // Un solo dei due ha avviato la chat; dopo la sincronizzazione scrivono entrambi.
+    mattia.sync().await?;
+    silvia.sync().await?;
     mattia
         .send_text(&silvia.identity(), "ti ho trovata in rubrica")
         .await?;
@@ -981,7 +970,6 @@ async fn nodo_aggiunto_dopo() -> R {
     let tmp = TempDir::new()?;
     let (mut anna, mut bruno, _, _) = local_pair(&tmp).await?;
     befriend(&mut anna, &mut bruno).await?;
-    anna.set_password(PW).await?;
 
     // Anna aggiunge un nodo: i suoi contatti ricevono il biglietto nuovo.
     anna.set_node(&node).await?;
@@ -997,8 +985,7 @@ async fn nodo_aggiunto_dopo() -> R {
     anna.forget_lan_peer(&bruno.identity());
     assert_eq!(texts(&anna.sync().await?), ["dal tuo nodo nuovo"]);
 
-    // Ora ha anche i servizi del nodo, e un secondo nodo non si aggiunge. La password scelta
-    // prima del nodo arriva al nodo, e il nome si può avere.
+    // Ora ha anche i servizi del nodo, e un secondo nodo non si aggiunge.
     anna.claim_username("anna").await?;
     assert!(anna.set_node(&node).await.is_err());
     Ok(())
@@ -1636,26 +1623,30 @@ async fn sveglia_fcm_sul_nido_che_fa_da_ripetitore() -> R {
     Ok(())
 }
 
-/// Rubrica (SPEC §9, §13.3): una ricerca trova chi ha verificato il numero, dice a quale numero
-/// corrisponde ciascuno, ignora i numeri solo scritti, e la seconda volta è immediata.
+/// Rubrica (SPEC §9, §13.3): una sola ricerca trova sia chi mi ha in rubrica a sua volta sia chi
+/// ha verificato il numero, dice a quale numero corrisponde ciascuno, e la seconda volta è
+/// immediata (segreti già calcolati).
 #[tokio::test]
-async fn rubrica_trova_solo_i_numeri_verificati() -> R {
+async fn rubrica_coppie_e_numeri_verificati_in_una_ricerca() -> R {
     let (node, state) = start_node_with_state().await?;
     let tmp = TempDir::new()?;
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
     let mut silvia = profile(&tmp, "Silvia", &node).await?;
     let mut luca = profile(&tmp, "Luca", &node).await?;
-    let mut anna = profile(&tmp, "Anna", &node).await?;
-    verify_phone(&mut mattia, &state, "3401112233").await?;
-    verify_phone(&mut silvia, &state, "3402223344").await?;
-    verify_phone(&mut luca, &state, "3403334455").await?;
-    // Anna ha solo scritto il numero, senza SMS: non si trova.
-    anna.set_phone("3404445566")?;
+    mattia.set_phone("3401112233")?;
+    silvia.set_phone("3402223344")?;
 
+    // Silvia ha Mattia in rubrica e la pubblica (coppia).
+    silvia.scan_address_book(&["340 111 2233".into()]).await?;
+    // Luca ha verificato il suo numero (Mattia lo trova anche se Luca non ha lui in rubrica).
+    luca.request_phone("3403334455").await?;
+    luca.confirm_phone(&sms_code(&state, "+393403334455")?)
+        .await?;
+
+    // La rubrica di Mattia: Silvia, Luca e qualcuno che non usa Rondine.
     let rubrica: Vec<String> = vec![
         "+39 340 222 3344".into(),
         "340-333-4455".into(),
-        "3404445566".into(),
         "3409998877".into(),
     ];
     let t0 = std::time::Instant::now();
@@ -1669,6 +1660,7 @@ async fn rubrica_trova_solo_i_numeri_verificati() -> R {
     };
     assert_eq!(by_input("+39 340 222 3344").as_deref(), Some("Silvia"));
     assert_eq!(by_input("340-333-4455").as_deref(), Some("Luca"));
+    assert_eq!(by_input("3409998877"), None);
     assert_eq!(found.len(), 2);
 
     // Di nuovo: niente Argon2 da rifare, molto più veloce.
@@ -1676,6 +1668,12 @@ async fn rubrica_trova_solo_i_numeri_verificati() -> R {
     let again = mattia.scan_address_book(&rubrica).await?;
     assert_eq!(again.len(), 2);
     assert!(t1.elapsed() < first, "{:?} contro {first:?}", t1.elapsed());
+
+    // Senza il mio numero si trovano comunque i numeri verificati.
+    let mut anna = profile(&tmp, "Anna", &node).await?;
+    let found = anna.scan_address_book(&["3403334455".into()]).await?;
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].contact.display_name, "Luca");
     Ok(())
 }
 
@@ -2138,20 +2136,13 @@ async fn nome_e_info_del_profilo() -> R {
 }
 
 /// Verifica il numero di un profilo con il codice "in prova" del nodo.
-/// Verifica il numero con l'SMS; se era di un altro profilo con la password (un mio profilo
-/// vecchio), con la password.
 async fn verify_phone(c: &mut Client, state: &AppState, phone: &str) -> R {
     c.request_phone(phone).await?;
     let code = sms_code(
         state,
         &rondine_core::phone::normalize(phone, rondine_core::phone::DEFAULT_COUNTRY)?,
     )?;
-    if let Err(e) = c.confirm_phone(&code).await {
-        if !e.to_string().contains("password") {
-            return Err(e.into());
-        }
-        c.confirm_phone_with_password(&code, PW).await?;
-    }
+    c.confirm_phone(&code).await?;
     Ok(())
 }
 
@@ -2170,15 +2161,15 @@ async fn nome_recuperato_col_numero_verificato() -> R {
         .await
         .err()
         .ok_or("doveva essere preso")?;
-    assert_eq!(err.node_code(), Some("name_protected"));
+    assert_eq!(err.node_code(), Some("name_taken"));
     // Un estraneo con un altro numero non lo prende.
     let mut altro = profile(&tmp, "Altro", &node).await?;
     verify_phone(&mut altro, &state, "340 999 8877").await?;
     assert!(altro.claim_username("mattia").await.is_err());
 
-    // Con lo stesso numero verificato e la password, il nome torna suo.
+    // Verificato lo stesso numero, il nome torna suo.
     verify_phone(&mut nuovo, &state, "340 111 2233").await?;
-    nuovo.recover_username("mattia", PW).await?;
+    nuovo.claim_username("mattia").await?;
     let card = nuovo
         .lookup_username(&format!(
             "mattia@{}",
@@ -2310,7 +2301,7 @@ async fn codice_di_sicurezza_cambiato_si_nota() -> R {
     // Mattia reinstalla l'app: chiave nuova, si riprende il nome col numero.
     let mut nuovo = profile(&tmp, "Mattia2", &node).await?;
     verify_phone(&mut nuovo, &state, "340 111 2233").await?;
-    nuovo.recover_username("mattia", PW).await?;
+    nuovo.claim_username("mattia").await?;
     let c = silvia.add(&format!("mattia@{host}")).await?;
     assert_eq!(c.identity, nuovo.identity());
     assert_eq!(c.previous_key, Some(mattia.identity()));
@@ -2361,31 +2352,39 @@ async fn chiave_nuova_con_numero_verificato_continua_la_stessa_chat() -> R {
     Ok(())
 }
 
-/// Chiave nuova che niente conferma (né SMS né codice di sicurezza): qui un nome utente scaduto
-/// e preso da un altro. Chat a parte, segnalata "(!)", e la chat vera resta com'è.
+/// Chiave nuova che niente conferma (né SMS né codice di sicurezza), per esempio chi ha preso il
+/// numero o il nome di un amico: chat a parte, segnalata "(!)", e la chat vera resta com'è.
 #[tokio::test]
 async fn chiave_nuova_senza_verifica_e_una_chat_a_parte() -> R {
-    let (node, state) = start_node_with_state().await?;
-    let host = rondine_core::username::node_host(&node)?;
+    let node = start_node().await?;
     let tmp = TempDir::new()?;
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
-    mattia.claim_username("mattia").await?;
+    mattia.set_phone("3401112233")?;
     let mut silvia = profile(&tmp, "Silvia", &node).await?;
-    let vero = silvia.add(&format!("mattia@{host}")).await?.identity;
+    silvia.set_phone("3402223344")?;
+    mattia.scan_address_book(&["3402223344".into()]).await?;
+    silvia.scan_address_book(&["3401112233".into()]).await?;
+    let vero = mattia.identity();
     silvia.send_text(&vero, "ci sei?").await?;
 
-    // Mattia sparisce, il nome scade e lo prende un altro.
-    state.set_name_ttl(1);
-    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
-    let mut altro = profile(&tmp, "Mattia2", &node).await?;
-    altro.claim_username("mattia").await?;
-    let sospetto = silvia.add(&format!("mattia@{host}")).await?;
+    // Qualcuno con il numero di Mattia, senza SMS: pubblica in rubrica dopo di lui.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let mut altro = profile(&tmp, "Mattia3", &node).await?;
+    altro.set_phone("3401112233")?;
+    altro.scan_address_book(&["3402223344".into()]).await?;
+    silvia.scan_address_book(&["3401112233".into()]).await?;
 
     assert_eq!(silvia.chats().len(), 2);
+    let sospetto = silvia
+        .contacts()
+        .iter()
+        .find(|c| c.identity == altro.identity())
+        .cloned()
+        .ok_or("manca il contatto")?;
     assert_eq!(sospetto.previous_key, Some(vero));
     assert!(sospetto.flagged());
     assert!(silvia.messages_with(&altro.identity()).is_empty());
-    // La chat vera non si tocca.
+    // La chat vera non si tocca: il messaggio resta a Mattia.
     let m = &silvia.messages_with(&vero)[0];
     assert_eq!(m.body, "ci sei?");
     assert_ne!(m.status, Delivery::Failed);
@@ -2398,31 +2397,35 @@ async fn chiave_nuova_senza_verifica_e_una_chat_a_parte() -> R {
 #[tokio::test]
 async fn chat_a_parte_si_unisce_dopo_la_verifica() -> R {
     let (node, state) = start_node_with_state().await?;
-    state.set_name_ttl(1);
-    let host = rondine_core::username::node_host(&node)?;
     let tmp = TempDir::new()?;
     let mut silvia = profile(&tmp, "Silvia", &node).await?;
-    verify_phone(&mut silvia, &state, "3402223344").await?;
+    silvia.set_phone("3402223344")?;
     for (i, by_sms) in [(1, false), (2, true)] {
-        let name = format!("mattia{i}");
+        let number = format!("34011122{i:02}");
         let mut vecchio = profile(&tmp, &format!("vecchio{i}"), &node).await?;
-        vecchio.claim_username(&name).await?;
-        let old = silvia.add(&format!("{name}@{host}")).await?.identity;
+        vecchio.set_phone(&number)?;
+        vecchio.scan_address_book(&["3402223344".into()]).await?;
+        silvia
+            .scan_address_book(std::slice::from_ref(&number))
+            .await?;
+        let old = vecchio.identity();
         silvia.send_text(&old, "ci sei?").await?;
 
-        // Il nome scade e lo prende la chiave nuova (che sia davvero lui, ancora non si sa).
-        tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
         let mut nuovo = profile(&tmp, &format!("nuovo{i}"), &node).await?;
-        nuovo.claim_username(&name).await?;
-        let c = silvia.add(&format!("{name}@{host}")).await?;
-        assert!(c.flagged());
+        nuovo.set_phone(&number)?;
+        nuovo.scan_address_book(&["3402223344".into()]).await?;
+        silvia
+            .scan_address_book(std::slice::from_ref(&number))
+            .await?;
         assert!(!silvia.messages_with(&old).is_empty(), "ancora a parte");
 
         if by_sms {
-            // Verifica il numero: la ricerca in rubrica lo trova confermato.
-            let number = format!("34011122{i:02}");
+            // Verifica il numero: la prossima ricerca in rubrica lo trova confermato.
             verify_phone(&mut nuovo, &state, &number).await?;
-            silvia.scan_address_book(&[number]).await?;
+            silvia
+                .scan_address_book(std::slice::from_ref(&number))
+                .await?;
         } else {
             silvia.mark_verified(&nuovo.identity())?;
         }
@@ -2453,7 +2456,7 @@ async fn contatto_verificato_non_si_sostituisce() -> R {
 
     let mut nuovo = profile(&tmp, "Mattia2", &node).await?;
     verify_phone(&mut nuovo, &state, "340 111 2233").await?;
-    nuovo.recover_username("mattia", PW).await?;
+    nuovo.claim_username("mattia").await?;
     let c = silvia.add(&format!("mattia@{host}")).await?;
     assert_eq!(c.previous_key, Some(mattia.identity()));
     assert_eq!(silvia.chats().len(), 2);
@@ -2491,20 +2494,22 @@ async fn tre_gradi_di_fiducia() -> R {
     Ok(())
 }
 
-/// Una rubrica di centinaia di numeri si cerca a lotti (prima il nodo rifiutava i corpi grandi).
+/// Bug: con una rubrica grande (centinaia di numeri) la pubblicazione superava il limite di
+/// dimensione del nodo, che rispondeva in testo semplice: "non sembra un nodo Rondine".
 #[tokio::test]
-async fn rubrica_grande_si_cerca_a_lotti() -> R {
-    let (node, state) = start_node_with_state().await?;
+async fn rubrica_grande_si_pubblica_a_lotti() -> R {
+    let node = start_node().await?;
     let tmp = TempDir::new()?;
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
     let mut silvia = profile(&tmp, "Silvia", &node).await?;
-    verify_phone(&mut mattia, &state, "3401112233").await?;
-    verify_phone(&mut silvia, &state, "3402223344").await?;
+    mattia.set_phone("3401112233")?;
+    silvia.set_phone("3402223344")?;
     let mut rubrica: Vec<String> = (0..600).map(|i| format!("+39 333 000 {i:04}")).collect();
     rubrica.push("3402223344".into());
-    let found = mattia.scan_address_book(&rubrica).await?;
+    mattia.scan_address_book(&rubrica).await?;
+    let found = silvia.scan_address_book(&["3401112233".into()]).await?;
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].contact.display_name, "Silvia");
+    assert_eq!(found[0].contact.display_name, "Mattia");
     Ok(())
 }
 
@@ -2534,22 +2539,39 @@ async fn errori_del_nodo_sempre_in_json() -> R {
     Ok(())
 }
 
-/// Chi reinstalla senza backup e verifica di nuovo lo stesso numero (con la sua password) prende
-/// il posto del profilo vecchio: la rubrica trova il nuovo.
+/// Bug: chi reinstalla senza backup lascia in bacheca la voce del profilo vecchio, e la rubrica
+/// prendeva la prima voce valida invece della più recente: si scriveva a un profilo abbandonato.
 #[tokio::test]
 async fn rubrica_sceglie_il_profilo_piu_recente() -> R {
-    let (node, state) = start_node_with_state().await?;
+    let node = start_node().await?;
     let tmp = TempDir::new()?;
-    let mut vecchia = profile(&tmp, "Silvia vecchia", &node).await?;
-    verify_phone(&mut vecchia, &state, "3402223344").await?;
-    let mut nuova = profile(&tmp, "Silvia nuova", &node).await?;
-    verify_phone(&mut nuova, &state, "3402223344").await?;
+    // Sei persone con un profilo vecchio e uno nuovo: l'ordine delle voci sul nodo dipende dalle
+    // chiavi, quindi con sei coppie il caso "la prima è la vecchia" capita di sicuro.
+    let numbers: Vec<String> = (0..6).map(|i| format!("34022233{i:02}")).collect();
+    for (i, n) in numbers.iter().enumerate() {
+        let mut vecchia = profile(&tmp, &format!("vecchia{i}"), &node).await?;
+        vecchia.set_phone(n)?;
+        vecchia.scan_address_book(&["3401112233".into()]).await?;
+    }
+    // Le date dei biglietti sono in secondi.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    for (i, n) in numbers.iter().enumerate() {
+        let mut nuova = profile(&tmp, &format!("nuova{i}"), &node).await?;
+        nuova.set_phone(n)?;
+        nuova.scan_address_book(&["3401112233".into()]).await?;
+    }
 
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
-    verify_phone(&mut mattia, &state, "3401112233").await?;
-    let found = mattia.scan_address_book(&["3402223344".into()]).await?;
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].contact.display_name, "Silvia nuova");
+    mattia.set_phone("3401112233")?;
+    let mut found: Vec<String> = mattia
+        .scan_address_book(&numbers)
+        .await?
+        .into_iter()
+        .map(|m| m.contact.display_name)
+        .collect();
+    found.sort();
+    let expected: Vec<String> = (0..6).map(|i| format!("nuova{i}")).collect();
+    assert_eq!(found, expected);
     Ok(())
 }
 
@@ -2595,18 +2617,19 @@ async fn elimina_chat_e_ricompare_con_un_messaggio() -> R {
 
 /// Bug: la rubrica agganciava il profilo abbandonato di chi aveva reinstallato (fermo da giorni),
 /// e i messaggi finivano in una casella che nessuno legge. Ora un profilo fermo da più di tre
-/// giorni non si trova.
+/// giorni non si trova; tra più profili vale quello usato più di recente.
 #[tokio::test]
 async fn rubrica_non_aggancia_i_profili_abbandonati() -> R {
     let (node, state) = start_node_with_state().await?;
     let tmp = TempDir::new()?;
     let mut vecchia = profile(&tmp, "Silvia vecchia", &node).await?;
-    verify_phone(&mut vecchia, &state, "3402223344").await?;
+    vecchia.set_phone("3402223344")?;
+    vecchia.scan_address_book(&["3401112233".into()]).await?;
     // Silvia disinstalla senza backup: il profilo vecchio resta fermo.
     state.backdate_owner(&vecchia.identity(), 6 * 24 * 3600);
 
     let mut mattia = profile(&tmp, "Mattia", &node).await?;
-    verify_phone(&mut mattia, &state, "3401112233").await?;
+    mattia.set_phone("3401112233")?;
     assert!(
         mattia
             .scan_address_book(&["3402223344".into()])
@@ -2615,9 +2638,10 @@ async fn rubrica_non_aggancia_i_profili_abbandonati() -> R {
         "il profilo abbandonato non va agganciato"
     );
 
-    // Silvia reinstalla e verifica di nuovo il numero (con la sua password): si trova lei.
+    // Il profilo nuovo di Silvia pubblica: è lui che si trova.
     let mut nuova = profile(&tmp, "Silvia nuova", &node).await?;
-    verify_phone(&mut nuova, &state, "3402223344").await?;
+    nuova.set_phone("3402223344")?;
+    nuova.scan_address_book(&["3401112233".into()]).await?;
     let found = mattia.scan_address_book(&["3402223344".into()]).await?;
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].contact.identity, nuova.identity());

@@ -94,21 +94,22 @@ fun PasswordDialog(change: Boolean, onDismiss: () -> Unit, dismissLabel: String 
         busy = true
         scope.launch {
             try {
-                // Prima la password: senza, nome e numero non si possono avere (SPEC §3.4).
-                Repo.client().setPassword(pw)
+                var recovered = false
                 if (askName && username.isNotBlank()) {
                     try {
                         Repo.client().claimUsername(username)
                     } catch (e: RondineException) {
                         if (!e.needsPassword()) throw e
-                        // Nome protetto: se è il mio, la stessa password me lo restituisce.
+                        // Nome protetto: se è il mio, la stessa password me lo restituisce (SPEC §3.4).
                         try {
                             Repo.client().recoverUsername(username, pw)
+                            recovered = true
                         } catch (_: RondineException) {
                             throw RondineException.Invalid("Il nome @$username è protetto da un'altra password: scegline un altro")
                         }
                     }
                 }
+                if (!recovered) Repo.client().setPassword(pw)
                 Repo.refresh()
                 Repo.autoBackup(force = true)
                 onDone()
@@ -127,8 +128,7 @@ fun PasswordDialog(change: Boolean, onDismiss: () -> Unit, dismissLabel: String 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!change) {
                     Text(
-                        "Con una password nessuno può prendersi il tuo nome utente o il tuo numero, nemmeno " +
-                            "clonando la SIM. Senza password resti anonimo: ti trova solo chi ha il tuo link. " +
+                        "Con una password nessuno può prendersi il tuo nome utente, nemmeno con il tuo numero. " +
                             "Rondine salva anche ogni giorno un backup cifrato in Documenti/Rondine sul telefono: " +
                             "se cancelli l'app lo riapri con questa password. Non va su nessun server.",
                         fontSize = 14.sp,

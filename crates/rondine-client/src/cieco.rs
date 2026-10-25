@@ -4,7 +4,8 @@
 //! con un gettone, e suona lui la sveglia. Il nido vede caselle anonime e buste tutte uguali,
 //! non sa di chi sono e non sveglia nessuno.
 //!
-//! Tor (§14.6) non è ancora qui: le richieste partono dirette.
+//! Tutto ciò che va al nido cieco o alla sveglia passa da Tor (§14.6, [`crate::anon`]): un
+//! circuito per casella, uno per la sveglia di ciascun contatto, uno per i gettoni.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -15,7 +16,8 @@ use rondine_core::token::{self, Token, TokenConfig};
 use rondine_core::{Identity, PublicKey, Signed, b64, now};
 use serde_json::json;
 
-use crate::net::parse;
+use crate::anon::{Anon, AnonUse};
+use crate::net::{node_result, parse};
 use crate::state::{BlindOut, Via};
 use crate::{Client, Kind, Result, Route};
 
@@ -29,6 +31,17 @@ const WAKE_GAP_SECS: u64 = 60;
 const WAKE_JITTER_MS: u64 = 5000;
 /// Corpo della sveglia: uguale a quello dei nodi (SPEC §8).
 const WAKE_BODY: &str = r#"{"v":1,"t":"wake"}"#;
+/// Server STUN pubblici per il buco nel NAT col nido cieco (SPEC §14.6), di gestori diversi.
+const PUBLIC_STUN: [&str; 6] = [
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302",
+    "stun:stun.cloudflare.com:3478",
+    "stun:stun.nextcloud.com:443",
+    "stun:global.stun.twilio.com:3478",
+    "stun:stun.sipgate.net:3478",
+];
+/// Quanti se ne provano, scelti a caso.
+const PUBLIC_STUN_PICK: usize = 3;
 
 /// Stato in memoria del nido cieco.
 pub(crate) struct Blind {
@@ -41,11 +54,16 @@ pub(crate) struct Blind {
     want: HashSet<PublicKey>,
     /// Buste ritirate da confermare: (casella, id).
     acks: Vec<(String, Vec<String>)>,
+    /// Tor (o, nei test, la rete diretta).
+    anon: Anon,
+    public_stun: Vec<String>,
 }
 
-impl Default for Blind {
-    fn default() -> Self {
+impl Blind {
+    pub(crate) fn new(dir: &std::path::Path) -> Self {
         Self {
+            anon: Anon::new(dir),
+            public_stun: PUBLIC_STUN.iter().map(|s| s.to_string()).collect(),
             spent: Mutex::new(HashSet::new()),
             last_wake: Mutex::new(HashMap::new()),
             jitter_ms: WAKE_JITTER_MS,
@@ -55,11 +73,68 @@ impl Default for Blind {
     }
 }
 
+/// Una richiesta JSON anonima al nido, sul circuito `group`.
+async fn anon_call(
+    anon: &Anon,
+    group: &str,
+    method: &str,
+    base: &str,
+    path: &str,
+    body: Option<(&serde_json::Value, Option<&Identity>)>,
+) -> Result<Vec<u8>> {
+    let url = format!("{}{path}", base.trim_end_matches('/'));
+    let mut headers = Vec::new();
+    let mut bytes = Vec::new();
+    if let Some((b, signer)) = body {
+        bytes = serde_json::to_vec(b)?;
+        headers.push(("content-type", "application/json".to_string()));
+        if let Some(id) = signer {
+            headers.push((
+                "authorization",
+                rondine_core::auth::header(id, method, path, now(), &bytes),
+            ));
+        }
+    }
+    let (status, res) = anon.request(group, method, &url, &headers, bytes).await?;
+    node_result(status, res)
+}
+
 impl Client {
+    /// Le richieste anonime fatte finora (SPEC §14.6): a chi e su quale circuito.
+    pub fn anon_log(&self) -> Vec<AnonUse> {
+        self.blind.anon.log()
+    }
+
+    /// Il nido cieco passa da Tor? No solo se compilato senza o con [`Client::set_anon_plain`].
+    pub fn uses_tor(&self) -> bool {
+        self.blind.anon.uses_tor()
+    }
+
+    /// Server STUN pubblici da usare col nido cieco al posto di quelli predefiniti (test).
+    pub fn set_public_stun(&mut self, urls: Vec<String>) {
+        self.blind.public_stun = urls;
+        self.stun_cache = None;
+    }
+
+    /// Alcuni server STUN pubblici, a caso: ogni lato ne sceglie per conto suo (SPEC §14.6).
+    pub(crate) fn public_stun_pick(&self) -> Vec<String> {
+        use rand::seq::SliceRandom;
+        let mut all = self.blind.public_stun.clone();
+        all.shuffle(&mut rand::thread_rng());
+        all.truncate(PUBLIC_STUN_PICK);
+        all
+    }
+
+    /// Richieste anonime dirette, senza Tor: solo per i test (non c'è Tor in un test).
+    pub fn set_anon_plain(&mut self) {
+        self.blind.anon = Anon::plain();
+    }
+
     /// Accende o spegne il nido cieco (SPEC §14.2). Acceso: il mio nido non mi sveglia più (lo
     /// fa chi mi scrive) e ai contatti do seme, gettoni e sveglia.
     pub async fn set_blind(&mut self, on: bool) -> Result<()> {
         self.state.blind = on;
+        self.stun_cache = None;
         self.save()?;
         if !on || !self.has_node() {
             return Ok(());
@@ -126,7 +201,12 @@ impl Client {
 
     /// Il mio nido ha il nido cieco? Con la chiave dei gettoni, firmata dal nido.
     async fn my_blind_config(&self) -> Option<TokenConfig> {
-        let info: serde_json::Value = self.net.get(&self.state.node, "/v1/info").await.ok()?;
+        let node = &self.state.node;
+        let group = format!("membro:{node}");
+        let bytes = anon_call(&self.blind.anon, &group, "GET", node, "/v1/info", None)
+            .await
+            .ok()?;
+        let info: serde_json::Value = parse(&bytes).ok()?;
         if !info["blind"].as_bool().unwrap_or(false) {
             return None;
         }
@@ -142,17 +222,17 @@ impl Client {
         let cfg = self.my_blind_config().await?;
         let req = token::Request::new(NODE_SCOPE, n).ok()?;
         let node = self.state.node.clone();
-        let bytes = self
-            .net
-            .owner(
-                &self.member_key(&node),
-                reqwest::Method::POST,
-                &node,
-                "/v2/tokens",
-                Some(&json!({ "blinded": req.blinded })),
-            )
-            .await
-            .ok()?;
+        let member = self.member_key(&node);
+        let bytes = anon_call(
+            &self.blind.anon,
+            &format!("membro:{node}"),
+            "POST",
+            &node,
+            "/v2/tokens",
+            Some((&json!({ "blinded": req.blinded }), Some(&member))),
+        )
+        .await
+        .ok()?;
         let issued = parse::<token::Issued>(&bytes).ok()?;
         req.finalize(&issued, &cfg).ok()
     }
@@ -170,13 +250,14 @@ impl Client {
         };
         let seed = c.blind_in.get_or_insert_with(blind::new_seed).clone();
         c.blind_rx = 0;
+        let wake = c.blind_wake.clone();
         let contact = c.clone();
         let app = AppMessage::Blind {
             v: 1,
             seed,
             node: self.state.node.clone(),
             tokens,
-            wake: self.state.push_endpoint.clone(),
+            wake: wake.or_else(|| self.state.push_endpoint.clone()),
         };
         let _ = self.save();
         let _ = self.send_app_with(&contact, &app, Kind::Normal, None).await;
@@ -242,24 +323,18 @@ impl Client {
         let padded = b64::encode(blind::pad(b64::decode(blob)?)?);
         let current = token::epoch(now());
         for t in out.tokens.iter().filter(|t| t.epoch + 1 >= current) {
-            let fresh = self
-                .blind
-                .spent
-                .lock()
-                .map(|mut s| s.insert(t.spent_id()))
-                .unwrap_or(false);
-            if !fresh {
+            if !self.claim(t) {
                 continue;
             }
-            match self
-                .net
-                .call(
-                    reqwest::Method::POST,
-                    &out.node,
-                    "/v2/drop",
-                    &json!({ "inbox": inbox, "token": t, "blob": padded }),
-                )
-                .await
+            match anon_call(
+                &self.blind.anon,
+                &format!("deposito:{inbox}"),
+                "POST",
+                &out.node,
+                "/v2/drop",
+                Some((&json!({ "inbox": inbox, "token": t, "blob": padded }), None)),
+            )
+            .await
             {
                 Ok(_) => {
                     if kind == Kind::Normal
@@ -273,14 +348,156 @@ impl Client {
                 Err(crate::Error::Node { status: 403, .. }) => continue,
                 Err(e) => {
                     // Non è arrivato al nido: il gettone vale ancora.
-                    if let Ok(mut s) = self.blind.spent.lock() {
-                        s.remove(&t.spent_id());
-                    }
+                    self.unclaim(t);
                     return Err(e);
                 }
             }
         }
         Ok(None)
+    }
+
+    /// Contatti a cui ho dato le mie caselle ma non ancora un indirizzo di sveglia tutto loro
+    /// (SPEC §14.7): l'app ne chiede uno al distributore UnifiedPush per ciascuno.
+    pub fn blind_wake_wanted(&self) -> Vec<PublicKey> {
+        if !self.state.blind {
+            return Vec::new();
+        }
+        self.state
+            .contacts
+            .iter()
+            .filter(|c| !c.blocked && c.blind_in.is_some() && c.blind_wake.is_none())
+            .map(|c| c.identity)
+            .collect()
+    }
+
+    /// L'indirizzo di sveglia solo per questo contatto (`None`: quello di sempre). Glielo
+    /// rimando subito con seme e gettoni.
+    pub async fn set_contact_wake(&mut self, id: &PublicKey, url: Option<String>) -> Result<()> {
+        let c = self
+            .contact_mut(id)
+            .ok_or_else(|| crate::Error::NotFound("contatto sconosciuto".into()))?;
+        if c.blind_wake == url {
+            return Ok(());
+        }
+        c.blind_wake = url;
+        self.save()?;
+        self.send_blind_to(id).await;
+        Ok(())
+    }
+
+    /// Prende per me un gettone del contatto non ancora usato.
+    fn claim(&self, t: &Token) -> bool {
+        self.blind
+            .spent
+            .lock()
+            .map(|mut s| s.insert(t.spent_id()))
+            .unwrap_or(false)
+    }
+
+    /// Il gettone non è arrivato al nido: vale ancora.
+    fn unclaim(&self, t: &Token) {
+        if let Ok(mut s) = self.blind.spent.lock() {
+            s.remove(&t.spent_id());
+        }
+    }
+
+    /// Carica un file cifrato nel nido cieco del contatto (SPEC §14.5), riempito a misura fissa
+    /// e pagato con un gettone. `Ok(None)`: niente nido cieco o niente gettoni.
+    pub(crate) async fn blind_upload(
+        &self,
+        id: &PublicKey,
+        ciphertext: &[u8],
+    ) -> Result<Option<rondine_core::file::FileAt>> {
+        if !self.state.blind {
+            return Ok(None);
+        }
+        let Some(out) = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == id && !c.blocked)
+            .and_then(|c| c.blind_out.clone())
+        else {
+            return Ok(None);
+        };
+        let inbox = blind::chat_inbox(&out.seed, blind::day(now()), id)?;
+        let padded = blind::pad_file(ciphertext.to_vec())?;
+        let url = format!("{}/v2/files", out.node.trim_end_matches('/'));
+        let current = token::epoch(now());
+        for t in out.tokens.iter().filter(|t| t.epoch + 1 >= current) {
+            if !self.claim(t) {
+                continue;
+            }
+            let headers = [
+                ("content-type", "application/octet-stream".to_string()),
+                ("rondine-token", b64::encode(serde_json::to_vec(t)?)),
+            ];
+            let res = self
+                .blind
+                .anon
+                .request(
+                    &format!("deposito:{inbox}"),
+                    "POST",
+                    &url,
+                    &headers,
+                    padded.clone(),
+                )
+                .await
+                .and_then(|(status, body)| node_result(status, body));
+            match res {
+                Ok(body) => {
+                    return Ok(Some(rondine_core::file::FileAt {
+                        node: out.node.clone(),
+                        file: Some(crate::uploaded_id(&body)?),
+                        shared: None,
+                        blind_len: Some(ciphertext.len() as u64),
+                    }));
+                }
+                Err(crate::Error::Node { status: 403, .. }) => continue,
+                Err(e) => {
+                    self.unclaim(t);
+                    return Err(e);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Scarica un file dal nido cieco e toglie il riempimento.
+    pub(crate) async fn blind_fetch(
+        &self,
+        node: &str,
+        file: &str,
+        len: Option<u64>,
+    ) -> Result<Vec<u8>> {
+        let mut data = anon_call(
+            &self.blind.anon,
+            &format!("file:{file}"),
+            "GET",
+            node,
+            &format!("/v2/files/{file}"),
+            None,
+        )
+        .await?;
+        let len = usize::try_from(len.unwrap_or(0)).unwrap_or(usize::MAX);
+        if len > data.len() {
+            return Err(crate::Error::Invalid("file del nido cieco troncato".into()));
+        }
+        data.truncate(len);
+        Ok(data)
+    }
+
+    /// Cancella dal nido cieco un file già scaricato. Se non riesce, scade.
+    pub(crate) async fn blind_forget(&self, node: &str, file: &str) {
+        let _ = anon_call(
+            &self.blind.anon,
+            &format!("file:{file}"),
+            "DELETE",
+            node,
+            &format!("/v2/files/{file}"),
+            None,
+        )
+        .await;
     }
 
     /// Suona la sveglia del contatto (SPEC §14.7): non se c'è un collegamento diretto vivo, al
@@ -303,11 +520,14 @@ impl Client {
             use rand::Rng;
             rand::thread_rng().gen_range(0..=self.blind.jitter_ms)
         };
-        let net = self.net.clone();
+        let anon = self.blind.anon.clone();
         let url = url.to_string();
+        let group = format!("sveglia:{}", b64::encode(id.0));
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
-            let _ = net.post_raw(&url, WAKE_BODY).await;
+            let _ = anon
+                .request(&group, "POST", &url, &[], WAKE_BODY.as_bytes().to_vec())
+                .await;
         });
     }
 
@@ -333,17 +553,16 @@ impl Client {
                 let Ok(inbox) = blind::chat_inbox(&seed, day, &me) else {
                     continue;
                 };
-                let Ok(items) = self
-                    .net
-                    .call(
-                        reqwest::Method::POST,
-                        &node,
-                        "/v2/pickup",
-                        &json!({ "inbox": inbox }),
-                    )
-                    .await
-                    .and_then(|b| parse::<Vec<serde_json::Value>>(&b))
-                else {
+                let Ok(items) = anon_call(
+                    &self.blind.anon,
+                    &format!("casella:{inbox}"),
+                    "POST",
+                    &node,
+                    "/v2/pickup",
+                    Some((&json!({ "inbox": inbox }), None)),
+                )
+                .await
+                .and_then(|b| parse::<Vec<serde_json::Value>>(&b)) else {
                     continue;
                 };
                 let mut ids = Vec::new();
@@ -375,15 +594,15 @@ impl Client {
     pub(crate) async fn run_blind(&mut self) {
         let node = self.state.node.clone();
         for (inbox, ids) in std::mem::take(&mut self.blind.acks) {
-            let _ = self
-                .net
-                .call(
-                    reqwest::Method::POST,
-                    &node,
-                    "/v2/ack",
-                    &json!({ "inbox": inbox, "ids": ids }),
-                )
-                .await;
+            let _ = anon_call(
+                &self.blind.anon,
+                &format!("casella:{inbox}"),
+                "POST",
+                &node,
+                "/v2/ack",
+                Some((&json!({ "inbox": inbox, "ids": ids }), None)),
+            )
+            .await;
         }
         let spent: HashSet<String> = self
             .blind

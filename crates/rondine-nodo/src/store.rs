@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS drops (
     day INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS drops_inbox ON drops (inbox);
+CREATE TABLE IF NOT EXISTS blind_files (
+    id TEXT PRIMARY KEY,
+    data BLOB NOT NULL,
+    day INTEGER NOT NULL
+);
 ";
 
 /// Password del nome di un'identità (SPEC §3.4): il sale e `blake3(accesso)`, mai la password.
@@ -744,12 +749,11 @@ impl Store {
             "DELETE FROM spent_tokens WHERE expires_at <= ?1",
             [to_i64(now)],
         )?;
-        self.conn.execute(
-            "DELETE FROM drops WHERE day < ?1",
-            [to_i64(
-                now.saturating_sub(message_ttl) / rondine_core::blind::DAY_SECS,
-            )],
-        )?;
+        let day = to_i64(now.saturating_sub(message_ttl) / rondine_core::blind::DAY_SECS);
+        self.conn
+            .execute("DELETE FROM drops WHERE day < ?1", [day])?;
+        self.conn
+            .execute("DELETE FROM blind_files WHERE day < ?1", [day])?;
         Ok(())
     }
 
@@ -802,6 +806,40 @@ impl Store {
             )?;
         }
         Ok(())
+    }
+
+    pub fn put_blind_file(&self, id: &str, data: &[u8], day: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO blind_files (id, data, day) VALUES (?1, ?2, ?3)",
+            params![id, data, to_i64(day)],
+        )?;
+        Ok(())
+    }
+
+    pub fn blind_file(&self, id: &str) -> Result<Option<Vec<u8>>> {
+        self.conn
+            .query_row("SELECT data FROM blind_files WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()
+    }
+
+    pub fn delete_blind_file(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM blind_files WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Misure dei file del nido cieco: per il limite di spazio e per i test.
+    pub fn blind_file_sizes(&self) -> Result<Vec<usize>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT LENGTH(data) FROM blind_files ORDER BY rowid")?;
+        let rows = st.query_map(
+            [],
+            |r| Ok(usize::try_from(r.get::<_, i64>(0)?).unwrap_or(0)),
+        )?;
+        rows.collect()
     }
 
     // --- gettoni anonimi (SPEC §14.4) ---

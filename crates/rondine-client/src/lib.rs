@@ -1,5 +1,6 @@
 //! Client Rondine: tutto ciò che l'app sa fare, come funzioni (CLAUDE.md, regola 5).
 
+mod anon;
 mod backup;
 mod calls;
 mod cieco;
@@ -12,7 +13,6 @@ mod rubrica;
 mod scheduled;
 mod state;
 mod status;
-mod tubo;
 mod verify;
 
 use std::collections::HashMap;
@@ -32,6 +32,7 @@ use rondine_core::{
 use rondine_mls::{Device, Received};
 use serde_json::json;
 
+pub use anon::AnonUse;
 pub use calls::TurnServers;
 pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
@@ -139,13 +140,17 @@ pub(crate) const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 /// Dove mettere un file troppo grande per stare nel messaggio (SPEC §7.5).
 pub(crate) enum FileDest<'a> {
     /// Nella casella del contatto (chat 1:1).
-    Mailbox { card: &'a SignedCard, name: &'a str },
+    Mailbox {
+        id: &'a PublicKey,
+        card: &'a SignedCard,
+        name: &'a str,
+    },
     /// Tra i file condivisi del mio nodo (gruppi).
     Shared,
 }
 
 /// L'id restituito dal nodo dopo un caricamento.
-fn uploaded_id(res: &[u8]) -> Result<String> {
+pub(crate) fn uploaded_id(res: &[u8]) -> Result<String> {
     let up: serde_json::Value = parse(res)?;
     up["id"]
         .as_str()
@@ -243,8 +248,6 @@ enum Route {
     Queued,
     /// Effimera senza strada: buttata.
     Dropped,
-    /// Nel tubo del nodo senza memoria (SPEC §14.3).
-    Tube,
 }
 
 /// Riga della lista chat.
@@ -290,8 +293,6 @@ pub struct Client {
     batch: Batch,
     /// Intervallo minimo tra due aggiornamenti della posizione (SPEC §7.6); cambia nei test.
     location_gap: u64,
-    /// Avvisi e tubo del nodo senza memoria (SPEC §14.2).
-    tubes: tubo::Tubes,
     /// Nido cieco (SPEC §14.2–14.7).
     blind: cieco::Blind,
 }
@@ -371,7 +372,6 @@ fn apply_route(msg: &mut ChatMessage, res: Result<Route>) {
             msg.via = match route {
                 Route::Direct => Some(Via::Direct),
                 Route::Node | Route::NodeUnsealed => Some(Via::Node),
-                Route::Tube => Some(Via::Tube),
                 Route::Queued | Route::Dropped => None,
             };
         }
@@ -466,7 +466,6 @@ impl Client {
                 mesh: false,
                 verifications: Vec::new(),
                 verify_requests: Vec::new(),
-                memoryless: false,
                 blind: false,
                 tokens: Vec::new(),
                 seen_blobs: Vec::new(),
@@ -483,8 +482,7 @@ impl Client {
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             punch: punch::Punch::default(),
-            tubes: tubo::Tubes::default(),
-            blind: cieco::Blind::default(),
+            blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),
@@ -543,7 +541,6 @@ impl Client {
                 mesh: false,
                 verifications: Vec::new(),
                 verify_requests: Vec::new(),
-                memoryless: false,
                 blind: false,
                 tokens: Vec::new(),
                 seen_blobs: Vec::new(),
@@ -560,8 +557,7 @@ impl Client {
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             punch: punch::Punch::default(),
-            tubes: tubo::Tubes::default(),
-            blind: cieco::Blind::default(),
+            blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),
@@ -767,12 +763,7 @@ impl Client {
             return;
         };
         let blob = b64::encode(bytes);
-        if !matches!(
-            self.try_deliver(&c.card, &blob, Kind::Normal).await,
-            Ok(Some(_))
-        ) {
-            self.tube_send_untracked(&c.identity, &blob).await;
-        }
+        let _ = self.try_deliver(&c.card, &blob, Kind::Normal).await;
     }
 
     /// "Sono collegato" a un contatto per identità, se c'è una chat con lui.
@@ -882,17 +873,23 @@ impl Client {
         Ok(parse::<Vec<serde_json::Value>>(&bytes)?.len())
     }
 
-    /// Server STUN del mio nodo (SPEC §7.9), ricordati per un'ora.
+    /// Server STUN del mio nodo (SPEC §7.9), ricordati per un'ora. Col nido cieco no: il nido
+    /// vedrebbe insieme i due indirizzi; si usano server pubblici scelti a caso (§14.6).
     async fn stun_servers(&mut self) -> Vec<std::net::SocketAddr> {
         if let Some((servers, at)) = &self.stun_cache
             && at + STUN_CACHE_SECS > now()
         {
             return servers.clone();
         }
-        let Ok(turn) = self.turn_servers().await else {
-            return Vec::new();
+        let urls = if self.state.blind {
+            self.public_stun_pick()
+        } else {
+            let Ok(turn) = self.turn_servers().await else {
+                return Vec::new();
+            };
+            turn.urls
         };
-        let servers = punch::stun_servers(&turn.urls).await;
+        let servers = punch::stun_servers(&urls).await;
         self.stun_cache = Some((servers.clone(), now()));
         servers
     }
@@ -958,7 +955,6 @@ impl Client {
         };
         let blob = b64::encode(bytes);
         matches!(self.try_deliver(&c.card, &blob, kind).await, Ok(Some(_)))
-            || self.tube_send_untracked(&c.identity, &blob).await
     }
 
     /// Offerte ricevute (rispondo) e risposte alle mie offerte (mi collego).
@@ -1031,11 +1027,6 @@ impl Client {
                 .iter()
                 .find(|c| c.identity == o.to)
                 .map(|c| c.card.clone());
-            // Nodo senza memoria: niente deposito, torna in coda e passa dal tubo.
-            if self.tube_mode(&o.to).await {
-                self.state.outbox.push(Outgoing { next_try: t, ..o });
-                continue;
-            }
             if let Some(card) = card
                 && !matches!(self.deliver_by_node(&card, &o.blob).await, Ok(Some(_)))
             {
@@ -1119,8 +1110,7 @@ impl Client {
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             punch: punch::Punch::default(),
-            tubes: tubo::Tubes::default(),
-            blind: cieco::Blind::default(),
+            blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),
@@ -1554,7 +1544,6 @@ impl Client {
             .clone();
         // Niente più collegamento diretto con chi blocco (SPEC §12.8).
         self.punch.close(id);
-        self.tubes.close(id);
         if let Some(pid) = permit_id {
             self.revoke_permit(&pid).await?;
         }
@@ -1600,11 +1589,10 @@ impl Client {
                 chat_deleted: false,
                 phone_checked: None,
                 can_ring: None,
-                tube: false,
-                caps_sent: false,
                 blind_in: None,
                 blind_out: None,
                 blind_rx: 0,
+                blind_wake: None,
             });
         }
         self.note_key_change(&info.identity);
@@ -1761,13 +1749,7 @@ impl Client {
         if let Some(route) = self.blind_drop(&id, blob, kind).await? {
             return Ok(Some(route));
         }
-        // Nodo senza memoria (SPEC §14.2): il messaggio non si deposita. Ciò che non va in coda
-        // passa nel tubo se è aperto; il resto aspetta in coda l'avviso.
-        let tube = self.tube_mode(&id).await;
-        if tube && kind == Kind::Ephemeral && self.tube_send_untracked(&id, blob).await {
-            return Ok(Some(Route::Tube));
-        }
-        if let Some((node, inbox, permit)) = info.mailbox().filter(|_| !tube) {
+        if let Some((node, inbox, permit)) = info.mailbox() {
             match self.deposit_node(node, inbox, permit, blob, kind).await {
                 Ok(route) => return Ok(Some(route)),
                 // Il nodo ha risposto di no (permesso revocato, casella piena…): non si aggira.
@@ -1818,31 +1800,13 @@ impl Client {
         blob: &str,
         kind: Kind,
     ) -> Result<Route> {
-        self.deposit_node_with(node, inbox, permit, None, blob, kind)
-            .await
-    }
-
-    /// Come [`Client::deposit_node`]; con un gettone anonimo (SPEC §14.4) il nodo non vede il
-    /// permesso, quindi non sa da quale contatto arriva il deposito.
-    pub(crate) async fn deposit_node_with(
-        &self,
-        node: &str,
-        inbox: &str,
-        permit: &rondine_core::SignedPermit,
-        token: Option<&rondine_core::token::Token>,
-        blob: &str,
-        kind: Kind,
-    ) -> Result<Route> {
-        let mut request = json!({
+        let request = json!({
             "inbox": inbox,
+            "permit": permit,
             "blob": blob,
             "ephemeral": kind == Kind::Ephemeral,
             "quiet": kind == Kind::Quiet,
         });
-        match token {
-            Some(t) => request["token"] = json!(t),
-            None => request["permit"] = json!(permit),
-        }
         let node_key = permit.verify()?.node_key;
         let (cfg, relays) = self.node_seal(node, &node_key, false).await?;
         let cfg = cfg.ok_or_else(|| Error::NoSeal(node.to_string()))?;
@@ -2009,9 +1973,6 @@ impl Client {
             next_try: t + RETRY_SECS,
         });
         self.save()?;
-        if self.tube_mode(&info.identity).await {
-            self.tube_after_queue(&info.identity, kind).await;
-        }
         if !self.state.mesh {
             return Ok(Route::Queued);
         }
@@ -2327,6 +2288,7 @@ impl Client {
             .seal_file(
                 &file,
                 FileDest::Mailbox {
+                    id: to,
                     card: &contact.card,
                     name: &contact.display_name,
                 },
@@ -2394,7 +2356,12 @@ impl Client {
             (None, Some(b64::encode(&sealed.ciphertext)))
         } else {
             let at = match dest {
-                FileDest::Mailbox { card, name } => {
+                FileDest::Mailbox { id, .. }
+                    if let Some(at) = self.blind_upload(id, &sealed.ciphertext).await? =>
+                {
+                    at
+                }
+                FileDest::Mailbox { card, name, .. } => {
                     let info = verify_card(card)?;
                     let Some((node, inbox, permit)) = info.mailbox() else {
                         return Err(Error::Invalid(format!(
@@ -2414,6 +2381,7 @@ impl Client {
                         node: node.to_string(),
                         file: Some(uploaded_id(&res)?),
                         shared: None,
+                        blind_len: None,
                     }
                 }
                 FileDest::Shared => {
@@ -2432,6 +2400,7 @@ impl Client {
                         node: self.state.node.clone(),
                         file: None,
                         shared: Some(uploaded_id(&res)?),
+                        blind_len: None,
                     }
                 }
             };
@@ -2531,8 +2500,13 @@ impl Client {
         let Some(at) = a.at.clone() else {
             return Err(Error::NotFound("il file non è più disponibile".into()));
         };
+        let mut blind_id = None;
         let (sealed, mine) = match (&at.shared, &at.file) {
             (Some(shared), _) => (self.net.get_shared(&at.node, shared).await?, None),
+            (None, Some(file)) if at.blind_len.is_some() => {
+                blind_id = Some(file.clone());
+                (self.blind_fetch(&at.node, file, at.blind_len).await?, None)
+            }
             (None, Some(file)) => {
                 self.require_node()?;
                 if node_host(&at.node)? != node_host(&self.state.node)? {
@@ -2557,6 +2531,9 @@ impl Client {
             att.key.clear();
         }
         self.save()?;
+        if let Some(file) = blind_id {
+            self.blind_forget(&at.node, &file).await;
+        }
         // Era nella mia casella ed è sul telefono: dal nodo si toglie. Se non riesce, scade.
         if let Some(path) = mine {
             let _ = self
@@ -3408,13 +3385,6 @@ impl Client {
                 .into_iter()
                 .map(|b| (b, Via::Direct)),
         );
-        blobs.extend(
-            self.tubes
-                .inbox()
-                .take()
-                .into_iter()
-                .map(|b| (b, Via::Tube)),
-        );
         let online_before = self.online_marker();
         for (blob, via) in blobs {
             self.process_blob(&blob, via, &mut events);
@@ -3456,8 +3426,6 @@ impl Client {
             self.offer_direct(&id, false).await;
         }
         self.run_punch_jobs().await;
-        // Nodo senza memoria: avvisi, tubo, conferme (SPEC §14.2).
-        events.extend(self.run_tubes().await);
         // Nido cieco: conferme, gettoni spesi, seme e gettoni ai contatti (SPEC §14.3).
         self.run_blind().await;
         // Azioni dei gruppi raccolte durante l'elaborazione (annunci, uscite, revoche).
@@ -3680,11 +3648,10 @@ impl Client {
                     chat_deleted: false,
                     phone_checked: None,
                     can_ring: None,
-                    tube: false,
-                    caps_sent: false,
                     blind_in: None,
                     blind_out: None,
                     blind_rx: 0,
+                    blind_wake: None,
                 });
                 self.note_key_change(&from);
             }
@@ -3780,14 +3747,6 @@ impl Client {
             AppMessage::StatusSeen { id, ts, .. } => Ok(self.received_status_seen(sender, &id, ts)),
             AppMessage::VerifyRequest { id, method, .. } => {
                 Ok(self.received_verify_request(sender, id, method))
-            }
-            AppMessage::Knock { id, ts, .. } => {
-                self.received_knock(sender, id, ts);
-                Ok(Vec::new())
-            }
-            AppMessage::Caps { caps, .. } => {
-                self.received_caps(sender, &caps);
-                Ok(Vec::new())
             }
             AppMessage::Blind {
                 seed,

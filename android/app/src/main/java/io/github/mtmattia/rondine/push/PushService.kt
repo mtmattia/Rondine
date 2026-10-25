@@ -12,7 +12,8 @@ import org.unifiedpush.android.connector.data.PushMessage
  */
 class PushService : UpPushService() {
     override fun onNewEndpoint(endpoint: PushEndpoint, instance: String) {
-        Repo.onPushEndpoint(endpoint.url)
+        val contact = Repo.contactOfWakeInstance(instance)
+        if (contact != null) Repo.onContactWake(contact, endpoint.url) else Repo.onPushEndpoint(endpoint.url)
     }
 
     override fun onMessage(message: PushMessage, instance: String) {
@@ -20,10 +21,13 @@ class PushService : UpPushService() {
     }
 
     override fun onRegistrationFailed(reason: FailedReason, instance: String) {
+        // Senza un indirizzo suo, il contatto riceve quello di sempre.
+        if (Repo.contactOfWakeInstance(instance) != null) return
         Repo.onPushGone("Registrazione non riuscita ($reason)")
     }
 
     override fun onUnregistered(instance: String) {
-        Repo.onPushGone("Disattivate dal distributore")
+        val contact = Repo.contactOfWakeInstance(instance)
+        if (contact != null) Repo.onContactWake(contact, null) else Repo.onPushGone("Disattivate dal distributore")
     }
 }

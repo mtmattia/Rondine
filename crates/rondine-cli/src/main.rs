@@ -219,12 +219,15 @@ enum Cmd {
     Blocca { contatto: String },
     /// Elimina la chat con un contatto (messaggi compresi), solo qui; il contatto resta.
     EliminaChat { contatto: String },
-    /// Nodo senza memoria (SPEC §14.2): `si` perché ai contatti che lo usano arrivino solo
-    /// avvisi e i messaggi passino in diretto o nel tubo, `no` per il deposito di prima.
-    SenzaMemoria { stato: Option<String> },
     /// Nido cieco (SPEC §14.2): `si` perché il nido veda solo caselle anonime e buste tutte
     /// uguali, e la sveglia la suoni chi scrive; `no` per spegnerlo. Senza argomento dice com'è.
     Cieco { stato: Option<String> },
+    /// Nido cieco (SPEC §14.7): l'indirizzo di sveglia solo per un contatto; senza indirizzo
+    /// torna quello di sempre.
+    SvegliaContatto {
+        contatto: String,
+        indirizzo: Option<String>,
+    },
     /// Mesh tra amici (SPEC §12.5): `si` per affidare ai contatti ciò che non parte e passare ciò
     /// che affidano loro, `no` per spegnerla. Senza argomento dice com'è.
     Mesh { stato: Option<String> },
@@ -1505,22 +1508,16 @@ async fn main() -> anyhow::Result<()> {
             c.mark_verified(&id)?;
             println!("Contatto verificato.");
         }
-        Cmd::SenzaMemoria { stato } => {
-            match stato.as_deref() {
-                Some("si" | "sì") => c.set_memoryless(true)?,
-                Some("no") => c.set_memoryless(false)?,
-                Some(other) => anyhow::bail!("scrivi `si` o `no`, non `{other}`"),
-                None => {}
+        Cmd::SvegliaContatto {
+            contatto,
+            indirizzo,
+        } => {
+            let id = c.find_contact(&contatto)?.identity;
+            c.set_contact_wake(&id, indirizzo.clone()).await?;
+            match indirizzo {
+                Some(u) => println!("Sveglia per {contatto}: {u}"),
+                None => println!("Sveglia per {contatto}: quella di sempre"),
             }
-            println!(
-                "Nodo senza memoria: {} (gettoni in tasca: {})",
-                if c.state().memoryless {
-                    "acceso"
-                } else {
-                    "spento"
-                },
-                c.tokens_left()
-            );
         }
         Cmd::Cieco { stato } => {
             match stato.as_deref() {
@@ -1535,8 +1532,9 @@ async fn main() -> anyhow::Result<()> {
                 .filter(|k| c.blind_ready(&k.identity))
                 .count();
             println!(
-                "Nido cieco: {} (contatti pronti: {pronti})",
-                if c.state().blind { "acceso" } else { "spento" }
+                "Nido cieco: {} (contatti pronti: {pronti}, {})",
+                if c.state().blind { "acceso" } else { "spento" },
+                if c.uses_tor() { "via Tor" } else { "senza Tor" }
             );
         }
         Cmd::Mesh { stato } => {

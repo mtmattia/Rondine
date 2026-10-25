@@ -22,6 +22,10 @@ pub struct FileAt {
     pub file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared: Option<String>,
+    /// Nel nido cieco (SPEC §14.5): `file` è l'id di `/v2/files`, e il file cifrato sono i
+    /// primi `len` byte (il resto è riempimento).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blind_len: Option<u64>,
 }
 
 /// File cifrato, pronto da spedire, con ciò che serve per decifrarlo.

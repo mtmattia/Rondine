@@ -9,6 +9,26 @@ pub const DAY_SECS: u64 = 24 * 3600;
 /// Misure fisse delle buste prima della codifica b64 (SPEC §14.5): la più piccola che basta.
 pub const BUCKETS: [usize; 5] = [2048, 8192, 32 * 1024, 128 * 1024, 192 * 1024];
 
+/// Misure fisse dei file cifrati nel nido cieco (SPEC §14.5): la più piccola che basta.
+pub const FILE_BUCKETS: [usize; 5] = [
+    256 * 1024,
+    1024 * 1024,
+    4 * 1024 * 1024,
+    16 * 1024 * 1024,
+    65 * 1024 * 1024,
+];
+
+/// Riempie di zeri un file cifrato fino alla misura fissa successiva (SPEC §14.5).
+pub fn pad_file(mut data: Vec<u8>) -> Result<Vec<u8>> {
+    let size = FILE_BUCKETS
+        .iter()
+        .copied()
+        .find(|&b| b >= data.len())
+        .ok_or(Error::Invalid("file troppo grande per il nido cieco"))?;
+    data.resize(size, 0);
+    Ok(data)
+}
+
 /// La "casella" usata nei gettoni v2: valgono per tutto il nido, non per una casella (§14.4).
 pub const NODE_SCOPE: &str = "*";
 
@@ -77,6 +97,13 @@ mod tests {
         assert_eq!(pad(vec![b'x'; 2048])?.len(), 2048);
         assert_eq!(pad(vec![b'x'; 2049])?.len(), 8192);
         assert!(pad(vec![b'x'; 192 * 1024 + 1]).is_err());
+        assert_eq!(pad_file(vec![1; 70_000])?.len(), 256 * 1024);
+        assert_eq!(pad_file(vec![1; 300 * 1024])?.len(), 1024 * 1024);
+        assert_eq!(
+            pad_file(vec![1; 64 * 1024 * 1024 + 16])?.len(),
+            65 * 1024 * 1024
+        );
+        assert!(pad_file(vec![1; 65 * 1024 * 1024 + 1]).is_err());
         let v: serde_json::Value = serde_json::from_slice(&pad(br#"{"a":1}"#.to_vec())?)?;
         assert_eq!(v["a"], 1);
         Ok(())

@@ -108,26 +108,9 @@ impl Net {
 
     async fn send(&self, req: reqwest::RequestBuilder) -> Result<Vec<u8>> {
         let res = req.send().await?;
-        let status = res.status();
+        let status = res.status().as_u16();
         let bytes = res.bytes().await?.to_vec();
-        if status.is_success() {
-            return Ok(bytes);
-        }
-        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
-        // Un nodo Rondine risponde sempre con {"error", "message"} (SPEC §11); altrimenti
-        // l'indirizzo è di un altro sito, e la sua pagina non va mostrata all'utente.
-        let (Some(code), Some(message)) = (v["error"].as_str(), v["message"].as_str()) else {
-            return Err(Error::Node {
-                status: status.as_u16(),
-                code: "not_rondine".into(),
-                message: "questo indirizzo non sembra un nodo Rondine".into(),
-            });
-        };
-        Err(Error::Node {
-            status: status.as_u16(),
-            code: code.to_string(),
-            message: message.to_string(),
-        })
+        node_result(status, bytes)
     }
 
     fn url(base: &str, path: &str) -> String {
@@ -154,12 +137,6 @@ impl Net {
         Ok((status, res.bytes().await?.to_vec()))
     }
 
-    /// `POST` di un corpo fisso a un indirizzo qualsiasi (la sveglia di un contatto, SPEC §14.7).
-    pub async fn post_raw(&self, url: &str, body: &'static str) -> Result<()> {
-        self.send(self.http.post(url).body(body)).await?;
-        Ok(())
-    }
-
     /// Richiesta senza autenticazione del proprietario; restituisce i byte della risposta.
     pub async fn call<B: Serialize>(
         &self,
@@ -169,33 +146,6 @@ impl Net {
         body: &B,
     ) -> Result<Vec<u8>> {
         self.call_with(method, base, path, body, &[]).await
-    }
-
-    /// Un pacchetto nel tubo `id` del nodo (SPEC §14.3).
-    pub async fn tube_put(&self, base: &str, id: &str, frame: Vec<u8>) -> Result<()> {
-        let req = self
-            .http
-            .put(Self::url(base, &format!("/v1/tube/{id}")))
-            .header("content-type", "application/octet-stream")
-            .body(frame);
-        self.send(req).await?;
-        Ok(())
-    }
-
-    /// I pacchetti del tubo `id`, aspettando fino a `wait` secondi che ne arrivi uno.
-    pub async fn tube_get(&self, base: &str, id: &str, wait: u64) -> Result<Vec<Vec<u8>>> {
-        #[derive(serde::Deserialize)]
-        struct Frames {
-            frames: Vec<String>,
-        }
-        let req = self
-            .http
-            .get(Self::url(base, &format!("/v1/tube/{id}?wait={wait}")));
-        let f: Frames = parse(&self.send(req).await?)?;
-        f.frames
-            .iter()
-            .map(|b| rondine_core::b64::decode(b).map_err(Into::into))
-            .collect()
     }
 
     /// Come [`Net::call`], con intestazioni in più.
@@ -293,6 +243,28 @@ impl Net {
         }
         self.send(req).await
     }
+}
+
+/// Stato e corpo di una risposta del nodo: i byte, o l'errore che il nodo ha dato (SPEC §11).
+pub(crate) fn node_result(status: u16, bytes: Vec<u8>) -> Result<Vec<u8>> {
+    if (200..300).contains(&status) {
+        return Ok(bytes);
+    }
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    // Un nodo Rondine risponde sempre con {"error", "message"} (SPEC §11); altrimenti
+    // l'indirizzo è di un altro sito, e la sua pagina non va mostrata all'utente.
+    let (Some(code), Some(message)) = (v["error"].as_str(), v["message"].as_str()) else {
+        return Err(Error::Node {
+            status,
+            code: "not_rondine".into(),
+            message: "questo indirizzo non sembra un nodo Rondine".into(),
+        });
+    };
+    Err(Error::Node {
+        status,
+        code: code.to_string(),
+        message: message.to_string(),
+    })
 }
 
 pub fn parse<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {

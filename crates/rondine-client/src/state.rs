@@ -59,12 +59,6 @@ pub struct Contact {
     /// Sa ricevere uno squillo di verifica? `None` finché non si sa (SPEC §14.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub can_ring: Option<bool>,
-    /// Usa il nodo senza memoria (avviso e tubo, SPEC §14.2): l'ha detto con `caps`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub tube: bool,
-    /// Gli ho già detto che lo uso anch'io.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub caps_sent: bool,
     /// Nido cieco (SPEC §14.3): il seme delle mie caselle che ho dato a questo contatto.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blind_in: Option<String>,
@@ -74,6 +68,10 @@ pub struct Contact {
     /// Buste ritirate dalle sue caselle dall'ultima volta che gli ho dato gettoni.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub blind_rx: u32,
+    /// Nido cieco (SPEC §14.7): l'indirizzo di sveglia solo per questo contatto, se l'app ne ha
+    /// chiesto uno al distributore; altrimenti gli do quello di sempre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blind_wake: Option<String>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -154,8 +152,6 @@ pub enum Via {
     Direct,
     /// Depositato nel nodo.
     Node,
-    /// Passato nel tubo del nodo, in tempo reale e senza essere conservato (SPEC §14.3).
-    Tube,
 }
 
 /// Posizione di un messaggio, fissa o in tempo reale (SPEC §7.6).
@@ -382,10 +378,6 @@ pub struct State {
     /// Richieste di verifica del mio numero arrivate dai contatti (SPEC §14.1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verify_requests: Vec<crate::verify::VerifyRequest>,
-    /// Nodo senza memoria (SPEC §14.2): ai contatti che lo usano anche loro arrivano solo
-    /// avvisi, e i messaggi passano in diretto o nel tubo. L'app lo accende.
-    #[serde(default)]
-    pub memoryless: bool,
     /// Nido cieco (SPEC §14.2): caselle rotanti, gettoni, buste a misura fissa, sveglia suonata
     /// da chi scrive.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

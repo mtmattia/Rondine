@@ -3,9 +3,10 @@
 
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
-use rondine_core::blind::{BUCKETS, NODE_SCOPE, day};
+use axum::response::IntoResponse;
+use rondine_core::blind::{BUCKETS, FILE_BUCKETS, NODE_SCOPE, day};
 use rondine_core::{b64, now, random_id};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -16,6 +17,10 @@ use crate::{ApiError, ApiResult, AppState, parse_json};
 const MAX_DROPS_PER_INBOX: u64 = 1000;
 /// Buste date in una risposta.
 const PICKUP_LIMIT: u32 = 200;
+/// File più grande del nido cieco (SPEC §14.5).
+pub(crate) const MAX_BLIND_FILE: usize = FILE_BUCKETS[FILE_BUCKETS.len() - 1];
+/// Spazio massimo per tutti i file del nido cieco.
+const MAX_BLIND_FILES_TOTAL: usize = 8 * 1024 * 1024 * 1024;
 
 fn check_inbox(inbox: &str) -> ApiResult<()> {
     match b64::decode(inbox) {
@@ -117,4 +122,63 @@ pub(crate) async fn tokens(
     key.issue(&req.blinded)
         .map(Json)
         .map_err(|e| ApiError::bad(e.to_string()))
+}
+
+/// `POST /v2/files`: un file cifrato a misura fissa, pagato con il gettone in `rondine-token`.
+pub(crate) async fn upload_file(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    if !FILE_BUCKETS.contains(&body.len()) {
+        return Err(ApiError::bad(
+            "il file non ha una misura fissa (SPEC §14.5)",
+        ));
+    }
+    let token: rondine_core::token::Token = headers
+        .get("rondine-token")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| b64::decode(v).ok())
+        .and_then(|v| serde_json::from_slice(&v).ok())
+        .ok_or_else(|| ApiError::bad("manca il gettone"))?;
+    {
+        let used: usize = s.db()?.blind_file_sizes()?.iter().sum();
+        if used + body.len() > MAX_BLIND_FILES_TOTAL {
+            return Err(ApiError::new(
+                StatusCode::INSUFFICIENT_STORAGE,
+                "node_full",
+                "il nido non ha più spazio per i file",
+            ));
+        }
+    }
+    s.spend_token(NODE_SCOPE, &token)?;
+    s.0.deposits_token
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let id = random_id();
+    s.db()?.put_blind_file(&id, &body, day(now()))?;
+    Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
+}
+
+/// `GET /v2/files/{id}`: basta l'id.
+pub(crate) async fn fetch_file(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    let data = s
+        .db()?
+        .blind_file(&id)?
+        .ok_or_else(|| ApiError::not_found("file sconosciuto o scaduto"))?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+        data,
+    ))
+}
+
+/// `DELETE /v2/files/{id}`: chi l'ha scaricato lo cancella. Basta l'id.
+pub(crate) async fn delete_file(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    s.db()?.delete_blind_file(&id)?;
+    Ok(StatusCode::NO_CONTENT)
 }

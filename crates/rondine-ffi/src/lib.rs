@@ -74,6 +74,9 @@ pub struct Profile {
     pub phone_verified: bool,
     /// Mesh tra amici accesa (SPEC §12.5).
     pub mesh: bool,
+    /// Nido cieco acceso (SPEC §14.2), e se passa da Tor (§14.6).
+    pub blind: bool,
+    pub blind_tor: bool,
     /// Le mie "Info" attive e fino a quando (SPEC §7.7).
     pub about: Option<String>,
     pub about_until: Option<u64>,
@@ -129,7 +132,7 @@ pub struct Message {
     pub error: Option<String>,
     /// Consegnato senza sigillo (SPEC §6.3): il nodo del contatto ha visto il mio IP.
     pub unsealed: bool,
-    /// Da dove è passato (SPEC §14.5): "diretto", "nodo", "tubo" o "" se non si sa.
+    /// Da dove è passato (SPEC §14.5): "diretto", "nodo" o "" se non si sa.
     pub via: String,
 }
 
@@ -637,7 +640,6 @@ fn message(m: &ChatMessage) -> Message {
         via: match m.via {
             Some(Via::Direct) => "diretto",
             Some(Via::Node) => "nodo",
-            Some(Via::Tube) => "tubo",
             None => "",
         }
         .into(),
@@ -811,6 +813,8 @@ fn view_of(c: &Client) -> View {
             photo: c.my_photo().map(|p| p.to_string_lossy().into_owned()),
             phone_verified: s.phone_verified,
             mesh: s.mesh,
+            blind: s.blind,
+            blind_tor: c.uses_tor(),
             about: c.my_about().map(|a| a.text),
             about_until: c.my_about().and_then(|a| a.until),
         })
@@ -1665,14 +1669,27 @@ impl Rondine {
         .await
     }
 
-    /// Accende o spegne il nodo senza memoria (SPEC §14.2): l'app lo accende all'avvio.
-    pub async fn set_memoryless(&self, on: bool) -> Result<()> {
-        Ok(self.with(move |c| c.set_memoryless(on)).await?)
-    }
-
     /// Accende o spegne il nido cieco (SPEC §14.2).
     pub async fn set_blind(&self, on: bool) -> Result<()> {
         self.run(move |c| Box::pin(async move { Ok(c.set_blind(on).await?) }))
+            .await
+    }
+
+    /// Contatti (id) a cui dare un indirizzo di sveglia UnifiedPush tutto loro (SPEC §14.7).
+    pub async fn blind_wake_wanted(&self) -> Vec<String> {
+        self.with(|c| {
+            c.blind_wake_wanted()
+                .iter()
+                .map(PublicKey::to_b64)
+                .collect()
+        })
+        .await
+    }
+
+    /// L'indirizzo di sveglia solo per questo contatto (`None`: quello di sempre).
+    pub async fn set_contact_wake(&self, id: String, url: Option<String>) -> Result<()> {
+        let id = key(&id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.set_contact_wake(&id, url).await?) }))
             .await
     }
 

@@ -1890,7 +1890,7 @@ private suspend fun forward(messages: List<UiMessage>, target: ChatTarget) {
 private fun BubbleMeta(m: UiMessage, tint: Color) {
     val badge = when (m.via) {
         "diretto" -> Icons.Filled.Lock to "Diretto, da telefono a telefono: il nodo non l'ha visto"
-        "nodo", "tubo" -> Icons.Outlined.MoveToInbox to "Passato dal nodo"
+        "nodo" -> Icons.Outlined.MoveToInbox to "Passato dal nodo"
         else -> null
     }
     Text(hourMinute(m.ts), fontSize = 11.sp, color = tint)

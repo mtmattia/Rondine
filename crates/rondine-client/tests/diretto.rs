@@ -204,3 +204,59 @@ fn stun_risposta_e_lettura() -> R {
     assert!(rondine_core::stun::answer(b"ciao", from).is_none());
     Ok(())
 }
+
+/// STUN che conta le richieste a cui risponde.
+async fn counting_stun()
+-> Result<(String, std::sync::Arc<std::sync::atomic::AtomicUsize>), Box<dyn std::error::Error>> {
+    let sock = tokio::net::UdpSocket::bind("127.0.0.1:0").await?;
+    let url = format!("stun:{}", sock.local_addr()?);
+    let n = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = n.clone();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 576];
+        while let Ok((len, from)) = sock.recv_from(&mut buf).await {
+            if let Some(resp) = rondine_core::stun::answer(&buf[..len], from) {
+                count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let _ = sock.send_to(&resp, from).await;
+            }
+        }
+    });
+    Ok((url, n))
+}
+
+/// Col nido cieco il buco nel NAT si fa con STUN pubblici, non con quello del nido, che
+/// vedrebbe insieme i due indirizzi (SPEC §14.6).
+#[tokio::test]
+async fn col_nido_cieco_stun_pubblico_e_non_del_nido() -> R {
+    let (node_stun, node_hits) = counting_stun().await?;
+    let (public, public_hits) = counting_stun().await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let node = format!("http://{}", listener.local_addr()?);
+    let state = AppState::new(Config {
+        public_url: node.clone(),
+        node_key: Identity::generate(),
+        store: Store::in_memory()?,
+        allow_local_push: true,
+        fcm: None,
+        sms: None,
+        turn: Some(TurnConfig {
+            urls: vec![node_stun],
+            secret: None,
+        }),
+    })?;
+    tokio::spawn(rondine_nodo::serve(listener, state));
+    let tmp = TempDir::new()?;
+    let mut mattia = Client::create(&tmp.path().join("Mattia"), "Mattia", &node).await?;
+    let mut silvia = Client::create(&tmp.path().join("Silvia"), "Silvia", &node).await?;
+    for c in [&mut mattia, &mut silvia] {
+        c.set_anon_plain();
+        c.set_blind(true).await?;
+        c.set_public_stun(vec![public.clone()]);
+    }
+    silvia.add(&mattia.invite_link()?).await?;
+    until_linked(&mut silvia, &mut mattia).await?;
+    use std::sync::atomic::Ordering::Relaxed;
+    assert_eq!(node_hits.load(Relaxed), 0, "lo STUN del nido non si usa");
+    assert!(public_hits.load(Relaxed) >= 2);
+    Ok(())
+}

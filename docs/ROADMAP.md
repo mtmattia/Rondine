@@ -125,7 +125,7 @@ scrive a chi riceve. Prima il diretto, il nido è l'ultima spiaggia e vale sempr
 - [ ] Arti nell'app: deposito, ritiro, sveglia e offerta del buco via Tor, circuiti isolati (§14.6)
 - [ ] STUN da server pubblici invece che dal nido (§14.6)
 - [ ] sveglia suonata da chi scrive, con le regole di §14.7; il nido non sveglia più
-- [ ] ripetitore FCM su un server sempre acceso (spesa: decide Mattia)
+- [x] ripetitore FCM su un server sempre acceso: il Mac di Mattia (nido e ripetitore, dal 2026-10-25), verso Google solo via Tor (Arti, `--fcm-proxy`, §8.1)
 - [ ] provare Tor nell'estensione delle notifiche di iPhone
 - [ ] togliere avviso di giacenza, tubo e staffetta (codice di d19f09f e §6.3)
 

@@ -610,6 +610,12 @@ che l'app ha ricevuto una sveglia. Per chiamare FCM (API HTTP v1) il ripetitore 
 (libreria `ring`) un JWT per `https://oauth2.googleapis.com/token`, con lo scope
 `https://www.googleapis.com/auth/firebase.messaging`. Lo stesso schema servirà per APNs (iPhone).
 
+**Verso Google solo via Tor** (`--fcm-proxy socks5h://…`, opzionale): con il proxy SOCKS di un
+client Tor (Arti o tor) tutte le chiamate a Google (token d'accesso e invio) passano da Tor, nomi
+compresi (`socks5h`; `socks5` è rifiutato perché risolverebbe i nomi fuori da Tor). Google non vede
+l'IP del ripetitore. Ogni sveglia prova al massimo due percorsi, con due utenti SOCKS a caso diversi
+(Tor isola i circuiti per utente); se nessuno riesce risponde `502` e **non** riprova in chiaro.
+
 ## 9. Scoperta dalla rubrica, senza centralino
 
 Due persone che hanno l'una il numero dell'altra si trovano da sole.

@@ -181,7 +181,7 @@ impl AppState {
             turn: cfg.turn,
             http: push::http_client()?,
             fcm: match cfg.fcm {
-                Some(f) => Some(fcm::Fcm::new(f, push::http_client()?)),
+                Some(f) => Some(fcm::Fcm::new(f)?),
                 None => None,
             },
             rate: Mutex::new(HashMap::new()),

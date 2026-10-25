@@ -154,6 +154,12 @@ impl Net {
         Ok((status, res.bytes().await?.to_vec()))
     }
 
+    /// `POST` di un corpo fisso a un indirizzo qualsiasi (la sveglia di un contatto, SPEC §14.7).
+    pub async fn post_raw(&self, url: &str, body: &'static str) -> Result<()> {
+        self.send(self.http.post(url).body(body)).await?;
+        Ok(())
+    }
+
     /// Richiesta senza autenticazione del proprietario; restituisce i byte della risposta.
     pub async fn call<B: Serialize>(
         &self,

@@ -1,5 +1,6 @@
 //! Nodo Rondine: API HTTP descritta in `docs/SPEC.md` §11.
 
+mod cieco;
 mod fcm;
 mod files;
 mod phone;
@@ -275,6 +276,14 @@ impl AppState {
         }
     }
 
+    /// Buste del nido cieco in attesa: `(casella, lunghezza)` (per i test, SPEC §14.5).
+    pub fn drops(&self) -> Vec<(String, usize)> {
+        self.db()
+            .ok()
+            .and_then(|db| db.all_drops().ok())
+            .unwrap_or_default()
+    }
+
     /// Dimensioni delle buste in attesa in una casella (per i test, SPEC §14.2).
     pub fn queued_sizes(&self, inbox: &str) -> Vec<usize> {
         self.db()
@@ -438,6 +447,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/inboxes/{inbox}/seen", get(inbox_seen))
         .route("/v1/inboxes/{inbox}/tokens", post(issue_tokens))
         .route("/v1/tube/{id}", put(tube::put).get(tube::get))
+        .route("/v2/drop", post(cieco::drop))
+        .route("/v2/pickup", post(cieco::pickup))
+        .route("/v2/ack", post(cieco::ack))
+        .route("/v2/tokens", post(cieco::tokens))
         .route("/v1/inboxes/{inbox}/keypackages", post(upload_keypackages))
         .route("/v1/inboxes/{inbox}/turn", get(turn_credentials))
         .route(
@@ -836,6 +849,8 @@ async fn info(State(s): State<AppState>) -> Json<serde_json::Value> {
     }
     // Nodo senza memoria (SPEC §14): tubo e gettoni anonimi.
     v["tube"] = json!(true);
+    // Nido cieco (SPEC §14.2): rotte `/v2`.
+    v["blind"] = json!(true);
     if let Ok(key) = s.token_key(rondine_core::token::epoch(now()))
         && let Ok(signed) = rondine_core::Signed::sign(&s.0.node, &key.config())
     {

@@ -720,7 +720,7 @@ non c'è): un errore in un altro formato vuol dire che l'indirizzo non è un nod
 | `POST /v2/drop` | gettone | `{inbox, token, blob}` → `{id}`, via Tor, senza sveglia (§14.5) |
 | `POST /v2/pickup` | — | `{inbox}` → `[{id, blob}]`, una casella per richiesta (§14.5) |
 | `POST /v2/ack` | — | `{inbox, ids}` (§14.5) |
-| `POST /v2/tokens` | chiave di membro | gettoni anonimi per tutto il nido (§14.4) |
+| `POST /v2/tokens` | chiave di membro (§6) | `{blinded}` → gettoni anonimi per tutto il nido (§14.4) |
 | `PUT /v1/names/{nome}` | firma nel record | registra o aggiorna `Signed<NameClaim>` |
 | `GET /v1/names/{nome}` | — | `Signed<NameClaim>` |
 | `DELETE /v1/names/{nome}` | proprietario | libera il nome (auth con la chiave dell'identità) |
@@ -973,7 +973,8 @@ contro il proprio elenco; l'Argon2id lo rallenta, non lo impedisce.
 ## 14. Proposta: un nodo che non conserva né messaggi né numeri
 
 > **Stato:** §14.1 decisa il 2026-10-24; §14.2–14.9 (nido cieco, v2) decise con Mattia il
-> 2026-10-25, non ancora implementate. Cambia il protocollo: sarà `v: 2` dove
+> 2026-10-25: §14.3–14.5 e §14.7 implementate nel client e nel nido (CLI `rondine cieco`), senza
+> Tor per ora (§14.6). Cambia il protocollo: sarà `v: 2` dove
 > serve, e i nodi accetteranno le due versioni finché le app vecchie non spariscono.
 
 Obiettivo: chi gestisce un nodo non vede **chi scrive a chi** né **i numeri di telefono** (dal
@@ -1059,7 +1060,7 @@ sua tariffa. Uno squillo non risposto di solito non costa; un SMS internazionale
 può costare a chi lo manda, e l'app lo dice prima di mandarlo.
 ### 14.2 Nido cieco: obiettivo e regole (v2)
 
-> **Stato: deciso con Mattia il 2026-10-25, non implementato.** Sostituisce l'avviso di giacenza e
+> **Stato: deciso con Mattia il 2026-10-25; Tor (§14.6) e lo STUN pubblico ancora da fare.** Sostituisce l'avviso di giacenza e
 > il tubo della prima proposta (codice del commit d19f09f, mai acceso nell'app: andrà tolto).
 > Le API sono sotto `/v2`; i nodi accettano `/v1` finché le app vecchie non spariscono.
 
@@ -1082,47 +1083,61 @@ telefoni sullo stesso id).
 
 ### 14.3 Caselle di chat rotanti
 
-Ogni chat ha, per ogni destinatario e per ogni giorno, una casella che conoscono solo i membri.
+Ogni chat ha, per ogni destinatario e per ogni giorno, una casella che conoscono solo i due.
 
-- Alla nascita della chat (Welcome, §7.1 e §7.4) ogni membro calcola
-  `seme = MLS-Exporter("rondine/v2/chat-inbox", "", 32)` sull'epoca del Welcome e lo conserva:
-  non cambia con le epoche successive, così i messaggi in volo durante un commit non si perdono.
-  Chi entra dopo riceve il seme in un messaggio MLS `{"type": "chat_seed", "v": 2, "seed": "<b64>"}`.
+- Il **destinatario** sceglie per ogni contatto un seme casuale di 32 byte e glielo dà dentro
+  MLS, con il messaggio `blind` (sotto). Ognuno dei due definisce così le caselle in cui riceve:
+  non serve mettersi d'accordo e non dipende dalle epoche MLS.
 - `casella(giorno, destinatario) = b64(blake3::keyed_hash(seme, "rondine/v2/inbox" || giorno ||
   chiave_destinatario)[..16])`, `giorno` = giorni UNIX (u64 big endian).
-- La casella sta sul **nido del destinatario** (dal suo biglietto, §4). Chi ritira guarda la
-  casella di oggi e di ieri.
+- La casella sta sul **nido del destinatario**. Chi ritira guarda la casella di oggi e di ieri.
 - Il nido crea una casella al primo deposito. Conoscere i 16 byte della casella basta per ritirare
   e confermare: sono 128 bit casuali per chi non ha il seme.
+
+Messaggio MLS, dal destinatario a chi gli scrive (anche di nuovo, per dare altri gettoni o un
+nuovo indirizzo di sveglia):
+
+```json
+{ "type": "blind", "v": 1, "seed": "<b64 32 byte>", "node": "<URL del nido>",
+  "tokens": [<gettoni, §14.4>], "wake": "<indirizzo della sveglia, §14.7>" }
+```
+
+Con lo stesso `seed` e `node` i gettoni nuovi si aggiungono a quelli che si hanno; con un seme o
+un nido diverso sostituiscono tutto. Chi accende il nido cieco lo manda a tutti i contatti, e ai
+contatti nuovi alla prima `sync`.
 
 Il nido vede caselle casuali che nascono e spariscono ogni giorno: non sa di chi sono, né che due
 caselle sono della stessa persona o della stessa chat.
 
 ### 14.4 Gettoni anonimi (v2)
 
-Gettoni ciechi VOPRF (RFC 9497, ristretto255, libreria `voprf`, già in `rondine-core::token`):
-il nodo vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla prima versione:
-- il gettone vale per **tutto il nido**, non per una casella (l'input è
-  `"rondine/v2/token|" || nonce`), perché le caselle cambiano ogni giorno;
-- i gettoni li chiede al nido chi ci tiene la casella, con una **chiave di membro** del nido:
-  una chiave Ed25519 creata per quel nido, diversa dall'identità e mai nel biglietto. La richiesta
-  passa da Tor. Il nido sa che il membro M ha chiesto 20 gettoni, non a chi li darà.
-- Il destinatario passa i gettoni ai contatti dentro MLS:
-  `{"type": "tokens", "v": 2, "node": "<URL>", "items": ["<b64>", …]}`. Il nido limita i
-  gettoni per membro e per epoca (anti-spam).
+Gettoni ciechi VOPRF (RFC 9497, ristretto255, libreria `voprf`, `rondine-core::token`): il nodo
+vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla prima versione:
+- il gettone vale per **tutto il nido**, non per una casella: al posto della casella l'input usa
+  `"*"`, perché le caselle cambiano ogni giorno;
+- i gettoni li chiede al nido chi ci tiene le caselle, con `POST /v2/tokens` `{blinded}`
+  autenticato (intestazione `Authorization` di §6) con una **chiave di membro**:
+  `Identity::from_seed(blake3::derive_key("rondine/v2/member", seme_identità || URL_nido))`,
+  diversa per ogni nido, mai nel biglietto. Il nido sa che il membro M ha chiesto dei gettoni, non
+  a chi li darà;
+- il destinatario ne dà 20 a ogni contatto nel messaggio `blind`, e altri 20 dopo aver ritirato
+  10 buste da quel contatto. Senza gettoni chi scrive torna al deposito di prima (§6).
 
 ### 14.5 Busta, deposito, ritiro (v2)
 
-- **Busta a misura fissa:** il `blob` (§6.1) si riempie fino a **2048 byte** prima della codifica
-  (riempimento dentro il messaggio MLS, con il padding di openmls). Busta più grande → si manda come
-  file. I file (§7.5) si riempiono fino a una taglia: 64 KiB, 1 MiB, 8 MiB o 64 MiB.
-- `POST /v2/drop` `{inbox, token, blob}` → `{id}`. Nessuna sveglia.
+- **Busta a misura fissa:** il JSON della busta (§6.1) si riempie di spazi in coda (il JSON resta
+  valido) fino alla misura successiva tra **2, 8, 32, 128 e 192 KiB**, poi si codifica in b64.
+  Il nido rifiuta ogni altra misura. I messaggi di testo stanno tutti in 2 KiB.
+- `POST /v2/drop` `{inbox, token, blob}` → `{id}`. Nessuna sveglia. Gettone speso o scaduto →
+  `403`, e chi scrive prova il prossimo.
 - `POST /v2/pickup` `{inbox}` → `[{id, blob}]`. **Una casella per richiesta, ognuna su un circuito
   Tor diverso** (isolamento di Arti): chiedere più caselle insieme le legherebbe tra loro.
 - `POST /v2/ack` `{inbox, ids}`: il nido cancella. Senza conferma, cancella dopo 30 giorni.
 - Il nido salva solo `inbox`, `id`, `blob` e il **giorno** di arrivo. Niente IP, niente ore, niente
-  log delle richieste.
+  log delle richieste. In `/v1/info` dice `"blind": true`.
 - Il nido si raggiunge solo in HTTPS: l'uscita di Tor non deve vedere caselle e gettoni.
+- Il deposito cieco vale per le chat 1:1 e per i membri dei gruppi che sono anche contatti; il
+  "sta scrivendo" (§7.3) non passa dal nido cieco, solo dal diretto.
 
 ### 14.6 Tor
 
@@ -1136,12 +1151,14 @@ il nodo vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla p
 
 ### 14.7 Sveglia suonata da chi scrive
 
-- Il destinatario manda a ogni contatto, dentro MLS, il suo indirizzo di sveglia:
-  `{"type": "wake_target", "v": 2, "url": "https://…"}`. Versione libera: l'endpoint UnifiedPush
-  (ntfy), uno diverso per contatto. Versione Play e iPhone: `<ripetitore>/v1/fcm/<token>` o
-  l'equivalente APNs (§8.1).
-- Dopo un deposito nel nido, chi scrive fa `POST` all'indirizzo, via Tor, con `{"v":1,"t":"wake"}`.
-  Il nido non sveglia più nessuno in v2 (`PUT /v1/inboxes/{inbox}/push` non si usa).
+- Il destinatario manda a ogni contatto il suo indirizzo di sveglia nel campo `wake` del messaggio
+  `blind` (§14.3). Versione libera: l'endpoint UnifiedPush (ntfy); più avanti uno diverso per
+  contatto. Versione Play e iPhone: `<ripetitore>/v1/fcm/<token>` o l'equivalente APNs (§8.1).
+  Se l'indirizzo cambia, il destinatario rimanda `blind` a tutti.
+- Dopo un deposito nel nido, chi scrive fa `POST` all'indirizzo, via Tor, con il corpo
+  `{"v":1,"t":"wake"}`. I depositi silenziosi (posizione in tempo reale, §6) non suonano.
+- Il nido non sveglia più nessuno: chi accende il nido cieco toglie il bersaglio della sveglia dal
+  proprio nido (`DELETE /v1/inboxes/{inbox}/push`) e non lo registra più.
 - **Sveglie con giudizio:**
   - niente sveglia se c'è un collegamento diretto vivo con il contatto (§12.4): mentre si chatta
     con l'app aperta, nessuna sveglia;

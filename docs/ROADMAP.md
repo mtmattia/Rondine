@@ -118,12 +118,16 @@ Il contenuto è già illeggibile. Restano da nascondere al gestore del nodo:
 
 **Nido cieco (SPEC §14.2–14.9, deciso con Mattia il 2026-10-25).** Obiettivo: nessuno lega chi
 scrive a chi riceve. Prima il diretto, il nido è l'ultima spiaggia e vale sempre come estraneo.
-- [ ] caselle di chat rotanti dal seme MLS (§14.3)
-- [ ] gettoni v2 per tutto il nido, chiave di membro (§14.4)
-- [ ] buste da 2048 byte e file a taglie fisse; `/v2/drop`, `/v2/pickup`, `/v2/ack` (§14.5)
+- [x] caselle di chat rotanti, seme dato dal destinatario nel messaggio `blind` (§14.3)
+- [x] gettoni v2 per tutto il nido, chiave di membro (§14.4)
+- [x] buste a misure fisse (2–192 KiB); `/v2/drop`, `/v2/pickup`, `/v2/ack`, `/v2/tokens` (§14.5)
+- [ ] file (§7.5) a taglie fisse anche nel nido cieco
 - [ ] Arti nell'app: deposito, ritiro, sveglia e offerta del buco via Tor, circuiti isolati (§14.6)
 - [ ] STUN da server pubblici invece che dal nido (§14.6)
-- [ ] sveglia suonata da chi scrive, con le regole di §14.7; il nido non sveglia più
+- [x] sveglia suonata da chi scrive, con le regole di §14.7; il nido non sveglia più
+- [x] CLI `rondine cieco si|no` e `set_blind` nel ponte per l'app
+- [ ] interruttore nell'app (o acceso da sola quando i contatti sono pronti)
+- [ ] un indirizzo di sveglia ntfy diverso per contatto
 - [ ] ripetitore FCM sul Mac di Mattia (scelta del 2026-10-25), raggiungibile da internet in
       HTTPS (Cloudflare Tunnel, vedi M1): con il Mac spento o addormentato la versione Play non
       riceve sveglie

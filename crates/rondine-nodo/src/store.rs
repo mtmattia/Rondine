@@ -110,6 +110,13 @@ CREATE TABLE IF NOT EXISTS spent_tokens (
     id TEXT PRIMARY KEY,
     expires_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS drops (
+    id TEXT PRIMARY KEY,
+    inbox TEXT NOT NULL,
+    blob TEXT NOT NULL,
+    day INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS drops_inbox ON drops (inbox);
 ";
 
 /// Password del nome di un'identità (SPEC §3.4): il sale e `blake3(accesso)`, mai la password.
@@ -737,6 +744,63 @@ impl Store {
             "DELETE FROM spent_tokens WHERE expires_at <= ?1",
             [to_i64(now)],
         )?;
+        self.conn.execute(
+            "DELETE FROM drops WHERE day < ?1",
+            [to_i64(
+                now.saturating_sub(message_ttl) / rondine_core::blind::DAY_SECS,
+            )],
+        )?;
+        Ok(())
+    }
+
+    // --- nido cieco (SPEC §14.5): solo casella, busta e giorno ---
+
+    pub fn put_drop(&self, id: &str, inbox: &str, blob: &str, day: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO drops (id, inbox, blob, day) VALUES (?1, ?2, ?3, ?4)",
+            params![id, inbox, blob, to_i64(day)],
+        )?;
+        Ok(())
+    }
+
+    pub fn count_drops(&self, inbox: &str) -> Result<u64> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM drops WHERE inbox = ?1",
+            [inbox],
+            |r| r.get::<_, i64>(0).map(to_u64),
+        )
+    }
+
+    /// Le buste di una casella: `(id, blob)`, in ordine di arrivo.
+    pub fn drops(&self, inbox: &str, limit: u32) -> Result<Vec<(String, String)>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT id, blob FROM drops WHERE inbox = ?1 ORDER BY rowid LIMIT ?2")?;
+        let rows = st.query_map(params![inbox, limit], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Tutte le buste: `(casella, lunghezza)` (per i test).
+    pub fn all_drops(&self) -> Result<Vec<(String, usize)>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT inbox, LENGTH(blob) FROM drops ORDER BY rowid")?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                usize::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+            ))
+        })?;
+        rows.collect()
+    }
+
+    pub fn ack_drops(&self, inbox: &str, ids: &[String]) -> Result<()> {
+        for id in ids {
+            self.conn.execute(
+                "DELETE FROM drops WHERE inbox = ?1 AND id = ?2",
+                params![inbox, id],
+            )?;
+        }
         Ok(())
     }
 

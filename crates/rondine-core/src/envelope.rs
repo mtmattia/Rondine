@@ -145,6 +145,17 @@ pub enum AppMessage {
     },
     /// Cosa sa fare questo telefono (SPEC §14.2), es. `["tubo"]`.
     Caps { v: u32, caps: Vec<String> },
+    /// Nido cieco (SPEC §14.3–14.7): il destinatario dà a chi gli scrive il seme delle sue
+    /// caselle di chat, il suo nido, gettoni per depositarci e dove suonare la sveglia.
+    Blind {
+        v: u32,
+        seed: String,
+        node: String,
+        #[serde(default)]
+        tokens: Vec<crate::token::Token>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wake: Option<String>,
+    },
     /// Un tipo che questa versione non conosce, da una versione più nuova: si ignora (SPEC §7).
     #[serde(other)]
     Unknown,
@@ -397,6 +408,7 @@ impl AppMessage {
             AppMessage::StatusDelete { v, .. } | AppMessage::StatusSeen { v, .. } => *v,
             AppMessage::VerifyRequest { v, .. } | AppMessage::VerifyReply { v, .. } => *v,
             AppMessage::Knock { v, .. } | AppMessage::Caps { v, .. } => *v,
+            AppMessage::Blind { v, .. } => *v,
             AppMessage::Unknown => crate::PROTOCOL_VERSION,
         }
     }

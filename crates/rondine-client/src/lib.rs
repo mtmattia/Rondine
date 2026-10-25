@@ -2,6 +2,7 @@
 
 mod backup;
 mod calls;
+mod cieco;
 mod error;
 mod groups;
 mod lan;
@@ -291,6 +292,8 @@ pub struct Client {
     location_gap: u64,
     /// Avvisi e tubo del nodo senza memoria (SPEC §14.2).
     tubes: tubo::Tubes,
+    /// Nido cieco (SPEC §14.2–14.7).
+    blind: cieco::Blind,
 }
 
 /// Cosa fare di un `relay` ricevuto (SPEC §12.5).
@@ -464,6 +467,7 @@ impl Client {
                 verifications: Vec::new(),
                 verify_requests: Vec::new(),
                 memoryless: false,
+                blind: false,
                 tokens: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
@@ -480,6 +484,7 @@ impl Client {
             lan: None,
             punch: punch::Punch::default(),
             tubes: tubo::Tubes::default(),
+            blind: cieco::Blind::default(),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),
@@ -539,6 +544,7 @@ impl Client {
                 verifications: Vec::new(),
                 verify_requests: Vec::new(),
                 memoryless: false,
+                blind: false,
                 tokens: Vec::new(),
                 seen_blobs: Vec::new(),
                 seen_relays: Vec::new(),
@@ -555,6 +561,7 @@ impl Client {
             lan: None,
             punch: punch::Punch::default(),
             tubes: tubo::Tubes::default(),
+            blind: cieco::Blind::default(),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),
@@ -1113,6 +1120,7 @@ impl Client {
             lan: None,
             punch: punch::Punch::default(),
             tubes: tubo::Tubes::default(),
+            blind: cieco::Blind::default(),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),
@@ -1594,6 +1602,9 @@ impl Client {
                 can_ring: None,
                 tube: false,
                 caps_sent: false,
+                blind_in: None,
+                blind_out: None,
+                blind_rx: 0,
             });
         }
         self.note_key_change(&info.identity);
@@ -1745,6 +1756,10 @@ impl Client {
             if let Ok(mut m) = self.slow_lan.lock() {
                 m.insert(id, t + SLOW_LAN_SECS);
             }
+        }
+        // Nido cieco (SPEC §14.5): casella anonima del giorno, busta a misura fissa, gettone.
+        if let Some(route) = self.blind_drop(&id, blob, kind).await? {
+            return Ok(Some(route));
         }
         // Nodo senza memoria (SPEC §14.2): il messaggio non si deposita. Ciò che non va in coda
         // passa nel tubo se è aperto; il resto aspetta in coda l'avviso.
@@ -3384,6 +3399,8 @@ impl Client {
                 retired_acks.push((r.node, format!("{rpath}/ack"), rids));
             }
         }
+        // Nido cieco: le mie caselle di chat (SPEC §14.5).
+        blobs.extend(self.blind_pickup().await);
         blobs.extend(
             self.punch
                 .inbox()
@@ -3441,6 +3458,8 @@ impl Client {
         self.run_punch_jobs().await;
         // Nodo senza memoria: avvisi, tubo, conferme (SPEC §14.2).
         events.extend(self.run_tubes().await);
+        // Nido cieco: conferme, gettoni spesi, seme e gettoni ai contatti (SPEC §14.3).
+        self.run_blind().await;
         // Azioni dei gruppi raccolte durante l'elaborazione (annunci, uscite, revoche).
         events.extend(self.run_pending().await);
         // Contatti nuovi: devono sapere dove trovarmi (SPEC §12.3).
@@ -3663,6 +3682,9 @@ impl Client {
                     can_ring: None,
                     tube: false,
                     caps_sent: false,
+                    blind_in: None,
+                    blind_out: None,
+                    blind_rx: 0,
                 });
                 self.note_key_change(&from);
             }
@@ -3765,6 +3787,16 @@ impl Client {
             }
             AppMessage::Caps { caps, .. } => {
                 self.received_caps(sender, &caps);
+                Ok(Vec::new())
+            }
+            AppMessage::Blind {
+                seed,
+                node,
+                tokens,
+                wake,
+                ..
+            } => {
+                self.received_blind(sender, seed, node, tokens, wake);
                 Ok(Vec::new())
             }
             AppMessage::VerifyReply {
@@ -3944,6 +3976,15 @@ impl Client {
     /// Registra l'endpoint UnifiedPush del telefono sul mio nodo.
     pub async fn set_push_endpoint(&mut self, endpoint: &str) -> Result<()> {
         self.require_node()?;
+        // Nido cieco (SPEC §14.7): il nido non sveglia; il nuovo indirizzo va ai contatti.
+        if self.state.blind {
+            if self.state.push_endpoint.as_deref() != Some(endpoint) {
+                self.state.push_endpoint = Some(endpoint.to_string());
+                self.save()?;
+                self.blind_resend_all();
+            }
+            return Ok(());
+        }
         self.net
             .owner(
                 &self.identity,

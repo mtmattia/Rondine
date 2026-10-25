@@ -213,6 +213,9 @@ impl Client {
                     can_ring: None,
                     tube: false,
                     caps_sent: false,
+                    blind_in: None,
+                    blind_out: None,
+                    blind_rx: 0,
                 });
             }
             self.note_key_change(&info.identity);

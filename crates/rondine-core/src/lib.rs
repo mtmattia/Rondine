@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod b64;
 pub mod backup;
+pub mod blind;
 pub mod card;
 pub mod discovery;
 pub mod envelope;

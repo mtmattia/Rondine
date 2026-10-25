@@ -1670,6 +1670,12 @@ impl Rondine {
         Ok(self.with(move |c| c.set_memoryless(on)).await?)
     }
 
+    /// Accende o spegne il nido cieco (SPEC §14.2).
+    pub async fn set_blind(&self, on: bool) -> Result<()> {
+        self.run(move |c| Box::pin(async move { Ok(c.set_blind(on).await?) }))
+            .await
+    }
+
     /// Accende o spegne la mesh tra amici (SPEC §12.5).
     pub async fn set_mesh(&self, on: bool) -> Result<()> {
         Ok(self.with(move |c| c.set_mesh(on)).await?)

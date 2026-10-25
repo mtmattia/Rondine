@@ -105,13 +105,12 @@ Il contenuto è già illeggibile. Restano da nascondere al gestore del nodo:
 - [x] etichette dei permessi senza la chiave di chi scrive (SPEC §5)
 - [x] deposito sigillato dei messaggi attraverso un nodo staffetta (SPEC §6.3, OHTTP + HPKE);
       nodi senza sigillo scartati; senza staffetta parte con il lucchetto aperto
-- [ ] sigillati anche key package, file e sveglie
-- [ ] staffetta attraverso un contatto (mesh) quando non c'è un secondo nodo
-- [ ] casella con una chiave sua invece della chiave d'identità (il nodo non lega casella e
-      biglietto)
-- [ ] dimensioni dei messaggi arrotondate (padding) e ritiri a intervalli fissi
+- ~~sigillati anche key package, file e sveglie~~ → sostituito dal nido cieco (Tor, §14.6)
+- ~~staffetta attraverso un contatto~~ → scartato il 2026-10-25 (niente staffetta in v2)
+- ~~casella con una chiave sua~~ → sostituito dalle caselle di chat rotanti (§14.3)
+- ~~padding e ritiri a intervalli fissi~~ → buste da 2048 byte (§14.5); niente ritiri fissi
 - [x] avvisi sulla chiave e tre gradi di fiducia (di persona, numero, non verificato; SPEC §10)
-- [ ] Tor (Arti) nell'app e nodi come servizi onion: il nodo non vede nemmeno l'IP
+- ~~Tor e nodi come servizi onion~~ → Tor come client nel nido cieco (§14.6), niente onion
 - [x] password (SPEC §3.4): nome utente protetto (password e numero se verificato), backup
       automatico cifrato in Documents/Rondine, promemoria del nome nel backup di Android
 - [ ] "Salva nella galleria" e salvataggio automatico dei file ricevuti in Pictures/Rondine
@@ -119,13 +118,17 @@ Il contenuto è già illeggibile. Restano da nascondere al gestore del nodo:
 
 **Nido cieco (SPEC §14.2–14.9, deciso con Mattia il 2026-10-25).** Obiettivo: nessuno lega chi
 scrive a chi riceve. Prima il diretto, il nido è l'ultima spiaggia e vale sempre come estraneo.
-- [ ] caselle di chat rotanti dal seme MLS (§14.3)
-- [ ] gettoni v2 per tutto il nido, chiave di membro (§14.4)
-- [ ] buste da 2048 byte e file a taglie fisse; `/v2/drop`, `/v2/pickup`, `/v2/ack` (§14.5)
+- [x] caselle di chat rotanti, seme dato dal destinatario nel messaggio `blind` (§14.3)
+- [x] gettoni v2 per tutto il nido, chiave di membro (§14.4)
+- [x] buste a misure fisse (2–192 KiB); `/v2/drop`, `/v2/pickup`, `/v2/ack`, `/v2/tokens` (§14.5)
+- [ ] file (§7.5) a taglie fisse anche nel nido cieco
 - [ ] Arti nell'app: deposito, ritiro, sveglia e offerta del buco via Tor, circuiti isolati (§14.6)
 - [ ] STUN da server pubblici invece che dal nido (§14.6)
-- [ ] sveglia suonata da chi scrive, con le regole di §14.7; il nido non sveglia più
-- [x] ripetitore FCM su un server sempre acceso: il Mac di Mattia (nido e ripetitore, dal 2026-10-25), verso Google solo via Tor (Arti, `--fcm-proxy`, §8.1)
+- [x] sveglia suonata da chi scrive, con le regole di §14.7; il nido non sveglia più
+- [x] CLI `rondine cieco si|no` e `set_blind` nel ponte per l'app
+- [ ] interruttore nell'app (o acceso da sola quando i contatti sono pronti)
+- [ ] un indirizzo di sveglia ntfy diverso per contatto
+- [x] ripetitore FCM su un server sempre acceso: il Mac di Mattia (nido e ripetitore, dal 2026-10-25), raggiungibile da internet con Tailscale Funnel, verso Google solo via Tor (Arti, `--fcm-proxy`, §8.1); con il Mac spento la versione Play non riceve sveglie
 - [ ] provare Tor nell'estensione delle notifiche di iPhone
 - [ ] togliere avviso di giacenza, tubo e staffetta (codice di d19f09f e §6.3)
 
@@ -140,6 +143,10 @@ I nodi diventano **nidi**, e ogni PC con l'app Rondine fa da nido.
       raggiunge tutti gli altri
 - [ ] ogni rondine (telefono) sceglie il nido in base alla latenza, e può cambiarlo
 - [ ] "nido" al posto di "nodo" nell'interfaccia e nei documenti (nel protocollo resta `node`)
+
+> **Da rileggere dopo il nido cieco (2026-10-25).** Con il diretto come strada principale e il
+> nido come ultima spiaggia, raggiunto via Tor e senza sapere di chi sono le caselle, la maglia
+> tra nidi serve meno: un nido qualsiasi va bene. Prima di M4 va deciso se serve ancora.
 
 Domande aperte da decidere prima del codice (vanno in `docs/SPEC.md`):
 - **Principi da rivedere.** SPEC §1 dice che nodi diversi *non* si parlano. La maglia tra nidi

@@ -65,6 +65,29 @@ pub struct Contact {
     /// Gli ho già detto che lo uso anch'io.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub caps_sent: bool,
+    /// Nido cieco (SPEC §14.3): il seme delle mie caselle che ho dato a questo contatto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blind_in: Option<String>,
+    /// Nido cieco: cosa mi ha dato lui per scrivergli (seme, nido, gettoni, sveglia).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blind_out: Option<BlindOut>,
+    /// Buste ritirate dalle sue caselle dall'ultima volta che gli ho dato gettoni.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub blind_rx: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+/// Ciò che un contatto mi ha dato per scrivergli nel nido cieco (SPEC §14.3–14.7).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct BlindOut {
+    pub seed: String,
+    pub node: String,
+    pub tokens: Vec<rondine_core::token::Token>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<String>,
 }
 
 /// Quanto è sicuro che la chiave di un contatto sia davvero sua (SPEC §10).
@@ -363,6 +386,10 @@ pub struct State {
     /// avvisi, e i messaggi passano in diretto o nel tubo. L'app lo accende.
     #[serde(default)]
     pub memoryless: bool,
+    /// Nido cieco (SPEC §14.2): caselle rotanti, gettoni, buste a misura fissa, sveglia suonata
+    /// da chi scrive.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub blind: bool,
     /// Gettoni anonimi per bussare ai contatti (SPEC §14.4).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tokens: Vec<StoredToken>,

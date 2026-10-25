@@ -222,6 +222,9 @@ enum Cmd {
     /// Nodo senza memoria (SPEC §14.2): `si` perché ai contatti che lo usano arrivino solo
     /// avvisi e i messaggi passino in diretto o nel tubo, `no` per il deposito di prima.
     SenzaMemoria { stato: Option<String> },
+    /// Nido cieco (SPEC §14.2): `si` perché il nido veda solo caselle anonime e buste tutte
+    /// uguali, e la sveglia la suoni chi scrive; `no` per spegnerlo. Senza argomento dice com'è.
+    Cieco { stato: Option<String> },
     /// Mesh tra amici (SPEC §12.5): `si` per affidare ai contatti ciò che non parte e passare ciò
     /// che affidano loro, `no` per spegnerla. Senza argomento dice com'è.
     Mesh { stato: Option<String> },
@@ -1517,6 +1520,23 @@ async fn main() -> anyhow::Result<()> {
                     "spento"
                 },
                 c.tokens_left()
+            );
+        }
+        Cmd::Cieco { stato } => {
+            match stato.as_deref() {
+                Some("si" | "sì") => c.set_blind(true).await?,
+                Some("no") => c.set_blind(false).await?,
+                Some(other) => anyhow::bail!("scrivi `si` o `no`, non `{other}`"),
+                None => {}
+            }
+            let pronti = c
+                .contacts()
+                .iter()
+                .filter(|k| c.blind_ready(&k.identity))
+                .count();
+            println!(
+                "Nido cieco: {} (contatti pronti: {pronti})",
+                if c.state().blind { "acceso" } else { "spento" }
             );
         }
         Cmd::Mesh { stato } => {

@@ -122,12 +122,12 @@ scrive a chi riceve. Prima il diretto, il nido è l'ultima spiaggia e vale sempr
 - [x] gettoni v2 per tutto il nido, chiave di membro (§14.4)
 - [x] buste a misure fisse (2–192 KiB); `/v2/drop`, `/v2/pickup`, `/v2/ack`, `/v2/tokens` (§14.5)
 - [ ] file (§7.5) a taglie fisse anche nel nido cieco
-- [x] Arti nel client: deposito, ritiro, sveglia, gettoni e offerta del buco via Tor, un circuito per casella (§14.6)
+- [x] Arti nel client: deposito, ritiro, sveglia, gettoni e offerta del buco via Tor, un circuito per casella (§14.6). Peso: libreria +7,0 MB (22,6 → 29,6 MB, misura su x86_64 Linux), +2,9 MB compressa, cioè circa +3 MB per ABI nell'APK
 - [ ] provare Tor vero su un telefono Android e sul Mac (nell'ambiente cloud la rete Tor è bloccata)
-- [ ] STUN da server pubblici invece che dal nido (§14.6)
+- [x] STUN da server pubblici invece che dal nido (§14.6)
 - [x] sveglia suonata da chi scrive, con le regole di §14.7; il nido non sveglia più
 - [x] CLI `rondine cieco si|no` e `set_blind` nel ponte per l'app
-- [ ] interruttore nell'app (o acceso da sola quando i contatti sono pronti)
+- [x] interruttore "Nido cieco" in Impostazioni › Privacy (spento di norma)
 - [ ] un indirizzo di sveglia ntfy diverso per contatto
 - [x] ripetitore FCM su un server sempre acceso: il Mac di Mattia (nido e ripetitore, dal 2026-10-25), raggiungibile da internet con Tailscale Funnel, verso Google solo via Tor (Arti, `--fcm-proxy`, §8.1); con il Mac spento la versione Play non riceve sveglie
 - [ ] provare Tor nell'estensione delle notifiche di iPhone

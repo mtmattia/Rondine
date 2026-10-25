@@ -6,7 +6,7 @@
 //! Senza la funzione `tor` (o nei test) le richieste partono dirette: è scritto nel registro.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -34,7 +34,7 @@ pub struct AnonUse {
 enum Mode {
     #[cfg(feature = "tor")]
     Tor {
-        dir: PathBuf,
+        dir: std::path::PathBuf,
         client: tokio::sync::OnceCell<Arc<arti_client::TorClient<tor_rtcompat::PreferredRuntime>>>,
     },
     Plain,

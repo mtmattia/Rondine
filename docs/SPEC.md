@@ -1152,7 +1152,9 @@ vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla prima ver
 - Passano da Tor: deposito, ritiro, conferma, richiesta di gettoni, sveglia (§14.7), e il deposito
   dell'offerta del buco nel NAT (§12.8).
 - **STUN** per il buco nel NAT: non dal nido (vedrebbe i due IP insieme), ma da server pubblici
-  scelti a caso da un elenco nell'app, diversi per i due lati.
+  scelti a caso da un elenco nell'app, diversi per i due lati: ognuno ne prova 3 a caso tra
+  Google, Cloudflare, Nextcloud, Twilio e sipgate. Vedono l'indirizzo di chi chiede, non con chi
+  parla.
 - Tor si avvia solo quando serve (deposito o ritiro), non tiene connessioni in sottofondo.
 - **Un circuito per gruppo**, mai condiviso tra gruppi (isolamento dei flussi di Arti):
   - `casella:<casella>`: ritiro e conferma di una casella di chat (ogni giorno una nuova);

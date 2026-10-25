@@ -74,6 +74,9 @@ pub struct Profile {
     pub phone_verified: bool,
     /// Mesh tra amici accesa (SPEC §12.5).
     pub mesh: bool,
+    /// Nido cieco acceso (SPEC §14.2), e se passa da Tor (§14.6).
+    pub blind: bool,
+    pub blind_tor: bool,
     /// Le mie "Info" attive e fino a quando (SPEC §7.7).
     pub about: Option<String>,
     pub about_until: Option<u64>,
@@ -811,6 +814,8 @@ fn view_of(c: &Client) -> View {
             photo: c.my_photo().map(|p| p.to_string_lossy().into_owned()),
             phone_verified: s.phone_verified,
             mesh: s.mesh,
+            blind: s.blind,
+            blind_tor: c.uses_tor(),
             about: c.my_about().map(|a| a.text),
             about_until: c.my_about().and_then(|a| a.until),
         })

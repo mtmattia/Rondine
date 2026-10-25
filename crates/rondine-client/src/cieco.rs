@@ -31,6 +31,17 @@ const WAKE_GAP_SECS: u64 = 60;
 const WAKE_JITTER_MS: u64 = 5000;
 /// Corpo della sveglia: uguale a quello dei nodi (SPEC §8).
 const WAKE_BODY: &str = r#"{"v":1,"t":"wake"}"#;
+/// Server STUN pubblici per il buco nel NAT col nido cieco (SPEC §14.6), di gestori diversi.
+const PUBLIC_STUN: [&str; 6] = [
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302",
+    "stun:stun.cloudflare.com:3478",
+    "stun:stun.nextcloud.com:443",
+    "stun:global.stun.twilio.com:3478",
+    "stun:stun.sipgate.net:3478",
+];
+/// Quanti se ne provano, scelti a caso.
+const PUBLIC_STUN_PICK: usize = 3;
 
 /// Stato in memoria del nido cieco.
 pub(crate) struct Blind {
@@ -45,12 +56,14 @@ pub(crate) struct Blind {
     acks: Vec<(String, Vec<String>)>,
     /// Tor (o, nei test, la rete diretta).
     anon: Anon,
+    public_stun: Vec<String>,
 }
 
 impl Blind {
     pub(crate) fn new(dir: &std::path::Path) -> Self {
         Self {
             anon: Anon::new(dir),
+            public_stun: PUBLIC_STUN.iter().map(|s| s.to_string()).collect(),
             spent: Mutex::new(HashSet::new()),
             last_wake: Mutex::new(HashMap::new()),
             jitter_ms: WAKE_JITTER_MS,
@@ -97,6 +110,21 @@ impl Client {
         self.blind.anon.uses_tor()
     }
 
+    /// Server STUN pubblici da usare col nido cieco al posto di quelli predefiniti (test).
+    pub fn set_public_stun(&mut self, urls: Vec<String>) {
+        self.blind.public_stun = urls;
+        self.stun_cache = None;
+    }
+
+    /// Alcuni server STUN pubblici, a caso: ogni lato ne sceglie per conto suo (SPEC §14.6).
+    pub(crate) fn public_stun_pick(&self) -> Vec<String> {
+        use rand::seq::SliceRandom;
+        let mut all = self.blind.public_stun.clone();
+        all.shuffle(&mut rand::thread_rng());
+        all.truncate(PUBLIC_STUN_PICK);
+        all
+    }
+
     /// Richieste anonime dirette, senza Tor: solo per i test (non c'è Tor in un test).
     pub fn set_anon_plain(&mut self) {
         self.blind.anon = Anon::plain();
@@ -106,6 +134,7 @@ impl Client {
     /// fa chi mi scrive) e ai contatti do seme, gettoni e sveglia.
     pub async fn set_blind(&mut self, on: bool) -> Result<()> {
         self.state.blind = on;
+        self.stun_cache = None;
         self.save()?;
         if !on || !self.has_node() {
             return Ok(());

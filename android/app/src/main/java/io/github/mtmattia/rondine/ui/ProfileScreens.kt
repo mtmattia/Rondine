@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -649,6 +650,23 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                     mesh = !mesh
                     scope.launch {
                         Repo.client().setMesh(mesh)
+                        Repo.refresh()
+                    }
+                }
+                var blind by remember { mutableStateOf(p.blind) }
+                SettingRow(
+                    Icons.Filled.VisibilityOff,
+                    "Nido cieco",
+                    if (blind) {
+                        "Acceso: quando non vi sentite in diretto, il nido non sa chi scrive a chi" +
+                            if (p.blindTor) " (via Tor)" else ""
+                    } else {
+                        "Spento: il nido sa di chi è ogni casella"
+                    },
+                ) {
+                    blind = !blind
+                    scope.launch {
+                        Repo.client().setBlind(blind)
                         Repo.refresh()
                     }
                 }

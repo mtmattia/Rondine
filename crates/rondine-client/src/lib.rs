@@ -884,17 +884,23 @@ impl Client {
         Ok(parse::<Vec<serde_json::Value>>(&bytes)?.len())
     }
 
-    /// Server STUN del mio nodo (SPEC §7.9), ricordati per un'ora.
+    /// Server STUN del mio nodo (SPEC §7.9), ricordati per un'ora. Col nido cieco no: il nido
+    /// vedrebbe insieme i due indirizzi; si usano server pubblici scelti a caso (§14.6).
     async fn stun_servers(&mut self) -> Vec<std::net::SocketAddr> {
         if let Some((servers, at)) = &self.stun_cache
             && at + STUN_CACHE_SECS > now()
         {
             return servers.clone();
         }
-        let Ok(turn) = self.turn_servers().await else {
-            return Vec::new();
+        let urls = if self.state.blind {
+            self.public_stun_pick()
+        } else {
+            let Ok(turn) = self.turn_servers().await else {
+                return Vec::new();
+            };
+            turn.urls
         };
-        let servers = punch::stun_servers(&turn.urls).await;
+        let servers = punch::stun_servers(&urls).await;
         self.stun_cache = Some((servers.clone(), now()));
         servers
     }

@@ -2903,3 +2903,79 @@ async fn la_richiesta_di_verifica_sveglia_il_telefono() -> R {
     assert_eq!(wait_wakes(&got, 1, 12_000).await?.len(), 1);
     Ok(())
 }
+
+/// Bug: cambiano nodo tutti e due, senza leggere in mezzo. Ognuno manda il biglietto nuovo al
+/// nodo vecchio dell'altro, che lo legge ancora dalla casella ritirata.
+#[tokio::test]
+async fn cambio_di_nodo_tutti_e_due() -> R {
+    let (n1, n2, n3) = (
+        start_node().await?,
+        start_node().await?,
+        start_node().await?,
+    );
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &n1).await?;
+    mattia.set_node(&n2).await?;
+    silvia.set_node(&n3).await?;
+    mattia.sync_all().await?;
+    silvia.sync_all().await?;
+    mattia.sync_all().await?;
+
+    let card_node = |c: &rondine_core::SignedCard| c.verify().ok().and_then(|i| i.node);
+    let of = |cl: &rondine_client::Client, id| {
+        cl.contacts()
+            .iter()
+            .find(|c| c.identity == id)
+            .and_then(|c| card_node(&c.card))
+    };
+    assert_eq!(of(&silvia, mattia.identity()), Some(n2.clone()));
+    assert_eq!(of(&mattia, silvia.identity()), Some(n3.clone()));
+
+    mattia.send_text(&silvia.identity(), "ci sei?").await?;
+    assert_eq!(texts(&silvia.sync().await?), ["ci sei?"]);
+    silvia.send_text(&mattia.identity(), "sì").await?;
+    assert_eq!(texts(&mattia.sync().await?), ["sì"]);
+    Ok(())
+}
+
+/// Bug: cambiano nodo tutti e due e il nodo vecchio si spegne. Nessuno dei due biglietti nuovi
+/// arriva (vanno tutti e due al nodo spento): ognuno ha l'altro all'indirizzo vecchio. Basta che
+/// uno riaggiunga l'altro dal suo invito (o nome, o numero) e la chat si riallaccia da sola.
+#[tokio::test]
+async fn cambio_di_nodo_tutti_e_due_col_vecchio_spento() -> R {
+    let (n1, killer) = start_node_killable().await?;
+    let n2 = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &n1).await?;
+    mattia.set_node(&n2).await?;
+    silvia.set_node(&n2).await?;
+    killer.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    mattia.sync_all().await?;
+    silvia.sync_all().await?;
+
+    // Si scrivono, ma i messaggi restano in coda: l'altro è ancora al nodo spento.
+    mattia.send_text(&silvia.identity(), "ci sei?").await?;
+    assert!(texts(&silvia.sync().await?).is_empty());
+
+    // Mattia riaggiunge Silvia dal suo invito nuovo.
+    mattia.add(&silvia.invite_link()?).await?;
+    let events = silvia.sync().await?;
+    assert_eq!(texts(&events), ["ci sei?"], "la coda non è ripartita");
+    let card_node = |c: &rondine_core::SignedCard| c.verify().ok().and_then(|i| i.node);
+    let me = mattia.identity();
+    let contact = silvia
+        .contacts()
+        .iter()
+        .find(|c| c.identity == me)
+        .ok_or("contatto sparito")?;
+    assert_eq!(
+        card_node(&contact.card),
+        Some(n2.clone()),
+        "biglietto vecchio"
+    );
+
+    silvia.send_text(&me, "sì").await?;
+    assert_eq!(texts(&mattia.sync().await?), ["sì"]);
+    Ok(())
+}

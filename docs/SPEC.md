@@ -872,6 +872,12 @@ insieme alla nuova per 30 giorni (la conservazione dei nodi, §6), poi la lascia
 numero verificato (§13) e voce nella bacheca appartengono al vecchio nodo: il nome si libera, gli
 altri si lasciano scadere, e si possono rifare sul nodo nuovo.
 
+**Riallacciare.** Se cambiano nodo tutti e due e un vecchio nodo si spegne prima che i `hello`
+arrivino, ognuno resta col biglietto vecchio dell'altro e i messaggi restano in coda. Basta che uno
+dei due riaggiunga l'altro (invito, nome utente o numero): il client prende il biglietto nuovo,
+ritenta subito la coda verso di lui e gli manda un `hello` col proprio biglietto e un permesso
+nuovo. Chi riceve un `hello` ritenta subito la sua coda verso il mittente. Nessun campo nuovo.
+
 ### 12.8 Buco nel NAT IPv4 (hole punching)
 Due telefoni dietro NAT IPv4 si collegano direttamente. Il nodo serve solo da punto d'incontro:
 porta i due messaggi MLS qui sotto, poi esce di mezzo. È lo stesso schema delle chiamate (§7.9).

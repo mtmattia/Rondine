@@ -1535,8 +1535,9 @@ async fn main() -> anyhow::Result<()> {
                 .filter(|k| c.blind_ready(&k.identity))
                 .count();
             println!(
-                "Nido cieco: {} (contatti pronti: {pronti})",
-                if c.state().blind { "acceso" } else { "spento" }
+                "Nido cieco: {} (contatti pronti: {pronti}, {})",
+                if c.state().blind { "acceso" } else { "spento" },
+                if c.uses_tor() { "via Tor" } else { "senza Tor" }
             );
         }
         Cmd::Mesh { stato } => {

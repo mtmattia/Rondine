@@ -108,26 +108,9 @@ impl Net {
 
     async fn send(&self, req: reqwest::RequestBuilder) -> Result<Vec<u8>> {
         let res = req.send().await?;
-        let status = res.status();
+        let status = res.status().as_u16();
         let bytes = res.bytes().await?.to_vec();
-        if status.is_success() {
-            return Ok(bytes);
-        }
-        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
-        // Un nodo Rondine risponde sempre con {"error", "message"} (SPEC §11); altrimenti
-        // l'indirizzo è di un altro sito, e la sua pagina non va mostrata all'utente.
-        let (Some(code), Some(message)) = (v["error"].as_str(), v["message"].as_str()) else {
-            return Err(Error::Node {
-                status: status.as_u16(),
-                code: "not_rondine".into(),
-                message: "questo indirizzo non sembra un nodo Rondine".into(),
-            });
-        };
-        Err(Error::Node {
-            status: status.as_u16(),
-            code: code.to_string(),
-            message: message.to_string(),
-        })
+        node_result(status, bytes)
     }
 
     fn url(base: &str, path: &str) -> String {
@@ -152,12 +135,6 @@ impl Net {
             .await?;
         let status = res.status().as_u16();
         Ok((status, res.bytes().await?.to_vec()))
-    }
-
-    /// `POST` di un corpo fisso a un indirizzo qualsiasi (la sveglia di un contatto, SPEC §14.7).
-    pub async fn post_raw(&self, url: &str, body: &'static str) -> Result<()> {
-        self.send(self.http.post(url).body(body)).await?;
-        Ok(())
     }
 
     /// Richiesta senza autenticazione del proprietario; restituisce i byte della risposta.
@@ -293,6 +270,28 @@ impl Net {
         }
         self.send(req).await
     }
+}
+
+/// Stato e corpo di una risposta del nodo: i byte, o l'errore che il nodo ha dato (SPEC §11).
+pub(crate) fn node_result(status: u16, bytes: Vec<u8>) -> Result<Vec<u8>> {
+    if (200..300).contains(&status) {
+        return Ok(bytes);
+    }
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    // Un nodo Rondine risponde sempre con {"error", "message"} (SPEC §11); altrimenti
+    // l'indirizzo è di un altro sito, e la sua pagina non va mostrata all'utente.
+    let (Some(code), Some(message)) = (v["error"].as_str(), v["message"].as_str()) else {
+        return Err(Error::Node {
+            status,
+            code: "not_rondine".into(),
+            message: "questo indirizzo non sembra un nodo Rondine".into(),
+        });
+    };
+    Err(Error::Node {
+        status,
+        code: code.to_string(),
+        message: message.to_string(),
+    })
 }
 
 pub fn parse<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {

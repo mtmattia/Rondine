@@ -1154,6 +1154,14 @@ vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla prima ver
 - **STUN** per il buco nel NAT: non dal nido (vedrebbe i due IP insieme), ma da server pubblici
   scelti a caso da un elenco nell'app, diversi per i due lati.
 - Tor si avvia solo quando serve (deposito o ritiro), non tiene connessioni in sottofondo.
+- **Un circuito per gruppo**, mai condiviso tra gruppi (isolamento dei flussi di Arti):
+  - `casella:<casella>`: ritiro e conferma di una casella di chat (ogni giorno una nuova);
+  - `deposito:<casella>`: i depositi di chi scrive in quella casella;
+  - `sveglia:<contatto>`: la sveglia di un contatto, mai sul circuito del deposito (un'uscita di
+    Tor vedrebbe insieme casella e ripetitore);
+  - `membro:<nido>`: `GET /v1/info` e `POST /v2/tokens` verso il proprio nido.
+- Le richieste sono HTTP/1.1 (HTTPS con i certificati del sistema, come il resto del client), una
+  connessione per richiesta.
 
 ### 14.7 Sveglia suonata da chi scrive
 

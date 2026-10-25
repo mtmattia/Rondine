@@ -22,6 +22,9 @@ pub enum Error {
     NotFound(String),
     #[error("{0}")]
     Invalid(String),
+    /// Tor (SPEC §14.6) non si è acceso o non raggiunge chi serve.
+    #[error("{0}")]
+    Tor(String),
     /// Il nodo non offre il deposito sigillato (SPEC §6.3): è scartato.
     #[error("il nodo {0} non offre il deposito sigillato: per proteggere chi scrive non si usa")]
     NoSeal(String),

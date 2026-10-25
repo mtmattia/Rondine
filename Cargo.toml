@@ -59,6 +59,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
 # Firma RS256 dei JWT per Google (ripetitore FCM, SPEC §8.1): è già la crittografia di rustls.
 ring = "0.17"
+# Nido cieco via Tor (SPEC §14.6): Arti, il Tor in Rust, con rustls e SQLite dentro il binario.
+arti-client = { version = "0.47", default-features = false, features = ["tokio", "rustls", "compression", "static-sqlite"] }
+tor-rtcompat = { version = "0.47", default-features = false, features = ["tokio", "rustls"] }
+# HTTP sopra i flussi di Tor.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

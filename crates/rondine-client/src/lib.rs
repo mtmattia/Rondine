@@ -1,5 +1,6 @@
 //! Client Rondine: tutto ciò che l'app sa fare, come funzioni (CLAUDE.md, regola 5).
 
+mod anon;
 mod backup;
 mod calls;
 mod cieco;
@@ -32,6 +33,7 @@ use rondine_core::{
 use rondine_mls::{Device, Received};
 use serde_json::json;
 
+pub use anon::AnonUse;
 pub use calls::TurnServers;
 pub use error::{Error, Result};
 pub use groups::{GroupDelivery, GroupEvent, Synced};
@@ -484,7 +486,7 @@ impl Client {
             lan: None,
             punch: punch::Punch::default(),
             tubes: tubo::Tubes::default(),
-            blind: cieco::Blind::default(),
+            blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),
@@ -561,7 +563,7 @@ impl Client {
             lan: None,
             punch: punch::Punch::default(),
             tubes: tubo::Tubes::default(),
-            blind: cieco::Blind::default(),
+            blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),
@@ -1120,7 +1122,7 @@ impl Client {
             lan: None,
             punch: punch::Punch::default(),
             tubes: tubo::Tubes::default(),
-            blind: cieco::Blind::default(),
+            blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
             want_offer: Default::default(),

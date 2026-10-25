@@ -122,7 +122,8 @@ scrive a chi riceve. Prima il diretto, il nido è l'ultima spiaggia e vale sempr
 - [x] gettoni v2 per tutto il nido, chiave di membro (§14.4)
 - [x] buste a misure fisse (2–192 KiB); `/v2/drop`, `/v2/pickup`, `/v2/ack`, `/v2/tokens` (§14.5)
 - [ ] file (§7.5) a taglie fisse anche nel nido cieco
-- [ ] Arti nell'app: deposito, ritiro, sveglia e offerta del buco via Tor, circuiti isolati (§14.6)
+- [x] Arti nel client: deposito, ritiro, sveglia, gettoni e offerta del buco via Tor, un circuito per casella (§14.6)
+- [ ] provare Tor vero su un telefono Android e sul Mac (nell'ambiente cloud la rete Tor è bloccata)
 - [ ] STUN da server pubblici invece che dal nido (§14.6)
 - [x] sveglia suonata da chi scrive, con le regole di §14.7; il nido non sveglia più
 - [x] CLI `rondine cieco si|no` e `set_blind` nel ponte per l'app

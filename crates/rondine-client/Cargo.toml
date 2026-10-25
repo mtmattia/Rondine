@@ -23,6 +23,17 @@ rand.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+arti-client = { workspace = true, optional = true }
+tor-rtcompat = { workspace = true, optional = true }
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+tokio-rustls.workspace = true
+
+[features]
+# Il nido cieco passa da Tor (SPEC §14.6). Senza, le richieste anonime partono dirette.
+default = ["tor"]
+tor = ["dep:arti-client", "dep:tor-rtcompat"]
 
 [dev-dependencies]
 rondine-nodo.workspace = true

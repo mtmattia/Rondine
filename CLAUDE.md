@@ -26,7 +26,8 @@ Leggi questo file prima di toccare il codice, poi `docs/SPEC.md` per il protocol
    possono guidare il sistema come un utente.
 6. **Test prima.** Per ogni funzione nuova si scrive prima il test di accettazione (di solito in
    `crates/rondine-client/tests/`, con un nodo vero in-process e più client), poi il codice.
-7. **Licenze.** Solo dipendenze MIT, Apache-2.0, BSD, ISC, Zlib, Unicode o MPL-2.0. Niente GPL/AGPL
+7. **Licenze.** Solo dipendenze MIT, Apache-2.0, BSD, ISC, Zlib, Unicode, MPL-2.0, Unlicense o CC0-1.0
+   (queste due, "pubblico dominio", ammesse da Mattia il 25 ottobre 2026 per Tor). Niente GPL/AGPL
    (esclude per esempio `libsignal`). Con più licenze in alternativa basta che una sia ammessa
    (per esempio JNA, "LGPL-2.1 OR Apache-2.0", si usa con Apache-2.0). Unica eccezione, scelta da
    Mattia il 18 ottobre 2026: Firebase Messaging (non libero) solo nella versione `play` dell'app,

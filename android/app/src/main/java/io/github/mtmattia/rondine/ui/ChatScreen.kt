@@ -23,8 +23,6 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.MoveToInbox
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -35,6 +33,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -1362,20 +1361,7 @@ private fun Bubble(
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RouteIcon(m.via, colors.bubbleMeta)
-                    Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
-                    val st = m.status
-                    if (m.outgoing && st != null) {
-                        Spacer(Modifier.width(3.dp))
-                        if (m.unsealed) {
-                            Icon(
-                                Icons.Filled.LockOpen, "Senza sigillo: nessuna staffetta, il nodo ha visto il tuo IP",
-                                Modifier.size(12.dp), tint = colors.bubbleMeta,
-                            )
-                            Spacer(Modifier.width(2.dp))
-                        }
-                        MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
-                    }
+                    BubbleMeta(m, colors.bubbleMeta)
                 }
             }
             return@Row
@@ -1398,20 +1384,7 @@ private fun Bubble(
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RouteIcon(m.via, colors.bubbleMeta)
-                    Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
-                    val st = m.status
-                    if (m.outgoing && st != null) {
-                        Spacer(Modifier.width(3.dp))
-                        if (m.unsealed) {
-                            Icon(
-                                Icons.Filled.LockOpen, "Senza sigillo: nessuna staffetta, il nodo ha visto il tuo IP",
-                                Modifier.size(12.dp), tint = colors.bubbleMeta,
-                            )
-                            Spacer(Modifier.width(2.dp))
-                        }
-                        MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
-                    }
+                    BubbleMeta(m, colors.bubbleMeta)
                 }
             }
             return@Row
@@ -1452,20 +1425,7 @@ private fun Bubble(
                     if (m.body.isNotBlank()) Spacer(Modifier.size(4.dp))
                 }
                 val meta: @Composable () -> Unit = {
-                    RouteIcon(m.via, colors.bubbleMeta)
-                    Text(hourMinute(m.ts), fontSize = 11.sp, color = colors.bubbleMeta)
-                    val st = m.status
-                    if (m.outgoing && st != null) {
-                        Spacer(Modifier.width(3.dp))
-                        if (m.unsealed) {
-                            Icon(
-                                Icons.Filled.LockOpen, "Senza sigillo: nessuna staffetta, il nodo ha visto il tuo IP",
-                                Modifier.size(12.dp), tint = colors.bubbleMeta,
-                            )
-                            Spacer(Modifier.width(2.dp))
-                        }
-                        MessageTicks(st, colors.bubbleMeta, 15.dp, sending = m.sending)
-                    }
+                    BubbleMeta(m, colors.bubbleMeta)
                 }
                 if (m.body.isNotBlank() || (a == null && loc == null)) {
                     TextWithMeta(m.body, colors.bubbleText, Modifier.padding(start = pad * 1.5f, end = pad), meta)
@@ -1797,16 +1757,31 @@ private suspend fun forward(messages: List<UiMessage>, target: ChatTarget) {
 }
 
 /**
- * Da dove è passato il messaggio (SPEC §14.5): frecce per il diretto (telefono-telefono, il nodo
- * non l'ha visto), cassetta per il nodo.
+ * Ora e spunte sotto una bolla (SPEC §14.5). Da dove è passato il messaggio si vede con un segno
+ * piccolo sopra le spunte, centrato (nei messaggi ricevuti, che non le hanno, dopo l'ora):
+ * lucchetto se è passato in diretto (da telefono a telefono, il nodo non l'ha visto), cassetto se
+ * è passato dal nodo.
  */
 @Composable
-private fun RouteIcon(via: String, tint: Color) {
-    val (icon, label) = when (via) {
-        "diretto" -> Icons.Filled.SwapHoriz to "Diretto, da telefono a telefono: il nodo non l'ha visto"
-        "nodo" -> Icons.Outlined.MoveToInbox to "Passato dal nodo"
-        else -> return
+private fun BubbleMeta(m: UiMessage, tint: Color) {
+    val badge = when (m.via) {
+        "diretto" -> Icons.Filled.Lock to "Diretto, da telefono a telefono: il nodo non l'ha visto"
+        "nodo", "tubo" -> Icons.Outlined.MoveToInbox to "Passato dal nodo"
+        else -> null
     }
-    Icon(icon, label, Modifier.size(12.dp), tint = tint)
-    Spacer(Modifier.width(3.dp))
+    Text(hourMinute(m.ts), fontSize = 11.sp, color = tint)
+    val st = m.status
+    if (m.outgoing && st != null) {
+        Spacer(Modifier.width(3.dp))
+        // Il segno sta sopra le spunte, centrato, senza toccarle.
+        Box(contentAlignment = Alignment.TopCenter) {
+            MessageTicks(st, tint, 15.dp, sending = m.sending)
+            badge?.let { (icon, label) ->
+                Icon(icon, label, Modifier.size(8.dp).offset(y = (-8).dp), tint = tint)
+            }
+        }
+    } else if (badge != null) {
+        Spacer(Modifier.width(3.dp))
+        Icon(badge.first, badge.second, Modifier.size(11.dp), tint = tint)
+    }
 }

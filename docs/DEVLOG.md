@@ -490,3 +490,4 @@ Una riga per modifica: data, cosa è cambiato.
   permesso "chiamate", e l'SMS parte dall'app dei messaggi e si conferma toccando il link.
   Preparazione: un dialogo per il filtro e uno per il permesso. Provato sull'emulatore.
 - 2026-10-25 — Versione 0.1.20 (versionCode 21).
+- 2026-10-25 — Icone della strada sotto le bolle: segno piccolo sopra le spunte, centrato (dopo l'ora nei ricevuti): lucchetto se diretto, cassetto se dal nodo. Tolto il lucchetto della staffetta.

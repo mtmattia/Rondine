@@ -250,13 +250,14 @@ impl Client {
         };
         let seed = c.blind_in.get_or_insert_with(blind::new_seed).clone();
         c.blind_rx = 0;
+        let wake = c.blind_wake.clone();
         let contact = c.clone();
         let app = AppMessage::Blind {
             v: 1,
             seed,
             node: self.state.node.clone(),
             tokens,
-            wake: self.state.push_endpoint.clone(),
+            wake: wake.or_else(|| self.state.push_endpoint.clone()),
         };
         let _ = self.save();
         let _ = self.send_app_with(&contact, &app, Kind::Normal, None).await;
@@ -322,13 +323,7 @@ impl Client {
         let padded = b64::encode(blind::pad(b64::decode(blob)?)?);
         let current = token::epoch(now());
         for t in out.tokens.iter().filter(|t| t.epoch + 1 >= current) {
-            let fresh = self
-                .blind
-                .spent
-                .lock()
-                .map(|mut s| s.insert(t.spent_id()))
-                .unwrap_or(false);
-            if !fresh {
+            if !self.claim(t) {
                 continue;
             }
             match anon_call(
@@ -353,14 +348,156 @@ impl Client {
                 Err(crate::Error::Node { status: 403, .. }) => continue,
                 Err(e) => {
                     // Non è arrivato al nido: il gettone vale ancora.
-                    if let Ok(mut s) = self.blind.spent.lock() {
-                        s.remove(&t.spent_id());
-                    }
+                    self.unclaim(t);
                     return Err(e);
                 }
             }
         }
         Ok(None)
+    }
+
+    /// Contatti a cui ho dato le mie caselle ma non ancora un indirizzo di sveglia tutto loro
+    /// (SPEC §14.7): l'app ne chiede uno al distributore UnifiedPush per ciascuno.
+    pub fn blind_wake_wanted(&self) -> Vec<PublicKey> {
+        if !self.state.blind {
+            return Vec::new();
+        }
+        self.state
+            .contacts
+            .iter()
+            .filter(|c| !c.blocked && c.blind_in.is_some() && c.blind_wake.is_none())
+            .map(|c| c.identity)
+            .collect()
+    }
+
+    /// L'indirizzo di sveglia solo per questo contatto (`None`: quello di sempre). Glielo
+    /// rimando subito con seme e gettoni.
+    pub async fn set_contact_wake(&mut self, id: &PublicKey, url: Option<String>) -> Result<()> {
+        let c = self
+            .contact_mut(id)
+            .ok_or_else(|| crate::Error::NotFound("contatto sconosciuto".into()))?;
+        if c.blind_wake == url {
+            return Ok(());
+        }
+        c.blind_wake = url;
+        self.save()?;
+        self.send_blind_to(id).await;
+        Ok(())
+    }
+
+    /// Prende per me un gettone del contatto non ancora usato.
+    fn claim(&self, t: &Token) -> bool {
+        self.blind
+            .spent
+            .lock()
+            .map(|mut s| s.insert(t.spent_id()))
+            .unwrap_or(false)
+    }
+
+    /// Il gettone non è arrivato al nido: vale ancora.
+    fn unclaim(&self, t: &Token) {
+        if let Ok(mut s) = self.blind.spent.lock() {
+            s.remove(&t.spent_id());
+        }
+    }
+
+    /// Carica un file cifrato nel nido cieco del contatto (SPEC §14.5), riempito a misura fissa
+    /// e pagato con un gettone. `Ok(None)`: niente nido cieco o niente gettoni.
+    pub(crate) async fn blind_upload(
+        &self,
+        id: &PublicKey,
+        ciphertext: &[u8],
+    ) -> Result<Option<rondine_core::file::FileAt>> {
+        if !self.state.blind {
+            return Ok(None);
+        }
+        let Some(out) = self
+            .state
+            .contacts
+            .iter()
+            .find(|c| &c.identity == id && !c.blocked)
+            .and_then(|c| c.blind_out.clone())
+        else {
+            return Ok(None);
+        };
+        let inbox = blind::chat_inbox(&out.seed, blind::day(now()), id)?;
+        let padded = blind::pad_file(ciphertext.to_vec())?;
+        let url = format!("{}/v2/files", out.node.trim_end_matches('/'));
+        let current = token::epoch(now());
+        for t in out.tokens.iter().filter(|t| t.epoch + 1 >= current) {
+            if !self.claim(t) {
+                continue;
+            }
+            let headers = [
+                ("content-type", "application/octet-stream".to_string()),
+                ("rondine-token", b64::encode(serde_json::to_vec(t)?)),
+            ];
+            let res = self
+                .blind
+                .anon
+                .request(
+                    &format!("deposito:{inbox}"),
+                    "POST",
+                    &url,
+                    &headers,
+                    padded.clone(),
+                )
+                .await
+                .and_then(|(status, body)| node_result(status, body));
+            match res {
+                Ok(body) => {
+                    return Ok(Some(rondine_core::file::FileAt {
+                        node: out.node.clone(),
+                        file: Some(crate::uploaded_id(&body)?),
+                        shared: None,
+                        blind_len: Some(ciphertext.len() as u64),
+                    }));
+                }
+                Err(crate::Error::Node { status: 403, .. }) => continue,
+                Err(e) => {
+                    self.unclaim(t);
+                    return Err(e);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Scarica un file dal nido cieco e toglie il riempimento.
+    pub(crate) async fn blind_fetch(
+        &self,
+        node: &str,
+        file: &str,
+        len: Option<u64>,
+    ) -> Result<Vec<u8>> {
+        let mut data = anon_call(
+            &self.blind.anon,
+            &format!("file:{file}"),
+            "GET",
+            node,
+            &format!("/v2/files/{file}"),
+            None,
+        )
+        .await?;
+        let len = usize::try_from(len.unwrap_or(0)).unwrap_or(usize::MAX);
+        if len > data.len() {
+            return Err(crate::Error::Invalid("file del nido cieco troncato".into()));
+        }
+        data.truncate(len);
+        Ok(data)
+    }
+
+    /// Cancella dal nido cieco un file già scaricato. Se non riesce, scade.
+    pub(crate) async fn blind_forget(&self, node: &str, file: &str) {
+        let _ = anon_call(
+            &self.blind.anon,
+            &format!("file:{file}"),
+            "DELETE",
+            node,
+            &format!("/v2/files/{file}"),
+            None,
+        )
+        .await;
     }
 
     /// Suona la sveglia del contatto (SPEC §14.7): non se c'è un collegamento diretto vivo, al

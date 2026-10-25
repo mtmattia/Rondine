@@ -45,6 +45,7 @@ enum class PushState {
 
 /** Stato dell'app e accesso al client Rust. Unico punto che parla con `rondine-ffi`. */
 object Repo {
+    private const val WAKE_INSTANCE_PREFIX = "c-"
     private lateinit var app: Context
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var rondine: Rondine? = null
@@ -465,6 +466,7 @@ object Repo {
             io.github.mtmattia.rondine.call.CallManager.onSignals(res.calls)
             onVerify(res.verifyRequests, res.phoneChecks, res.verifyFallbacks)
             autoBackup()
+            requestContactWakes()
             if (res.messages.isNotEmpty() || res.newContacts.isNotEmpty()) {
                 val foreground = ProcessLifecycleOwner.get().lifecycle.currentState
                     .isAtLeast(Lifecycle.State.STARTED)
@@ -478,6 +480,42 @@ object Repo {
             Result.success(Unit)
         } catch (e: RondineException) {
             Result.failure(e)
+        }
+    }
+
+    /** Istanze UnifiedPush già chieste in questa esecuzione, una per contatto (SPEC §14.7). */
+    private val wakeAsked = mutableSetOf<String>()
+
+    /** L'istanza UnifiedPush della sveglia di un contatto: `c-<id>`. */
+    fun contactOfWakeInstance(instance: String): String? =
+        instance.removePrefix(WAKE_INSTANCE_PREFIX).takeIf { instance.startsWith(WAKE_INSTANCE_PREFIX) }
+
+    /**
+     * Nido cieco con ntfy: a ogni contatto un indirizzo di sveglia tutto suo, chiesto al
+     * distributore come istanza a parte. Con FCM (versione Play) non serve: resta il ripetitore.
+     */
+    private suspend fun requestContactWakes() {
+        val r = rondine ?: return
+        if (org.unifiedpush.android.connector.UnifiedPush.getAckDistributor(app) == null) return
+        for (id in r.blindWakeWanted()) {
+            if (!wakeAsked.add(id)) continue
+            org.unifiedpush.android.connector.UnifiedPush.register(
+                app,
+                instance = WAKE_INSTANCE_PREFIX + id,
+                messageForDistributor = "Rondine",
+            )
+        }
+    }
+
+    /** Il distributore ha dato (o tolto) l'indirizzo di sveglia di un contatto. */
+    fun onContactWake(contactId: String, url: String?) {
+        scope.launch {
+            loaded.await()
+            try {
+                client().setContactWake(contactId, url)
+            } catch (_: Exception) {
+                // Il contatto riceve quello di sempre.
+            }
         }
     }
 

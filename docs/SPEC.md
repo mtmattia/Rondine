@@ -1139,6 +1139,17 @@ vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla prima ver
 - `POST /v2/pickup` `{inbox}` → `[{id, blob}]`. **Una casella per richiesta, ognuna su un circuito
   Tor diverso** (isolamento di Arti): chiedere più caselle insieme le legherebbe tra loro.
 - `POST /v2/ack` `{inbox, ids}`: il nido cancella. Senza conferma, cancella dopo 30 giorni.
+- **File (§7.5) a misura fissa.** Quelli oltre i 64 KiB, cifrati come in §7.5, si riempiono di
+  zeri fino alla misura successiva tra **256 KiB, 1, 4, 16 e 65 MiB**.
+  - `POST /v2/files` con il corpo `application/octet-stream` e l'intestazione
+    `rondine-token: b64(JSON del gettone)` → `{id}`. Ogni altra misura → `400`; gettone speso →
+    `403`.
+  - `GET /v2/files/{id}` restituisce i byte, `DELETE /v2/files/{id}` li cancella dopo lo
+    scaricamento: basta l'id (128 bit casuali), che viaggia solo dentro MLS.
+  - Nel messaggio `file`, `at` = `{node, file: <id>, blind_len: <byte cifrati prima del
+    riempimento>}`. Chi riceve scarica via Tor, tiene i primi `blind_len` byte e controlla l'hash.
+  - Il nido tiene in tutto al massimo 8 GiB di file ciechi (oltre → `507`) e li cancella dopo 30
+    giorni.
 - Il nido salva solo `inbox`, `id`, `blob` e il **giorno** di arrivo. Niente IP, niente ore, niente
   log delle richieste. In `/v1/info` dice `"blind": true`.
 - Il nido si raggiunge solo in HTTPS: l'uscita di Tor non deve vedere caselle e gettoni.
@@ -1161,15 +1172,18 @@ vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla prima ver
   - `deposito:<casella>`: i depositi di chi scrive in quella casella;
   - `sveglia:<contatto>`: la sveglia di un contatto, mai sul circuito del deposito (un'uscita di
     Tor vedrebbe insieme casella e ripetitore);
-  - `membro:<nido>`: `GET /v1/info` e `POST /v2/tokens` verso il proprio nido.
+  - `membro:<nido>`: `GET /v1/info` e `POST /v2/tokens` verso il proprio nido;
+  - `file:<id>`: scaricamento e cancellazione di un file cieco (il caricamento usa `deposito:`).
 - Le richieste sono HTTP/1.1 (HTTPS con i certificati del sistema, come il resto del client), una
   connessione per richiesta.
 
 ### 14.7 Sveglia suonata da chi scrive
 
 - Il destinatario manda a ogni contatto il suo indirizzo di sveglia nel campo `wake` del messaggio
-  `blind` (§14.3). Versione libera: l'endpoint UnifiedPush (ntfy); più avanti uno diverso per
-  contatto. Versione Play e iPhone: `<ripetitore>/v1/fcm/<token>` o l'equivalente APNs (§8.1).
+  `blind` (§14.3). Versione libera: un endpoint UnifiedPush (ntfy) **diverso per ogni
+  contatto**, chiesto al distributore come istanza a parte (`c-<id del contatto>`); finché non
+  c'è, quello di sempre. Così due contatti non possono confrontare gli indirizzi per scoprire che
+  svegliano lo stesso telefono. Versione Play e iPhone: `<ripetitore>/v1/fcm/<token>` o l'equivalente APNs (§8.1).
   Se l'indirizzo cambia, il destinatario rimanda `blind` a tutti.
 - Dopo un deposito nel nido, chi scrive fa `POST` all'indirizzo, via Tor, con il corpo
   `{"v":1,"t":"wake"}`. I depositi silenziosi (posizione in tempo reale, §6) non suonano.

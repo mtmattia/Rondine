@@ -284,6 +284,14 @@ impl AppState {
             .unwrap_or_default()
     }
 
+    /// Misure dei file nel nido cieco (per i test, SPEC §14.5).
+    pub fn blind_files(&self) -> Vec<usize> {
+        self.db()
+            .ok()
+            .and_then(|db| db.blind_file_sizes().ok())
+            .unwrap_or_default()
+    }
+
     /// Dimensioni delle buste in attesa in una casella (per i test, SPEC §14.2).
     pub fn queued_sizes(&self, inbox: &str) -> Vec<usize> {
         self.db()
@@ -451,6 +459,14 @@ pub fn router(state: AppState) -> Router {
         .route("/v2/pickup", post(cieco::pickup))
         .route("/v2/ack", post(cieco::ack))
         .route("/v2/tokens", post(cieco::tokens))
+        .route(
+            "/v2/files",
+            post(cieco::upload_file).layer(DefaultBodyLimit::max(cieco::MAX_BLIND_FILE)),
+        )
+        .route(
+            "/v2/files/{id}",
+            get(cieco::fetch_file).delete(cieco::delete_file),
+        )
         .route("/v1/inboxes/{inbox}/keypackages", post(upload_keypackages))
         .route("/v1/inboxes/{inbox}/turn", get(turn_credentials))
         .route(

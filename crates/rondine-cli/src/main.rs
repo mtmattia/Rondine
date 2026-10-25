@@ -225,6 +225,12 @@ enum Cmd {
     /// Nido cieco (SPEC §14.2): `si` perché il nido veda solo caselle anonime e buste tutte
     /// uguali, e la sveglia la suoni chi scrive; `no` per spegnerlo. Senza argomento dice com'è.
     Cieco { stato: Option<String> },
+    /// Nido cieco (SPEC §14.7): l'indirizzo di sveglia solo per un contatto; senza indirizzo
+    /// torna quello di sempre.
+    SvegliaContatto {
+        contatto: String,
+        indirizzo: Option<String>,
+    },
     /// Mesh tra amici (SPEC §12.5): `si` per affidare ai contatti ciò che non parte e passare ciò
     /// che affidano loro, `no` per spegnerla. Senza argomento dice com'è.
     Mesh { stato: Option<String> },
@@ -1521,6 +1527,17 @@ async fn main() -> anyhow::Result<()> {
                 },
                 c.tokens_left()
             );
+        }
+        Cmd::SvegliaContatto {
+            contatto,
+            indirizzo,
+        } => {
+            let id = c.find_contact(&contatto)?.identity;
+            c.set_contact_wake(&id, indirizzo.clone()).await?;
+            match indirizzo {
+                Some(u) => println!("Sveglia per {contatto}: {u}"),
+                None => println!("Sveglia per {contatto}: quella di sempre"),
+            }
         }
         Cmd::Cieco { stato } => {
             match stato.as_deref() {

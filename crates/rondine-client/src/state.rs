@@ -74,6 +74,10 @@ pub struct Contact {
     /// Buste ritirate dalle sue caselle dall'ultima volta che gli ho dato gettoni.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub blind_rx: u32,
+    /// Nido cieco (SPEC §14.7): l'indirizzo di sveglia solo per questo contatto, se l'app ne ha
+    /// chiesto uno al distributore; altrimenti gli do quello di sempre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blind_wake: Option<String>,
 }
 
 fn is_zero(n: &u32) -> bool {

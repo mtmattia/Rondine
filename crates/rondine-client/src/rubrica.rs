@@ -216,6 +216,7 @@ impl Client {
                     blind_in: None,
                     blind_out: None,
                     blind_rx: 0,
+                    blind_wake: None,
                 });
             }
             self.note_key_change(&info.identity);

@@ -1681,6 +1681,24 @@ impl Rondine {
             .await
     }
 
+    /// Contatti (id) a cui dare un indirizzo di sveglia UnifiedPush tutto loro (SPEC §14.7).
+    pub async fn blind_wake_wanted(&self) -> Vec<String> {
+        self.with(|c| {
+            c.blind_wake_wanted()
+                .iter()
+                .map(PublicKey::to_b64)
+                .collect()
+        })
+        .await
+    }
+
+    /// L'indirizzo di sveglia solo per questo contatto (`None`: quello di sempre).
+    pub async fn set_contact_wake(&self, id: String, url: Option<String>) -> Result<()> {
+        let id = key(&id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.set_contact_wake(&id, url).await?) }))
+            .await
+    }
+
     /// Accende o spegne la mesh tra amici (SPEC §12.5).
     pub async fn set_mesh(&self, on: bool) -> Result<()> {
         Ok(self.with(move |c| c.set_mesh(on)).await?)

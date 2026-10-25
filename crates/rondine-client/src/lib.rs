@@ -141,13 +141,17 @@ pub(crate) const BOARD_TTL_SECS: u64 = 14 * 24 * 3600;
 /// Dove mettere un file troppo grande per stare nel messaggio (SPEC §7.5).
 pub(crate) enum FileDest<'a> {
     /// Nella casella del contatto (chat 1:1).
-    Mailbox { card: &'a SignedCard, name: &'a str },
+    Mailbox {
+        id: &'a PublicKey,
+        card: &'a SignedCard,
+        name: &'a str,
+    },
     /// Tra i file condivisi del mio nodo (gruppi).
     Shared,
 }
 
 /// L'id restituito dal nodo dopo un caricamento.
-fn uploaded_id(res: &[u8]) -> Result<String> {
+pub(crate) fn uploaded_id(res: &[u8]) -> Result<String> {
     let up: serde_json::Value = parse(res)?;
     up["id"]
         .as_str()
@@ -1613,6 +1617,7 @@ impl Client {
                 blind_in: None,
                 blind_out: None,
                 blind_rx: 0,
+                blind_wake: None,
             });
         }
         self.note_key_change(&info.identity);
@@ -2335,6 +2340,7 @@ impl Client {
             .seal_file(
                 &file,
                 FileDest::Mailbox {
+                    id: to,
                     card: &contact.card,
                     name: &contact.display_name,
                 },
@@ -2402,7 +2408,12 @@ impl Client {
             (None, Some(b64::encode(&sealed.ciphertext)))
         } else {
             let at = match dest {
-                FileDest::Mailbox { card, name } => {
+                FileDest::Mailbox { id, .. }
+                    if let Some(at) = self.blind_upload(id, &sealed.ciphertext).await? =>
+                {
+                    at
+                }
+                FileDest::Mailbox { card, name, .. } => {
                     let info = verify_card(card)?;
                     let Some((node, inbox, permit)) = info.mailbox() else {
                         return Err(Error::Invalid(format!(
@@ -2422,6 +2433,7 @@ impl Client {
                         node: node.to_string(),
                         file: Some(uploaded_id(&res)?),
                         shared: None,
+                        blind_len: None,
                     }
                 }
                 FileDest::Shared => {
@@ -2440,6 +2452,7 @@ impl Client {
                         node: self.state.node.clone(),
                         file: None,
                         shared: Some(uploaded_id(&res)?),
+                        blind_len: None,
                     }
                 }
             };
@@ -2539,8 +2552,13 @@ impl Client {
         let Some(at) = a.at.clone() else {
             return Err(Error::NotFound("il file non è più disponibile".into()));
         };
+        let mut blind_id = None;
         let (sealed, mine) = match (&at.shared, &at.file) {
             (Some(shared), _) => (self.net.get_shared(&at.node, shared).await?, None),
+            (None, Some(file)) if at.blind_len.is_some() => {
+                blind_id = Some(file.clone());
+                (self.blind_fetch(&at.node, file, at.blind_len).await?, None)
+            }
             (None, Some(file)) => {
                 self.require_node()?;
                 if node_host(&at.node)? != node_host(&self.state.node)? {
@@ -2565,6 +2583,9 @@ impl Client {
             att.key.clear();
         }
         self.save()?;
+        if let Some(file) = blind_id {
+            self.blind_forget(&at.node, &file).await;
+        }
         // Era nella mia casella ed è sul telefono: dal nodo si toglie. Se non riesce, scade.
         if let Some(path) = mine {
             let _ = self
@@ -3693,6 +3714,7 @@ impl Client {
                     blind_in: None,
                     blind_out: None,
                     blind_rx: 0,
+                    blind_wake: None,
                 });
                 self.note_key_change(&from);
             }

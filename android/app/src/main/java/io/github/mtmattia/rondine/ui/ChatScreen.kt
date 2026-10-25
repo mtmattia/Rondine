@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.drop
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Delete
@@ -669,6 +672,35 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     var replyTo by remember { mutableStateOf<UiMessage?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var forwarding by remember { mutableStateOf(false) }
+    // Foto aperta a tutto schermo, con le opzioni del messaggio nel ⋮.
+    var viewing by remember { mutableStateOf<UiMessage?>(null) }
+    viewing?.let { vm ->
+        val a = vm.attachment
+        val path = a?.path
+        if (a == null || path == null) {
+            viewing = null
+        } else {
+            val canReply = !(isGroup && group?.active == false)
+            PhotoViewer(
+                path,
+                if (vm.outgoing) "Tu" else (vm.senderName ?: a.name),
+                menu = buildList {
+                    if (canReply) add("Rispondi" to { replyTo = vm; viewing = null })
+                    add("Inoltra" to { selected = setOf(vm.id); forwarding = true; viewing = null })
+                    if (vm.body.isNotBlank()) {
+                        add(
+                            "Copia didascalia" to {
+                                context.getSystemService(android.content.ClipboardManager::class.java)
+                                    ?.setPrimaryClip(android.content.ClipData.newPlainText("Rondine", vm.body))
+                            },
+                        )
+                    }
+                    add("Apri con…" to { openAttachment(context, a) })
+                    add("Elimina" to { selected = setOf(vm.id); confirmDelete = true; viewing = null })
+                },
+            ) { viewing = null }
+        }
+    }
     BackHandler(enabled = selected.isNotEmpty()) { selected = emptySet() }
     fun toggle(m: UiMessage) {
         selected = if (m.id in selected) selected - m.id else selected + m.id
@@ -977,7 +1009,12 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                 },
                                 downloading = item.m.id in downloading,
                                 onOpen = { a ->
-                                    openAttachment(context, a)?.let { scope.launch { snackbar.showSnackbar(it) } }
+                                    // Le foto si ingrandiscono qui; il resto si apre con un'altra app.
+                                    if (a.mime.startsWith("image/") && a.path != null) {
+                                        viewing = item.m
+                                    } else {
+                                        openAttachment(context, a)?.let { scope.launch { snackbar.showSnackbar(it) } }
+                                    }
                                 },
                                 onDownload = { download(item.m) },
                                 onOpenLocation = { l ->
@@ -995,6 +1032,9 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                     }
                                 },
                                 onFailedTap = { failed = item.m },
+                                onReply = if (isGroup && group?.active == false) null else {
+                                    { replyTo = item.m }
+                                },
                                 onStickerTap = { path ->
                                     scope.launch {
                                         stickerToSave = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -1319,8 +1359,13 @@ private fun Bubble(
     onStopLocation: () -> Unit,
     onStickerTap: (String) -> Unit,
     onFailedTap: () -> Unit,
+    onReply: (() -> Unit)?,
 ) {
     val colors = LocalChatColors.current
+    // Scorrere la bolla da destra a sinistra: rispondi (compare la freccia; oltre la soglia, al
+    // rilascio, si apre la risposta).
+    val maxDrag = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
+    var drag by remember(m.id) { mutableFloatStateOf(0f) }
     val big = 12.dp
     val small = 3.dp
     val shape = if (m.outgoing) {
@@ -1328,15 +1373,40 @@ private fun Bubble(
     } else {
         RoundedCornerShape(if (firstOfRun) small else big, big, big, big)
     }
+    Box(Modifier.fillMaxWidth()) {
+    if (drag < 0f) {
+        Icon(
+            Icons.AutoMirrored.Filled.Reply, null,
+            Modifier.align(Alignment.CenterEnd).padding(end = 8.dp).size(22.dp)
+                .graphicsLayer(alpha = (-drag / maxDrag).coerceIn(0f, 1f)),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     Row(
         Modifier
             .fillMaxWidth()
+            .offset { androidx.compose.ui.unit.IntOffset(drag.toInt(), 0) }
             .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent)
+            .pointerInput(m.id, selecting, onReply != null) {
+                if (selecting || onReply == null) return@pointerInput
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (drag <= -maxDrag * 0.75f) onReply()
+                        drag = 0f
+                    },
+                    onDragCancel = { drag = 0f },
+                ) { change, delta ->
+                    change.consume()
+                    drag = (drag + delta).coerceIn(-maxDrag, 0f)
+                }
+            }
             .combinedClickable(
                 onClick = {
+                    // Un tocco: le opzioni del messaggio (le foto si aprono toccando la foto).
                     when {
                         selecting -> onSelect()
                         m.status == MessageStatus.FAILED -> onFailedTap()
+                        else -> onSelect()
                     }
                 },
                 onLongClick = onSelect,
@@ -1434,6 +1504,7 @@ private fun Bubble(
                 }
             }
         }
+    }
     }
 }
 

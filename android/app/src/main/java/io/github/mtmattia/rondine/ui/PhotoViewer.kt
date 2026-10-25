@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -44,9 +47,18 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Foto a tutto schermo su nero, con il nome in alto; si ingrandisce con due dita. */
+/**
+ * Foto a tutto schermo su nero, con il nome in alto; si ingrandisce con due dita. `menu`: le voci
+ * del ⋮ in alto a destra (per una foto di una chat, le opzioni del messaggio).
+ */
 @Composable
-fun PhotoViewer(path: String, title: String, onDismiss: () -> Unit) {
+fun PhotoViewer(
+    path: String,
+    title: String,
+    menu: List<Pair<String, () -> Unit>> = emptyList(),
+    onDismiss: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
     val stamp = java.io.File(path).lastModified()
     val image by produceState<ImageBitmap?>(null, path, stamp) {
         value = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(path)?.asImageBitmap() }
@@ -81,7 +93,19 @@ fun PhotoViewer(path: String, title: String, onDismiss: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Chiudi", tint = Color.White) }
-                Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                Text(title, Modifier.weight(1f), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                if (menu.isNotEmpty()) {
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, "Opzioni del messaggio", tint = Color.White)
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            for ((label, action) in menu) {
+                                DropdownMenuItem(text = { Text(label) }, onClick = { menuOpen = false; action() })
+                            }
+                        }
+                    }
+                }
             }
         }
     }

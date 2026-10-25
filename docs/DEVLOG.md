@@ -491,3 +491,4 @@ Una riga per modifica: data, cosa è cambiato.
   Preparazione: un dialogo per il filtro e uno per il permesso. Provato sull'emulatore.
 - 2026-10-25 — Versione 0.1.20 (versionCode 21).
 - 2026-10-25 — Icone della strada sotto le bolle: segno piccolo sopra le spunte, centrato (dopo l'ora nei ricevuti): lucchetto se diretto, cassetto se dal nodo. Tolto il lucchetto della staffetta.
+- 2026-10-25 — Chat: scorrere una bolla da destra a sinistra risponde; un tocco apre le opzioni del messaggio; le foto si aprono dentro l'app, con le opzioni del messaggio nel ⋮ (Rispondi, Inoltra, Copia didascalia, Apri con…, Elimina).

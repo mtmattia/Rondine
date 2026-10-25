@@ -117,6 +117,18 @@ Il contenuto è già illeggibile. Restano da nascondere al gestore del nodo:
 - [ ] "Salva nella galleria" e salvataggio automatico dei file ricevuti in Pictures/Rondine
 - [ ] nessun log degli IP nel nodo, scritto e verificabile
 
+**Nido cieco (SPEC §14.2–14.9, deciso con Mattia il 2026-10-25).** Obiettivo: nessuno lega chi
+scrive a chi riceve. Prima il diretto, il nido è l'ultima spiaggia e vale sempre come estraneo.
+- [ ] caselle di chat rotanti dal seme MLS (§14.3)
+- [ ] gettoni v2 per tutto il nido, chiave di membro (§14.4)
+- [ ] buste da 2048 byte e file a taglie fisse; `/v2/drop`, `/v2/pickup`, `/v2/ack` (§14.5)
+- [ ] Arti nell'app: deposito, ritiro, sveglia e offerta del buco via Tor, circuiti isolati (§14.6)
+- [ ] STUN da server pubblici invece che dal nido (§14.6)
+- [ ] sveglia suonata da chi scrive, con le regole di §14.7; il nido non sveglia più
+- [ ] ripetitore FCM su un server sempre acceso (spesa: decide Mattia)
+- [ ] provare Tor nell'estensione delle notifiche di iPhone
+- [ ] togliere avviso di giacenza, tubo e staffetta (codice di d19f09f e §6.3)
+
 ### M3 — Senza rete
 Mesh Bluetooth e Wi-Fi Direct, consegna differita.
 

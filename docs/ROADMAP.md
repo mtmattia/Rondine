@@ -128,9 +128,7 @@ scrive a chi riceve. Prima il diretto, il nido è l'ultima spiaggia e vale sempr
 - [x] CLI `rondine cieco si|no` e `set_blind` nel ponte per l'app
 - [ ] interruttore nell'app (o acceso da sola quando i contatti sono pronti)
 - [ ] un indirizzo di sveglia ntfy diverso per contatto
-- [ ] ripetitore FCM sul Mac di Mattia (scelta del 2026-10-25), raggiungibile da internet in
-      HTTPS (Cloudflare Tunnel, vedi M1): con il Mac spento o addormentato la versione Play non
-      riceve sveglie
+- [x] ripetitore FCM su un server sempre acceso: il Mac di Mattia (nido e ripetitore, dal 2026-10-25), raggiungibile da internet con Tailscale Funnel, verso Google solo via Tor (Arti, `--fcm-proxy`, §8.1); con il Mac spento la versione Play non riceve sveglie
 - [ ] provare Tor nell'estensione delle notifiche di iPhone
 - [ ] togliere avviso di giacenza, tubo e staffetta (codice di d19f09f e §6.3)
 

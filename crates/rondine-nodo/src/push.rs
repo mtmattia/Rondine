@@ -26,11 +26,25 @@ fn tls_config() -> Result<rustls::ClientConfig, rustls::Error> {
 
 /// Client HTTPS verso servizi esterni (sveglie, FCM): niente redirect, tempi brevi.
 pub(crate) fn http_client() -> anyhow::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+    http_client_via(None)
+}
+
+/// Come [`http_client`], ma tutto passa dal proxy dato (per esempio Tor): mai in diretta.
+pub(crate) fn http_client_via(proxy: Option<reqwest::Proxy>) -> anyhow::Result<reqwest::Client> {
+    let mut b = reqwest::Client::builder()
         .tls_backend_preconfigured(tls_config()?)
-        .timeout(std::time::Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?)
+        // Tor aggiunge qualche secondo a ogni connessione.
+        .timeout(std::time::Duration::from_secs(if proxy.is_some() {
+            30
+        } else {
+            10
+        }))
+        .redirect(reqwest::redirect::Policy::none());
+    b = match proxy {
+        Some(p) => b.proxy(p),
+        None => b.no_proxy(),
+    };
+    Ok(b.build()?)
 }
 
 #[derive(Clone)]

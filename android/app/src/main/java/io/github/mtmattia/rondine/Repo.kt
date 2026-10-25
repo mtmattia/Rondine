@@ -109,6 +109,7 @@ object Repo {
                 if (rondine != null) refresh()
                 ready.value = rondine != null
                 if (rondine != null) startLan()
+                rondine?.let { moveFromOldNode(it) }
             } catch (e: RondineException) {
                 ready.value = false
             } finally {
@@ -118,6 +119,25 @@ object Repo {
     }
 
     fun client(): Rondine = rondine ?: throw IllegalStateException("nessun profilo")
+
+    /**
+     * Il nido di Mattia si è spostato dal PC al Mac (2026-10-25): chi sta ancora sul vecchio
+     * indirizzo passa da solo al nuovo. Il vecchio nido resta acceso per i 30 giorni di ritiro.
+     * Prima della registrazione della sveglia (che aspetta `loaded`), così va sul nido nuovo.
+     */
+    private suspend fun moveFromOldNode(r: Rondine) {
+        val target = BuildConfig.DEFAULT_NODE.trimEnd('/')
+        if (target.isEmpty() || target == OLD_DEFAULT_NODE) return
+        if (r.profile().node.trimEnd('/') != OLD_DEFAULT_NODE) return
+        try {
+            kotlinx.coroutines.withTimeout(30_000) { r.setNode(target) }
+            refresh()
+        } catch (_: Exception) {
+            // Senza rete si riprova al prossimo avvio.
+        }
+    }
+
+    private const val OLD_DEFAULT_NODE = "https://cachyos-mattia.tail9cc49c.ts.net"
 
     suspend fun create(name: String, node: String, phone: String?) {
         val r = createProfile(profileDir, name, node)

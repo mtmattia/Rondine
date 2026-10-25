@@ -25,6 +25,10 @@ struct Args {
     /// Google Play dell'app (SPEC §8.1).
     #[arg(long, env = "RONDINE_FCM_CREDENZIALI")]
     fcm_credenziali: Option<PathBuf>,
+    /// Proxy SOCKS di Tor per parlare con Google (es. socks5h://127.0.0.1:9050): Google non vede
+    /// l'IP del ripetitore; se Tor non risponde la sveglia fallisce, mai in chiaro (SPEC §8.1).
+    #[arg(long, env = "RONDINE_FCM_PROXY", requires = "fcm_credenziali")]
+    fcm_proxy: Option<String>,
     /// Telefono Android con "SMS Gateway for Android" in modalità server locale, per gli SMS di
     /// verifica (SPEC §13.4), es. http://100.64.0.7:8080. Senza: SMS "in prova", nel log.
     #[arg(long, env = "RONDINE_SMS_GATEWAY")]
@@ -83,8 +87,13 @@ async fn main() -> anyhow::Result<()> {
     let fcm = match &args.fcm_credenziali {
         Some(path) => {
             let json = std::fs::read_to_string(path).context("lettura delle credenziali FCM")?;
-            let cfg = FcmConfig::from_service_account(&json).context("credenziali FCM")?;
-            tracing::info!(progetto = %cfg.project_id, "ripetitore FCM attivo");
+            let mut cfg = FcmConfig::from_service_account(&json).context("credenziali FCM")?;
+            cfg.proxy = args.fcm_proxy.clone();
+            tracing::info!(
+                progetto = %cfg.project_id,
+                tor = cfg.proxy.is_some(),
+                "ripetitore FCM attivo"
+            );
             Some(cfg)
         }
         None => None,

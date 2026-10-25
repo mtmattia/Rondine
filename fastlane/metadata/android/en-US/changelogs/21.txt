@@ -1,0 +1,1 @@
+Simpler number verification with a ring: at startup two taps are enough, Rondine as call screener and the call permission. The app no longer asks for access to SMS and call log, which Android blocks for apps installed outside a store. If an SMS is needed, the messaging app opens with the text already written.

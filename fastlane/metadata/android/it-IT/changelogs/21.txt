@@ -1,0 +1,1 @@
+Verifica del numero con uno squillo più semplice: all'avvio bastano due tocchi, Rondine come filtro chiamate e il permesso per le chiamate. L'app non chiede più l'accesso a SMS e registro chiamate, che Android blocca alle app installate fuori dallo store. Se serve l'SMS, si apre l'app dei messaggi con il testo già scritto.

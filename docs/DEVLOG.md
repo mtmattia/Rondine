@@ -489,3 +489,4 @@ Una riga per modifica: data, cosa è cambiato.
   Tolti dall'app: lo squillo lo riceve solo il filtro chiamate, chi verifica chiede solo il
   permesso "chiamate", e l'SMS parte dall'app dei messaggi e si conferma toccando il link.
   Preparazione: un dialogo per il filtro e uno per il permesso. Provato sull'emulatore.
+- 2026-10-25 — Versione 0.1.20 (versionCode 21).

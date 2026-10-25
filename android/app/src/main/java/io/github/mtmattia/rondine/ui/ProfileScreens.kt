@@ -625,6 +625,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                     maps = !maps
                     MapTiles.setEnabled(context, maps)
                 }
+                Repo.verifySetupDone.collectAsState().value
                 val ready = verifyReady(context)
                 SettingRow(
                     Icons.Filled.PhoneCallback,

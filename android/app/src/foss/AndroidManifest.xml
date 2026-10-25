@@ -1,23 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Solo nella versione libera (F-Droid, GitHub): verifica del numero tra amici (SPEC §14.1).
-     Chi verifica chiama e chiude da sé (squillo) o manda l'SMS col codice; chi è verificato legge
-     le chiamate perse e gli SMS di verifica. Google Play non li permette: lì si fa a mano. -->
+     Chi verifica fa lo squillo e lo chiude da sé. Niente permessi su SMS e registro chiamate:
+     Android li blocca alle app installate fuori dallo store, e lo squillo lo riceve il filtro
+     chiamate. Google Play non permette nemmeno questi: lì lo squillo si fa a mano. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
-    <uses-permission android:name="android.permission.READ_CALL_LOG" />
-    <uses-permission android:name="android.permission.SEND_SMS" />
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
-
-    <application>
-        <receiver
-            android:name=".verify.SmsReceiver"
-            android:exported="true"
-            android:permission="android.permission.BROADCAST_SMS">
-            <intent-filter>
-                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
-            </intent-filter>
-        </receiver>
-    </application>
 </manifest>

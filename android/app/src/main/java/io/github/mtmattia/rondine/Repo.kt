@@ -221,6 +221,9 @@ object Repo {
     /** Apri l'invito a preparare la verifica con squillo (dalle Impostazioni). */
     val verifySetupOpen = MutableStateFlow(false)
 
+    /** Cresce a ogni preparazione finita: chi mostra lo stato si ridisegna. */
+    val verifySetupDone = MutableStateFlow(0)
+
     /** Quando è stato fatto l'ultimo backup (millisecondi), 0 se mai. */
     var lastBackup: Long
         get() = prefs().getLong("ultimo_backup", 0)
@@ -389,10 +392,6 @@ object Repo {
                             ringExpectedAt = System.currentTimeMillis()
                         }
                     }
-                    verify.canReceiveRing(app) -> {
-                        val since = System.currentTimeMillis()
-                        scope.launch { verify.watchRings(app, since) }
-                    }
                     else -> {
                         // Non so ricevere lo squillo: chi verifica passa all'SMS.
                         scope.launch { try { client().answerUnable(r.id) } catch (_: RondineException) {} }
@@ -400,8 +399,7 @@ object Repo {
                     }
                 }
                 "sms" -> {
-                    if (verify.full && !verify.granted(app, verify.verifiedPermissions)) verifyNeedsPermission.value = true
-                    if (!verify.full) notice.value = "$name sta verificando il tuo numero: quando arriva il suo SMS, tocca il link."
+                    notice.value = "$name sta verificando il tuo numero: quando arriva il suo SMS, tocca il link."
                     earlyVerifySms?.let { (text, at) ->
                         earlyVerifySms = null
                         if (System.currentTimeMillis() - at < 15 * 60_000L) answerVerifySms(text)

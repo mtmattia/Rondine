@@ -484,3 +484,8 @@ Una riga per modifica: data, cosa è cambiato.
   chiede filtro chiamate e permessi all'avvio, con le istruzioni se Android li blocca. Test
   `la_richiesta_di_verifica_sveglia_il_telefono`; provato sull'emulatore il percorso dei permessi.
 - 2026-10-25 — Versione 0.1.19 (versionCode 20).
+- 2026-10-25 — Verifica con squillo senza permessi bloccati: Android nega SMS e registro chiamate
+  alle app installate fuori dallo store (bisognava "Consenti impostazioni con restrizioni").
+  Tolti dall'app: lo squillo lo riceve solo il filtro chiamate, chi verifica chiede solo il
+  permesso "chiamate", e l'SMS parte dall'app dei messaggi e si conferma toccando il link.
+  Preparazione: un dialogo per il filtro e uno per il permesso. Provato sull'emulatore.

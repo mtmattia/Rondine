@@ -31,26 +31,22 @@ import uniffi.rondine_ffi.RondineException
 
 /**
  * Un contatto ha provato a verificare il mio numero e questo telefono non sapeva rispondere da
- * solo (SPEC §14.1): si propone il filtro chiamate (squillo in silenzio, anche nella versione
- * Play) e, nella versione libera, i permessi per registro chiamate e SMS.
+ * solo (SPEC §14.1): si propone il filtro chiamate, che riceve lo squillo in silenzio.
  */
 @Composable
 fun VerifyPermissionPrompt() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val verify = io.github.mtmattia.rondine.verify.PhoneVerify
     val need by Repo.verifyNeedsPermission.collectAsState()
-    val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        Repo.verifyNeedsPermission.value = false
-    }
     val role = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (verify.full && !verify.granted(context, verify.verifiedPermissions)) {
-            perms.launch(verify.verifiedPermissions)
-        } else {
-            Repo.verifyNeedsPermission.value = false
-        }
+        Repo.verifyNeedsPermission.value = false
     }
     if (!need) return
     val screener = verify.screenerRequest(context)
+    if (screener == null) {
+        Repo.verifyNeedsPermission.value = false
+        return
+    }
     AlertDialog(
         onDismissRequest = { Repo.verifyNeedsPermission.value = false },
         title = { Text("Ti stanno verificando") },
@@ -62,15 +58,7 @@ fun VerifyPermissionPrompt() {
                     "Stavolta gli abbiamo detto di usare un SMS.",
             )
         },
-        confirmButton = {
-            TextButton(onClick = {
-                when {
-                    screener != null -> role.launch(screener)
-                    verify.full -> perms.launch(verify.verifiedPermissions)
-                    else -> Repo.verifyNeedsPermission.value = false
-                }
-            }) { Text("Attiva") }
-        },
+        confirmButton = { TextButton(onClick = { role.launch(screener) }) { Text("Attiva") } },
         dismissButton = { TextButton(onClick = { Repo.verifyNeedsPermission.value = false }) { Text("Non ora") } },
     )
 }
@@ -151,20 +139,11 @@ fun VerifyContactDialog(contactId: String, name: String, phone: String?, canRing
     )
 }
 
-/** Tutti i permessi della verifica con squillo e SMS (versione libera, SPEC §14.1). */
-private val ALL_VERIFY_PERMISSIONS = arrayOf(
-    android.Manifest.permission.CALL_PHONE,
-    android.Manifest.permission.ANSWER_PHONE_CALLS,
-    android.Manifest.permission.READ_CALL_LOG,
-    android.Manifest.permission.SEND_SMS,
-    android.Manifest.permission.RECEIVE_SMS,
-)
-
-/** Questo telefono è pronto a fare e ricevere la verifica con squillo? */
+/** Questo telefono è pronto a ricevere (filtro chiamate) e fare (versione libera) lo squillo? */
 fun verifyReady(context: android.content.Context): Boolean {
     val verify = io.github.mtmattia.rondine.verify.PhoneVerify
-    if (!verify.canReceiveRing(context)) return false
-    return !verify.full || verify.granted(context, ALL_VERIFY_PERMISSIONS)
+    if (verify.screenerRequest(context) != null && !verify.canReceiveRing(context)) return false
+    return !verify.full || verify.granted(context, verify.ringPermissions)
 }
 
 private fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
@@ -176,9 +155,8 @@ private fun android.content.Context.findActivity(): android.app.Activity? = when
 /**
  * All'avvio (anche dopo un aggiornamento) e dalle Impostazioni: prepara il telefono alla
  * verifica del numero con uno squillo (SPEC §14.1). Prima il filtro chiamate, così lo squillo di
- * chi ti verifica arriva in silenzio; poi, nella versione libera, i permessi. Se Android li blocca
- * senza chiedere (app installata fuori dallo store), spiega come sbloccarli. Se rimandi, lo
- * richiede dopo un giorno.
+ * chi ti verifica arriva in silenzio; poi, nella versione libera, il permesso di fare lo squillo.
+ * Se rimandi, lo richiede dopo un giorno.
  */
 @Composable
 fun VerifySetupPrompt() {
@@ -198,6 +176,7 @@ fun VerifySetupPrompt() {
         Repo.verifySetupOpen.value = false
         dismissed = true
         done = verifyReady(context)
+        Repo.verifySetupDone.value += 1
         Repo.notice.value = if (done) {
             "Pronto: chi verifica il tuo numero ti fa uno squillo, e Rondine risponde da sola."
         } else {
@@ -207,14 +186,14 @@ fun VerifySetupPrompt() {
 
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
         val activity = context.findActivity()
-        // Negati senza che Android abbia mostrato niente: bloccati (impostazioni con restrizioni).
+        // Negati senza che Android abbia mostrato niente: negati per sempre in passato.
         val silent = res.filterValues { !it }.keys.filter { p ->
             activity != null && !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, p)
         }
         if (silent.isNotEmpty()) blocked = silent else finish()
     }
     fun askPermissions() {
-        val missing = ALL_VERIFY_PERMISSIONS.filter { !verify.granted(context, arrayOf(it)) }
+        val missing = verify.ringPermissions.filter { !verify.granted(context, arrayOf(it)) }
         if (verify.full && missing.isNotEmpty()) perms.launch(missing.toTypedArray()) else finish()
     }
     val role = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { askPermissions() }
@@ -222,13 +201,11 @@ fun VerifySetupPrompt() {
     if (blocked.isNotEmpty()) {
         AlertDialog(
             onDismissRequest = { blocked = emptyList(); finish() },
-            title = { Text("Permessi bloccati da Android") },
+            title = { Text("Permesso negato") },
             text = {
                 Text(
-                    "Android non ha nemmeno chiesto alcuni permessi (chiamate o SMS): succede con le app " +
-                        "installate fuori dallo store. Apri le informazioni dell'app, tocca ⋮ in alto e " +
-                        "\"Consenti impostazioni con restrizioni\", poi in Autorizzazioni attiva Telefono, " +
-                        "Registri chiamate e SMS.",
+                    "Il permesso per le chiamate era stato negato, e Android non lo richiede più. Apri " +
+                        "le informazioni dell'app e in Autorizzazioni attiva Telefono.",
                 )
             },
             confirmButton = {
@@ -263,8 +240,7 @@ fun VerifySetupPrompt() {
                     "scegli Rondine come app di filtro chiamate: prende solo lo squillo di chi ti " +
                     "verifica, nei 30 secondi dopo la sua richiesta, e lascia passare tutte le altre " +
                     "chiamate." + if (verify.full) {
-                        " Poi servono i permessi per chiamare, leggere le chiamate perse e gli SMS di " +
-                            "verifica: Rondine guarda solo quelli, e niente esce dal telefono."
+                        " Poi il permesso per le chiamate, per fare tu lo squillo a chi verifichi."
                     } else {
                         ""
                     },

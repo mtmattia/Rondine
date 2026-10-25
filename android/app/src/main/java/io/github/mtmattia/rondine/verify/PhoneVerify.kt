@@ -7,16 +7,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.provider.CallLog
 import android.telecom.TelecomManager
-import android.telephony.SmsManager
 import androidx.core.content.ContextCompat
 import io.github.mtmattia.rondine.BuildConfig
 import io.github.mtmattia.rondine.MainActivity
 import io.github.mtmattia.rondine.Repo
 import kotlinx.coroutines.delay
-import uniffi.rondine_ffi.RingCall
-import uniffi.rondine_ffi.RondineException
 import uniffi.rondine_ffi.VerifyPlanInfo
 
 /**
@@ -25,35 +21,28 @@ import uniffi.rondine_ffi.VerifyPlanInfo
  * l'impronta del numero che ha chiamato, o con il codice. Il nodo non vede né numeri né codici.
  *
  * Chi è verificato riceve lo squillo in silenzio se Rondine è il suo filtro chiamate (anche nella
- * versione Play); se no, nella versione libera, lo legge dal registro chiamate. Senza nessuno dei
- * due risponde "non posso" e chi verifica passa all'SMS.
+ * versione Play); se no risponde "non posso" e chi verifica passa all'SMS, che parte dall'app dei
+ * messaggi con il testo già scritto e si conferma toccando il link. Niente permessi su SMS e
+ * registro chiamate: Android li blocca alle app installate fuori dallo store.
  */
 object PhoneVerify {
-    /** Chiamare e mandare SMS da sé, leggere registro e SMS: solo nella versione libera. */
+    /** Fare lo squillo da sé: solo nella versione libera (Google Play non lo permette). */
     val full: Boolean = BuildConfig.FLAVOR == "foss"
 
     /** Quanto suona lo squillo prima di chiuderlo. */
     private const val RING_MS = 4_000L
 
-    /** Per quanto chi è verificato aspetta lo squillo dopo la richiesta. */
-    private const val WATCH_MS = 60_000L
 
-    /** Al massimo tante chiamate nella risposta (SPEC §14.1). */
-    private const val MAX_CALLS = 5
 
     /** Posso fare uno squillo (versione libera, col mio numero nel profilo)? */
     fun canRing(): Boolean = full
 
-    /** Permessi di chi verifica, per il metodo scelto. */
-    fun verifierPermissions(method: String): Array<String> = when {
-        !full -> emptyArray()
-        method == "squillo" -> arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.ANSWER_PHONE_CALLS)
-        else -> arrayOf(Manifest.permission.SEND_SMS)
-    }
+    /** Permessi di chi verifica: fare lo squillo e chiuderlo (l'SMS parte dall'app dei messaggi). */
+    val ringPermissions: Array<String> =
+        arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.ANSWER_PHONE_CALLS)
 
-    /** Permessi di chi viene verificato senza filtro chiamate: registro chiamate e SMS. */
-    val verifiedPermissions: Array<String>
-        get() = if (full) arrayOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.RECEIVE_SMS) else emptyArray()
+    fun verifierPermissions(method: String): Array<String> =
+        if (full && method == "squillo") ringPermissions else emptyArray()
 
     fun granted(context: Context, permissions: Array<String>): Boolean = permissions.all {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -72,9 +61,8 @@ object PhoneVerify {
         return roles.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING)
     }
 
-    /** Questo telefono sa ricevere uno squillo di verifica? */
-    fun canReceiveRing(context: Context): Boolean =
-        isScreener(context) || (full && granted(context, arrayOf(Manifest.permission.READ_CALL_LOG)))
+    /** Questo telefono sa ricevere uno squillo di verifica? Solo col filtro chiamate. */
+    fun canReceiveRing(context: Context): Boolean = isScreener(context)
 
     /** Esegue il piano di chi verifica: lo squillo, o l'SMS. */
     suspend fun run(context: Context, plan: VerifyPlanInfo, progress: (String) -> Unit) {
@@ -111,59 +99,12 @@ object PhoneVerify {
         false
     }
 
-    /** L'SMS col codice dalla mia SIM: da sé nella versione libera, se no dall'app dei messaggi. */
+    /** L'SMS col codice dalla mia SIM: si apre l'app dei messaggi con il testo già scritto. */
     fun sendSms(context: Context, number: String, text: String) {
-        if (full && granted(context, arrayOf(Manifest.permission.SEND_SMS))) {
-            val sms = context.getSystemService(SmsManager::class.java)
-            sms.sendMultipartTextMessage(number, null, sms.divideMessage(text), null, null)
-            return
-        }
         context.startActivity(
             Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null))
                 .putExtra("sms_body", text)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
-    }
-
-    /**
-     * Chi è verificato, senza filtro chiamate: guarda nel registro le chiamate arrivate da poco
-     * prima della richiesta fino a un minuto dopo, e manda ora e impronta del numero.
-     */
-    suspend fun watchRings(context: Context, sinceMs: Long) {
-        if (!full || !granted(context, arrayOf(Manifest.permission.READ_CALL_LOG))) return
-        var calls = emptyList<RingCall>()
-        while (System.currentTimeMillis() < sinceMs + WATCH_MS) {
-            calls = incomingCallsSince(context, sinceMs - 10_000)
-            if (calls.isNotEmpty()) break
-            delay(2_000)
-        }
-        if (calls.isEmpty()) return
-        try {
-            Repo.client().answerRings(calls.take(MAX_CALLS))
-        } catch (_: RondineException) {
-            // Scaduta o già risposta: niente da fare.
-        }
-    }
-
-    /** Chiamate in arrivo dal momento dato, dal registro chiamate. */
-    private fun incomingCallsSince(context: Context, sinceMs: Long): List<RingCall> {
-        val types = listOf(CallLog.Calls.INCOMING_TYPE, CallLog.Calls.MISSED_TYPE, CallLog.Calls.REJECTED_TYPE)
-        val out = mutableListOf<RingCall>()
-        try {
-            context.contentResolver.query(
-                CallLog.Calls.CONTENT_URI,
-                arrayOf(CallLog.Calls.DATE, CallLog.Calls.TYPE, CallLog.Calls.NUMBER),
-                "${CallLog.Calls.DATE} >= ?",
-                arrayOf(sinceMs.toString()),
-                "${CallLog.Calls.DATE} ASC",
-            )?.use { c ->
-                while (c.moveToNext()) {
-                    val number = c.getString(2) ?: continue
-                    if (c.getInt(1) in types) out += RingCall((c.getLong(0) / 1000).toULong(), number)
-                }
-            }
-        } catch (_: SecurityException) {
-        }
-        return out
     }
 }

@@ -1018,25 +1018,24 @@ ricevute valgono 15 minuti, al massimo 20 alla volta.
        passano come sempre; il filtro ricorda in memoria quelle degli ultimi 2 minuti, così se la
        richiesta arriva dopo lo squillo risponde con quelle dell'ultimo minuto.
      - L'app prepara il telefono **all'avvio** (anche dopo un aggiornamento) e dalle Impostazioni:
-       filtro chiamate e, nella versione libera, i permessi; se Android li blocca senza chiederli
-       (app installata fuori dallo store) spiega come sbloccarli.
-     - **Registro chiamate** (versione libera, con il permesso): guarda le chiamate arrivate da
-       10 s prima a 60 s dopo la richiesta.
-     - **Niente dei due** (iPhone, versione Play senza filtro): risponde `unable` e chi verifica
-       passa da sé all'SMS, ricordandoselo per la volta dopo.
+       il filtro chiamate e, nella versione libera, il permesso di fare lo squillo. Nessun
+       permesso su SMS o registro chiamate.
+     - **Senza filtro chiamate** (iPhone, o chi non l'ha scelto): risponde `unable` e chi verifica
+       passa da sé all'SMS, ricordandoselo per la volta dopo. Niente lettura del registro
+       chiamate: Android blocca quel permesso alle app installate fuori dallo store.
    - Chi verifica accetta se una chiamata ha l'impronta del suo numero ed è arrivata tra −2 e
      +10 s dopo la sua (la rete mobile impiega qualche secondo a far squillare). Chi si mette nel
      mezzo con una chiave falsa non riceve la chiamata: dovrebbe indovinare il numero di chi
      verifica. Limite: chi conosce quel numero e si mette nel mezzo proprio in quei secondi.
-   - Permessi: chiamare e chiudere la chiamata a chi verifica (versione libera).
+   - Permessi: chiamare e chiudere la chiamata a chi verifica (versione libera; nella versione
+     Play non si può fare lo squillo, e si verifica con l'SMS).
 2. **SMS tra amici** (alternativa, e per iPhone).
    - Chi verifica sceglie un codice a caso di 8 cifre e lo manda **dalla sua SIM** al numero:
      "Rondine: <nome> ti chiede di confermare il tuo numero. Codice 12345678
-     rondine:verifica/12345678". Nella versione libera l'app lo manda da sé; altrimenti apre
-     l'app dei messaggi con il testo già scritto.
-   - Il telefono che lo riceve lo riconosce (versione libera: legge gli SMS in arrivo; altrimenti
-     si tocca il link) e manda il codice nella chat a chi ha chiesto una verifica via SMS. Se
-     l'SMS arriva prima della richiesta, lo tiene da parte per 15 minuti.
+     rondine:verifica/12345678". L'app apre l'app dei messaggi con il testo già scritto: basta
+     toccare Invia.
+   - Chi lo riceve tocca il link, e Rondine manda il codice nella chat a chi ha chiesto una
+     verifica via SMS. Se il link arriva prima della richiesta, lo tiene da parte per 15 minuti.
 3. **QR di persona** (§10): la garanzia più forte, senza telefono né operatore.
 
 Esito: il contatto passa al grado **"numero verificato da te"** (§10), per quella chiave e quel

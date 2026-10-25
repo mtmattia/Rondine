@@ -1148,8 +1148,11 @@ il nodo vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla p
   - al massimo una sveglia per contatto ogni 60 s: i messaggi ravvicinati ne fanno una sola;
   - prima di suonare si aspetta un tempo casuale tra 0 e 5 s.
   - Niente sveglie finte (scelta di Mattia).
-- Il **ripetitore** (§8.1) è gestito da chi ha il progetto Firebase/Apple, separato dai nidi; deve
-  stare su un server sempre acceso. Limite di frequenza per token come in §8.1.
+- Il **ripetitore** (§8.1) è gestito da chi ha il progetto Firebase/Apple, separato dai nidi.
+  Limite di frequenza per token come in §8.1. Dev'essere raggiungibile da internet in HTTPS (chi
+  scrive lo chiama da un'uscita Tor). Per ora (scelta di Mattia del 2026-10-25) gira sul suo Mac:
+  con il Mac spento, addormentato o senza rete la versione Play non riceve sveglie; i messaggi
+  arrivano comunque in diretto o al primo ritiro con l'app aperta.
 
 ### 14.8 Chi vede cosa, e limiti noti
 

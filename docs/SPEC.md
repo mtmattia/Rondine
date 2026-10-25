@@ -165,6 +165,8 @@ telefono che l'ha chiesto (per revocarlo).
 
 Il nodo verifica firma, casella, scadenza, che l'`id` non sia revocato e un limite di frequenza
 per `id`. Un permesso revocato non funziona più; per bloccare un contatto basta revocare il suo.
+Per sbloccarlo si apre una chat nuova (Welcome con `Hello`, §7) con un biglietto che porta un
+permesso nuovo, emesso apposta per lui.
 
 ## 6. Casella postale
 

@@ -4,7 +4,7 @@ pub enum Error {
     Http(#[from] reqwest::Error),
     #[error("TLS: {0}")]
     Tls(#[from] rustls::Error),
-    #[error("il nodo ha risposto {status}: {message}")]
+    #[error("il nido ha risposto {status}: {message}")]
     Node {
         status: u16,
         code: String,
@@ -23,7 +23,7 @@ pub enum Error {
     #[error("{0}")]
     Invalid(String),
     /// Il nodo non offre il deposito sigillato (SPEC §6.3): è scartato.
-    #[error("il nodo {0} non offre il deposito sigillato: per proteggere chi scrive non si usa")]
+    #[error("il nido {0} non offre il deposito sigillato: per proteggere chi scrive non si usa")]
     NoSeal(String),
 }
 
@@ -66,16 +66,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Spiega un errore di rete in italiano, senza i dettagli tecnici della libreria HTTP.
 fn describe_http(e: &reqwest::Error) -> String {
     if bad_certificate(e) {
-        return "il certificato del nodo non è valido: connessione rifiutata per sicurezza".into();
+        return "il certificato del nido non è valido: connessione rifiutata per sicurezza".into();
     }
     if e.is_timeout() {
-        "il nodo non risponde: tempo scaduto".into()
+        "il nido non risponde: tempo scaduto".into()
     } else if e.is_connect() {
-        "nodo non raggiungibile: controlla la connessione e l'indirizzo del nodo".into()
+        "nido non raggiungibile: controlla la connessione e l'indirizzo del nido".into()
     } else if e.is_decode() || e.is_body() {
-        "risposta del nodo non valida".into()
+        "risposta del nido non valida".into()
     } else {
-        "errore di rete nel parlare con il nodo".into()
+        "errore di rete nel parlare con il nido".into()
     }
 }
 

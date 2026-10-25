@@ -98,7 +98,7 @@ fun VerifyContactDialog(contactId: String, name: String, phone: String?, canRing
                 Text(
                     "Il tuo telefono fa uno squillo o manda un SMS a questo numero, e quello di $name " +
                         "risponde nella chat cifrata. Se torna, questa chiave ha davvero la sua SIM. Il " +
-                        "nodo non vede niente.",
+                        "nido non vede niente.",
                     fontSize = 14.sp,
                 )
                 OutlinedTextField(

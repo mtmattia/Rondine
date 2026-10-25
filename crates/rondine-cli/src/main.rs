@@ -217,6 +217,8 @@ enum Cmd {
     VerificaSms { testo: String },
     /// Blocca un contatto.
     Blocca { contatto: String },
+    /// Sblocca un contatto: riceve un permesso nuovo e può tornare a scriverti.
+    Sblocca { contatto: String },
     /// Elimina la chat con un contatto (messaggi compresi), solo qui; il contatto resta.
     EliminaChat { contatto: String },
     /// Nodo senza memoria (SPEC §14.2): `si` perché ai contatti che lo usano arrivino solo
@@ -951,7 +953,7 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Nodo { url } => {
             c.set_node(&url).await?;
             println!(
-                "Ora il tuo nodo è {url}. I tuoi contatti e i tuoi gruppi ricevono il biglietto nuovo."
+                "Ora il tuo nido è {url}. I tuoi contatti e i tuoi gruppi ricevono il biglietto nuovo."
             );
         }
         Cmd::Rete {
@@ -964,7 +966,7 @@ async fn main() -> anyhow::Result<()> {
             println!("Nome:     {}", s.display_name);
             println!("Chiave:   {}", c.identity());
             println!(
-                "Nodo:     {}",
+                "Nido:     {}",
                 if c.has_node() {
                     s.node.as_str()
                 } else {
@@ -1168,7 +1170,7 @@ async fn main() -> anyhow::Result<()> {
             ChiamataCmd::Turn => {
                 let t = c.turn_servers().await?;
                 if t.urls.is_empty() {
-                    println!("Il tuo nodo non dà server STUN/TURN.");
+                    println!("Il tuo nido non dà server STUN/TURN.");
                 }
                 for u in &t.urls {
                     println!("{u}");
@@ -1409,7 +1411,7 @@ async fn main() -> anyhow::Result<()> {
             let id = c.find_contact(&contatto)?.identity;
             if !c.connect_direct(&id).await? && !c.direct_link(&id) {
                 anyhow::bail!(
-                    "collegamento diretto non disponibile: serve un server STUN sul nodo (SPEC §12.8)"
+                    "collegamento diretto non disponibile: serve un server STUN sul nido (SPEC §12.8)"
                 );
             }
             println!("Offerta mandata, aspetto la risposta…");
@@ -1513,7 +1515,7 @@ async fn main() -> anyhow::Result<()> {
                 None => {}
             }
             println!(
-                "Nodo senza memoria: {} (gettoni in tasca: {})",
+                "Nido senza memoria: {} (gettoni in tasca: {})",
                 if c.state().memoryless {
                     "acceso"
                 } else {
@@ -1562,6 +1564,11 @@ async fn main() -> anyhow::Result<()> {
             println!(
                 "Contatto bloccato. Per fermare anche il vecchio link usa `rondine invito --nuovo`."
             );
+        }
+        Cmd::Sblocca { contatto } => {
+            let id = c.find_contact(&contatto)?.identity;
+            c.unblock(&id).await?;
+            println!("Contatto sbloccato: può tornare a scriverti.");
         }
         Cmd::Push(PushCmd::Imposta { endpoint }) => {
             c.set_push_endpoint(&endpoint).await?;
@@ -1671,7 +1678,7 @@ fn report_sent(m: &rondine_client::ChatMessage) -> anyhow::Result<()> {
         ),
         Delivery::Pending => println!("In coda: parte quando è in rete."),
         _ if m.unsealed => println!(
-            "Inviato, ma senza sigillo: nessuna staffetta disponibile, il nodo ha visto il tuo IP."
+            "Inviato, ma senza sigillo: nessuna staffetta disponibile, il nido ha visto il tuo IP."
         ),
         _ => println!("Inviato."),
     }

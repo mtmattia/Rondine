@@ -52,7 +52,7 @@ pub fn verify_card(card: &SignedCard) -> Result<Card> {
             }
         }
         (None, None, None) => {}
-        _ => return Err(Error::Invalid("nodo, casella e permesso vanno insieme")),
+        _ => return Err(Error::Invalid("nido, casella e permesso vanno insieme")),
     }
     Ok(c)
 }

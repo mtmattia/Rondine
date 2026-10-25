@@ -204,6 +204,42 @@ async fn bloccare_un_contatto_ferma_i_suoi_messaggi() -> R {
 }
 
 #[tokio::test]
+async fn sbloccare_un_contatto_riapre_la_chat() -> R {
+    let n1 = start_node().await?;
+    let tmp = TempDir::new()?;
+    let mut mattia = profile(&tmp, "Mattia", &n1).await?;
+    let mut silvia = profile(&tmp, "Silvia", &n1).await?;
+
+    silvia.add_from_invite(&mattia.invite_link()?).await?;
+    mattia.sync().await?;
+    mattia.send_text(&silvia.identity(), "ciao").await?;
+    silvia.sync().await?;
+
+    mattia.block(&silvia.identity()).await?;
+    mattia.reset_invite().await?;
+    let m = silvia
+        .send_text(&mattia.identity(), "mi hai bloccata?")
+        .await?;
+    assert_eq!(m.status, Delivery::Failed);
+
+    // Sbloccata: Silvia riceve un permesso nuovo e i suoi messaggi tornano ad arrivare.
+    mattia.unblock(&silvia.identity()).await?;
+    assert!(
+        mattia
+            .contacts()
+            .iter()
+            .any(|c| c.identity == silvia.identity() && !c.blocked)
+    );
+    silvia.sync().await?;
+    let m = silvia.send_text(&mattia.identity(), "eccomi").await?;
+    assert_eq!(m.status, Delivery::Sent);
+    assert_eq!(texts(&mattia.sync().await?), ["eccomi"]);
+    // Sbloccare chi non è bloccato non fa niente.
+    mattia.unblock(&silvia.identity()).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn riprova_dopo_un_nuovo_invito() -> R {
     let node = start_node().await?;
     let tmp = TempDir::new()?;
@@ -428,7 +464,7 @@ async fn errori_di_rete_comprensibili() -> R {
         .err()
         .ok_or("doveva fallire")?
         .to_string();
-    assert!(err.contains("non sembra un nodo Rondine"), "{err}");
+    assert!(err.contains("non sembra un nido Rondine"), "{err}");
     assert!(!err.contains("<html"), "{err}");
 
     // Nessuno in ascolto: si dice che il nodo non è raggiungibile.
@@ -673,7 +709,7 @@ async fn rete_locale_senza_nodo() -> R {
         .await
         .err()
         .ok_or("doveva fallire")?;
-    assert!(err.to_string().contains("nodo"), "{err}");
+    assert!(err.to_string().contains("nido"), "{err}");
     Ok(())
 }
 
@@ -2723,7 +2759,7 @@ async fn tre_gradi_di_fiducia() -> R {
 }
 
 /// Bug: con una rubrica grande (centinaia di numeri) la pubblicazione superava il limite di
-/// dimensione del nodo, che rispondeva in testo semplice: "non sembra un nodo Rondine".
+/// dimensione del nodo, che rispondeva in testo semplice: "non sembra un nido Rondine".
 #[tokio::test]
 async fn rubrica_grande_si_pubblica_a_lotti() -> R {
     let node = start_node().await?;

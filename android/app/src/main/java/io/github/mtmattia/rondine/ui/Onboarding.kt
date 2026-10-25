@@ -66,13 +66,13 @@ fun Onboarding() {
     if (nodeInfo) {
         AlertDialog(
             onDismissRequest = { nodeInfo = false },
-            title = { Text("Il nodo") },
+            title = { Text("Il nido") },
             text = {
                 Text(
                     "Un piccolo server, tuo o di qualcuno di cui ti fidi. Non può leggere niente: " +
                         "tiene i tuoi messaggi cifrati quando il telefono è spento, ti manda le " +
                         "notifiche e ti dà un nome utente (@nome) per farti trovare.\n\n" +
-                        "Senza nodo Rondine funziona lo stesso: i messaggi arrivano direttamente da " +
+                        "Senza nido Rondine funziona lo stesso: i messaggi arrivano direttamente da " +
                         "telefono a telefono o tramite contatti in comune, ma solo quando sei " +
                         "raggiungibile, e ti si aggiunge con il link d'invito o il QR.",
                 )
@@ -206,10 +206,10 @@ fun Onboarding() {
                 )
                 OutlinedTextField(
                     node, { node = it }, Modifier.fillMaxWidth(),
-                    label = { Text("Nodo (facoltativo)") },
+                    label = { Text("Nido (facoltativo)") },
                     trailingIcon = {
                         IconButton(onClick = { nodeInfo = true }) {
-                            Icon(Icons.Outlined.Info, "A cosa serve il nodo")
+                            Icon(Icons.Outlined.Info, "A cosa serve il nido")
                         }
                     },
                     singleLine = true,
@@ -223,7 +223,7 @@ fun Onboarding() {
                         scope.launch {
                             try {
                                 val n = node.trim()
-                                // Vuoto (o solo "https://"): profilo senza nodo (SPEC §12.7).
+                                // Vuoto (o solo "https://"): profilo senza nido (SPEC §12.7).
                                 if (n.isEmpty() || n == "https://" || n == "http://") Repo.createLocal(name.trim())
                                 else Repo.create(name.trim(), n, phone.trim().ifEmpty { null })
                             } catch (e: RondineException) {

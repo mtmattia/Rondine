@@ -189,7 +189,12 @@ class MainActivity : ComponentActivity() {
             }
             composable("chat/{id}") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable
-                ChatScreen(ChatTarget.Person(id), onBack = { nav.popBackStack() }, onHeader = { nav.navigate("sicurezza/$id") })
+                ChatScreen(
+                    ChatTarget.Person(id),
+                    onBack = { nav.popBackStack() },
+                    onHeader = { nav.navigate("contatto/$id") },
+                    onSafety = { nav.navigate("sicurezza/$id") },
+                )
             }
             composable("nuova") {
                 NewChatScreen(
@@ -238,6 +243,16 @@ class MainActivity : ComponentActivity() {
                     onBack = { nav.popBackStack() },
                     onMyQr = { nav.navigate("qr") },
                     onPickPush = { setupPush(interactive = true) },
+                )
+            }
+            composable("contatto/{id}") { entry ->
+                val id = entry.arguments?.getString("id") ?: return@composable
+                io.github.mtmattia.rondine.ui.ContactInfoScreen(
+                    id,
+                    onBack = { nav.popBackStack() },
+                    onSafety = { nav.navigate("sicurezza/$id") },
+                    // Chat eliminata: si torna alla lista.
+                    onChatDeleted = { nav.popBackStack("home", inclusive = false) },
                 )
             }
             composable("sicurezza/{id}") { entry ->

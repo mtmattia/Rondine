@@ -176,7 +176,7 @@ data class UiMessage(
     val sending: Boolean = false,
     /** Consegnato senza sigillo: il nodo del contatto ha visto il mio IP (lucchetto aperto). */
     val unsealed: Boolean = false,
-    /** Da dove è passato: "diretto", "nodo" o "" (SPEC §14.5). */
+    /** Da dove è passato: "diretto", "nido" o "" (SPEC §14.5). */
     val via: String = "",
 )
 
@@ -221,7 +221,7 @@ private fun buildItems(messages: List<UiMessage>): List<ChatItem> {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
+fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit, onSafety: () -> Unit = onHeader) {
     val contactId = target.id
     val isGroup = target is ChatTarget.Group
     var group by remember { mutableStateOf<GroupInfo?>(null) }
@@ -966,7 +966,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Altro") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(text = { Text("Numero di sicurezza") }, onClick = { menu = false; onHeader() })
+                            DropdownMenuItem(text = { Text("Info contatto") }, onClick = { menu = false; onHeader() })
                             DropdownMenuItem(
                                 text = { Text(if (c?.favorite == true) "Rimuovi dai preferiti" else "Aggiungi ai preferiti") },
                                 onClick = {
@@ -1009,7 +1009,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                 .background(colors.wallpaper)
                 .imePadding(),
         ) {
-            if (!isGroup && c != null) KeyBanner(c, onVerify = onHeader)
+            if (!isGroup && c != null) KeyBanner(c, onVerify = onSafety)
             Box(Modifier.weight(1f)) {
                 Wallpaper(colors.wallpaperDot)
                 // L'ultimo messaggio è l'elemento 0 (lista rovesciata). Si scende da soli quando
@@ -1351,7 +1351,7 @@ private fun KeyBanner(c: uniffi.rondine_ffi.ContactInfo, onVerify: () -> Unit) {
         "Il numero di $name è confermato. Per non doverti fidare di nessuno, confrontate il codice " +
             "di sicurezza."
     } else {
-        "Hai trovato $name attraverso il nodo. Per essere sicuro che sia davvero lui o lei, verifica " +
+        "Hai trovato $name attraverso il nido. Per essere sicuro che sia davvero lui o lei, verifica " +
             "il numero con uno squillo o confrontate il codice di sicurezza."
     }
     Surface(
@@ -1384,7 +1384,7 @@ private fun EncryptionNotice() {
                 Spacer(Modifier.width(6.dp))
                 Text(
                     "I messaggi sono cifrati end-to-end con MLS. Solo tu e questa persona potete leggerli: " +
-                        "nemmeno i nodi che li consegnano.",
+                        "nemmeno i nidi che li consegnano.",
                     fontSize = 12.sp,
                     color = colors.noticeText,
                     textAlign = TextAlign.Center,
@@ -1889,8 +1889,8 @@ private suspend fun forward(messages: List<UiMessage>, target: ChatTarget) {
 @Composable
 private fun BubbleMeta(m: UiMessage, tint: Color) {
     val badge = when (m.via) {
-        "diretto" -> Icons.Filled.Lock to "Diretto, da telefono a telefono: il nodo non l'ha visto"
-        "nodo", "tubo" -> Icons.Outlined.MoveToInbox to "Passato dal nodo"
+        "diretto" -> Icons.Filled.Lock to "Diretto, da telefono a telefono: il nido non l'ha visto"
+        "nodo", "tubo" -> Icons.Outlined.MoveToInbox to "Passato dal nido"
         else -> null
     }
     Text(hourMinute(m.ts), fontSize = 11.sp, color = tint)

@@ -1945,6 +1945,12 @@ impl Rondine {
             .await
     }
 
+    pub async fn unblock(&self, contact_id: String) -> Result<()> {
+        let k = key(&contact_id)?;
+        self.run(move |c| Box::pin(async move { Ok(c.unblock(&k).await?) }))
+            .await
+    }
+
     pub async fn mark_verified(&self, contact_id: String) -> Result<()> {
         let k = key(&contact_id)?;
         Ok(self.with(|c| c.mark_verified(&k)).await?)

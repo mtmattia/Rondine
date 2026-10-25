@@ -1066,8 +1066,10 @@ sua tariffa. Uno squillo non risposto di solito non costa; un SMS internazionale
 può costare a chi lo manda, e l'app lo dice prima di mandarlo.
 ### 14.2 Nido cieco: obiettivo e regole (v2)
 
-> **Stato: deciso con Mattia il 2026-10-25; Tor (§14.6) e lo STUN pubblico ancora da fare.** Sostituisce l'avviso di giacenza e
-> il tubo della prima proposta (codice del commit d19f09f, mai acceso nell'app: andrà tolto).
+> **Stato: deciso con Mattia il 2026-10-25, nel codice con Tor (§14.6) e lo STUN pubblico.**
+> Sostituisce l'avviso di giacenza e il tubo della prima proposta (commit d19f09f, mai acceso
+> nell'app, tolto il 2026-10-25 insieme a `/v1/tube/{id}`, `/v1/inboxes/{inbox}/tokens`, al
+> deposito v1 con gettone e ai messaggi `knock` e `caps`, che ora si ignorano).
 > Le API sono sotto `/v2`; i nodi accettano `/v1` finché le app vecchie non spariscono.
 
 **Obiettivo:** nessuno deve poter **legare chi scrive a chi riceve** (X a Y). Che un telefono

@@ -13,7 +13,6 @@ mod rubrica;
 mod scheduled;
 mod state;
 mod status;
-mod tubo;
 mod verify;
 
 use std::collections::HashMap;
@@ -249,8 +248,6 @@ enum Route {
     Queued,
     /// Effimera senza strada: buttata.
     Dropped,
-    /// Nel tubo del nodo senza memoria (SPEC §14.3).
-    Tube,
 }
 
 /// Riga della lista chat.
@@ -296,8 +293,6 @@ pub struct Client {
     batch: Batch,
     /// Intervallo minimo tra due aggiornamenti della posizione (SPEC §7.6); cambia nei test.
     location_gap: u64,
-    /// Avvisi e tubo del nodo senza memoria (SPEC §14.2).
-    tubes: tubo::Tubes,
     /// Nido cieco (SPEC §14.2–14.7).
     blind: cieco::Blind,
 }
@@ -377,7 +372,6 @@ fn apply_route(msg: &mut ChatMessage, res: Result<Route>) {
             msg.via = match route {
                 Route::Direct => Some(Via::Direct),
                 Route::Node | Route::NodeUnsealed => Some(Via::Node),
-                Route::Tube => Some(Via::Tube),
                 Route::Queued | Route::Dropped => None,
             };
         }
@@ -472,7 +466,6 @@ impl Client {
                 mesh: false,
                 verifications: Vec::new(),
                 verify_requests: Vec::new(),
-                memoryless: false,
                 blind: false,
                 tokens: Vec::new(),
                 seen_blobs: Vec::new(),
@@ -489,7 +482,6 @@ impl Client {
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             punch: punch::Punch::default(),
-            tubes: tubo::Tubes::default(),
             blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
@@ -549,7 +541,6 @@ impl Client {
                 mesh: false,
                 verifications: Vec::new(),
                 verify_requests: Vec::new(),
-                memoryless: false,
                 blind: false,
                 tokens: Vec::new(),
                 seen_blobs: Vec::new(),
@@ -566,7 +557,6 @@ impl Client {
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             punch: punch::Punch::default(),
-            tubes: tubo::Tubes::default(),
             blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
@@ -773,12 +763,7 @@ impl Client {
             return;
         };
         let blob = b64::encode(bytes);
-        if !matches!(
-            self.try_deliver(&c.card, &blob, Kind::Normal).await,
-            Ok(Some(_))
-        ) {
-            self.tube_send_untracked(&c.identity, &blob).await;
-        }
+        let _ = self.try_deliver(&c.card, &blob, Kind::Normal).await;
     }
 
     /// "Sono collegato" a un contatto per identità, se c'è una chat con lui.
@@ -970,7 +955,6 @@ impl Client {
         };
         let blob = b64::encode(bytes);
         matches!(self.try_deliver(&c.card, &blob, kind).await, Ok(Some(_)))
-            || self.tube_send_untracked(&c.identity, &blob).await
     }
 
     /// Offerte ricevute (rispondo) e risposte alle mie offerte (mi collego).
@@ -1043,11 +1027,6 @@ impl Client {
                 .iter()
                 .find(|c| c.identity == o.to)
                 .map(|c| c.card.clone());
-            // Nodo senza memoria: niente deposito, torna in coda e passa dal tubo.
-            if self.tube_mode(&o.to).await {
-                self.state.outbox.push(Outgoing { next_try: t, ..o });
-                continue;
-            }
             if let Some(card) = card
                 && !matches!(self.deliver_by_node(&card, &o.blob).await, Ok(Some(_)))
             {
@@ -1131,7 +1110,6 @@ impl Client {
             location_gap: MIN_LOCATION_UPDATE_SECS,
             lan: None,
             punch: punch::Punch::default(),
-            tubes: tubo::Tubes::default(),
             blind: cieco::Blind::new(dir),
             punch_jobs: Vec::new(),
             stun_cache: None,
@@ -1566,7 +1544,6 @@ impl Client {
             .clone();
         // Niente più collegamento diretto con chi blocco (SPEC §12.8).
         self.punch.close(id);
-        self.tubes.close(id);
         if let Some(pid) = permit_id {
             self.revoke_permit(&pid).await?;
         }
@@ -1612,8 +1589,6 @@ impl Client {
                 chat_deleted: false,
                 phone_checked: None,
                 can_ring: None,
-                tube: false,
-                caps_sent: false,
                 blind_in: None,
                 blind_out: None,
                 blind_rx: 0,
@@ -1774,13 +1749,7 @@ impl Client {
         if let Some(route) = self.blind_drop(&id, blob, kind).await? {
             return Ok(Some(route));
         }
-        // Nodo senza memoria (SPEC §14.2): il messaggio non si deposita. Ciò che non va in coda
-        // passa nel tubo se è aperto; il resto aspetta in coda l'avviso.
-        let tube = self.tube_mode(&id).await;
-        if tube && kind == Kind::Ephemeral && self.tube_send_untracked(&id, blob).await {
-            return Ok(Some(Route::Tube));
-        }
-        if let Some((node, inbox, permit)) = info.mailbox().filter(|_| !tube) {
+        if let Some((node, inbox, permit)) = info.mailbox() {
             match self.deposit_node(node, inbox, permit, blob, kind).await {
                 Ok(route) => return Ok(Some(route)),
                 // Il nodo ha risposto di no (permesso revocato, casella piena…): non si aggira.
@@ -1831,31 +1800,13 @@ impl Client {
         blob: &str,
         kind: Kind,
     ) -> Result<Route> {
-        self.deposit_node_with(node, inbox, permit, None, blob, kind)
-            .await
-    }
-
-    /// Come [`Client::deposit_node`]; con un gettone anonimo (SPEC §14.4) il nodo non vede il
-    /// permesso, quindi non sa da quale contatto arriva il deposito.
-    pub(crate) async fn deposit_node_with(
-        &self,
-        node: &str,
-        inbox: &str,
-        permit: &rondine_core::SignedPermit,
-        token: Option<&rondine_core::token::Token>,
-        blob: &str,
-        kind: Kind,
-    ) -> Result<Route> {
-        let mut request = json!({
+        let request = json!({
             "inbox": inbox,
+            "permit": permit,
             "blob": blob,
             "ephemeral": kind == Kind::Ephemeral,
             "quiet": kind == Kind::Quiet,
         });
-        match token {
-            Some(t) => request["token"] = json!(t),
-            None => request["permit"] = json!(permit),
-        }
         let node_key = permit.verify()?.node_key;
         let (cfg, relays) = self.node_seal(node, &node_key, false).await?;
         let cfg = cfg.ok_or_else(|| Error::NoSeal(node.to_string()))?;
@@ -2022,9 +1973,6 @@ impl Client {
             next_try: t + RETRY_SECS,
         });
         self.save()?;
-        if self.tube_mode(&info.identity).await {
-            self.tube_after_queue(&info.identity, kind).await;
-        }
         if !self.state.mesh {
             return Ok(Route::Queued);
         }
@@ -3437,13 +3385,6 @@ impl Client {
                 .into_iter()
                 .map(|b| (b, Via::Direct)),
         );
-        blobs.extend(
-            self.tubes
-                .inbox()
-                .take()
-                .into_iter()
-                .map(|b| (b, Via::Tube)),
-        );
         let online_before = self.online_marker();
         for (blob, via) in blobs {
             self.process_blob(&blob, via, &mut events);
@@ -3485,8 +3426,6 @@ impl Client {
             self.offer_direct(&id, false).await;
         }
         self.run_punch_jobs().await;
-        // Nodo senza memoria: avvisi, tubo, conferme (SPEC §14.2).
-        events.extend(self.run_tubes().await);
         // Nido cieco: conferme, gettoni spesi, seme e gettoni ai contatti (SPEC §14.3).
         self.run_blind().await;
         // Azioni dei gruppi raccolte durante l'elaborazione (annunci, uscite, revoche).
@@ -3709,8 +3648,6 @@ impl Client {
                     chat_deleted: false,
                     phone_checked: None,
                     can_ring: None,
-                    tube: false,
-                    caps_sent: false,
                     blind_in: None,
                     blind_out: None,
                     blind_rx: 0,
@@ -3810,14 +3747,6 @@ impl Client {
             AppMessage::StatusSeen { id, ts, .. } => Ok(self.received_status_seen(sender, &id, ts)),
             AppMessage::VerifyRequest { id, method, .. } => {
                 Ok(self.received_verify_request(sender, id, method))
-            }
-            AppMessage::Knock { id, ts, .. } => {
-                self.received_knock(sender, id, ts);
-                Ok(Vec::new())
-            }
-            AppMessage::Caps { caps, .. } => {
-                self.received_caps(sender, &caps);
-                Ok(Vec::new())
             }
             AppMessage::Blind {
                 seed,

@@ -219,9 +219,6 @@ enum Cmd {
     Blocca { contatto: String },
     /// Elimina la chat con un contatto (messaggi compresi), solo qui; il contatto resta.
     EliminaChat { contatto: String },
-    /// Nodo senza memoria (SPEC §14.2): `si` perché ai contatti che lo usano arrivino solo
-    /// avvisi e i messaggi passino in diretto o nel tubo, `no` per il deposito di prima.
-    SenzaMemoria { stato: Option<String> },
     /// Nido cieco (SPEC §14.2): `si` perché il nido veda solo caselle anonime e buste tutte
     /// uguali, e la sveglia la suoni chi scrive; `no` per spegnerlo. Senza argomento dice com'è.
     Cieco { stato: Option<String> },
@@ -1510,23 +1507,6 @@ async fn main() -> anyhow::Result<()> {
             let id = c.find_contact(&contatto)?.identity;
             c.mark_verified(&id)?;
             println!("Contatto verificato.");
-        }
-        Cmd::SenzaMemoria { stato } => {
-            match stato.as_deref() {
-                Some("si" | "sì") => c.set_memoryless(true)?,
-                Some("no") => c.set_memoryless(false)?,
-                Some(other) => anyhow::bail!("scrivi `si` o `no`, non `{other}`"),
-                None => {}
-            }
-            println!(
-                "Nodo senza memoria: {} (gettoni in tasca: {})",
-                if c.state().memoryless {
-                    "acceso"
-                } else {
-                    "spento"
-                },
-                c.tokens_left()
-            );
         }
         Cmd::SvegliaContatto {
             contatto,

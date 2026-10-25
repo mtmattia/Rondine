@@ -131,7 +131,8 @@ scrive a chi riceve. Prima il diretto, il nido è l'ultima spiaggia e vale sempr
 - [x] un indirizzo di sveglia ntfy diverso per contatto (istanze UnifiedPush `c-<id>`; CLI `rondine sveglia-contatto`)
 - [x] ripetitore FCM su un server sempre acceso: il Mac di Mattia (nido e ripetitore, dal 2026-10-25), raggiungibile da internet con Tailscale Funnel, verso Google solo via Tor (Arti, `--fcm-proxy`, §8.1); con il Mac spento la versione Play non riceve sveglie
 - [ ] provare Tor nell'estensione delle notifiche di iPhone
-- [ ] togliere avviso di giacenza, tubo e staffetta (codice di d19f09f e §6.3)
+- [x] togliere avviso di giacenza e tubo (codice di d19f09f)
+- [ ] togliere la staffetta (§6.3)
 
 ### M3 — Senza rete
 Mesh Bluetooth e Wi-Fi Direct, consegna differita.

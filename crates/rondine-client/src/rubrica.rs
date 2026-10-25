@@ -211,8 +211,6 @@ impl Client {
                     chat_deleted: false,
                     phone_checked: None,
                     can_ring: None,
-                    tube: false,
-                    caps_sent: false,
                     blind_in: None,
                     blind_out: None,
                     blind_rx: 0,

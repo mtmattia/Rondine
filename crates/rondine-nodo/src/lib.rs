@@ -6,7 +6,6 @@ mod files;
 mod phone;
 mod push;
 mod store;
-mod tube;
 mod web;
 
 use std::collections::HashMap;
@@ -130,8 +129,6 @@ struct Inner {
     deposits_direct: std::sync::atomic::AtomicU64,
     deposits_sealed: std::sync::atomic::AtomicU64,
     deposits_token: std::sync::atomic::AtomicU64,
-    /// Tubi (SPEC §14.3): solo in memoria.
-    tubes: tube::Tubes,
 }
 
 /// Quanti depositi sono arrivati diretti e quanti sigillati (per i test, SPEC §6.3).
@@ -172,7 +169,6 @@ impl AppState {
             deposits_direct: std::sync::atomic::AtomicU64::new(0),
             deposits_sealed: std::sync::atomic::AtomicU64::new(0),
             deposits_token: std::sync::atomic::AtomicU64::new(0),
-            tubes: tube::Tubes::default(),
             public_url: cfg.public_url.trim_end_matches('/').to_string(),
             host,
             node: cfg.node_key,
@@ -453,8 +449,6 @@ pub fn router(state: AppState) -> Router {
             get(files::fetch).delete(files::delete),
         )
         .route("/v1/inboxes/{inbox}/seen", get(inbox_seen))
-        .route("/v1/inboxes/{inbox}/tokens", post(issue_tokens))
-        .route("/v1/tube/{id}", put(tube::put).get(tube::get))
         .route("/v2/drop", post(cieco::drop))
         .route("/v2/pickup", post(cieco::pickup))
         .route("/v2/ack", post(cieco::ack))
@@ -823,26 +817,6 @@ impl AppState {
     }
 }
 
-#[derive(Deserialize)]
-struct TokenRequestBody {
-    permit: SignedPermit,
-    blinded: Vec<String>,
-}
-
-/// `POST /v1/inboxes/{inbox}/tokens`: gettoni anonimi per depositare in questa casella, a chi
-/// ha un permesso (SPEC §14.4). Il nodo li firma alla cieca.
-async fn issue_tokens(
-    State(s): State<AppState>,
-    Path(inbox): Path<String>,
-    Json(req): Json<TokenRequestBody>,
-) -> ApiResult<Json<rondine_core::token::Issued>> {
-    s.check_permit(&req.permit, Some(&inbox), Scope::Deposit)?;
-    let key = s.token_key(rondine_core::token::epoch(now()))?;
-    key.issue(&req.blinded)
-        .map(Json)
-        .map_err(|e| ApiError::bad(e.to_string()))
-}
-
 /// Ultima sveglia mandata (o programmata) per una casella, e se ce n'è una in coda.
 #[derive(Default)]
 struct WakeSlot {
@@ -863,8 +837,6 @@ async fn info(State(s): State<AppState>) -> Json<serde_json::Value> {
     if s.seal_on() {
         v["seal"] = s.0.seal_signed.clone();
     }
-    // Nodo senza memoria (SPEC §14): tubo e gettoni anonimi.
-    v["tube"] = json!(true);
     // Nido cieco (SPEC §14.2): rotte `/v2`.
     v["blind"] = json!(true);
     if let Ok(key) = s.token_key(rondine_core::token::epoch(now()))
@@ -1000,11 +972,9 @@ async fn clear_push(
 
 #[derive(Serialize, Deserialize)]
 pub struct DepositRequest {
-    /// Il permesso del contatto (SPEC §5), oppure un gettone anonimo (§14.4).
+    /// Il permesso del contatto (SPEC §5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permit: Option<SignedPermit>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token: Option<rondine_core::token::Token>,
     pub blob: String,
     /// Effimero ("sta scrivendo"): niente sveglia, sparisce dopo poco se non ritirato.
     #[serde(default)]
@@ -1032,17 +1002,10 @@ async fn deposit(
 
 /// Il deposito vero e proprio, diretto o arrivato sigillato (SPEC §6.3).
 fn store_deposit(s: &AppState, inbox: &str, req: DepositRequest) -> ApiResult<Deposited> {
-    match (&req.token, &req.permit) {
-        (Some(t), _) => {
-            s.spend_token(inbox, t)?;
-            s.0.deposits_token
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
-        (None, Some(p)) => {
-            s.check_permit(p, Some(inbox), Scope::Deposit)?;
-        }
-        (None, None) => return Err(ApiError::forbidden("serve un permesso o un gettone")),
-    }
+    let Some(p) = &req.permit else {
+        return Err(ApiError::forbidden("serve un permesso"));
+    };
+    s.check_permit(p, Some(inbox), Scope::Deposit)?;
     let blob = b64::decode(&req.blob)?;
     if blob.len() > MAX_MESSAGE_BYTES {
         return Err(ApiError::new(

@@ -53,9 +53,9 @@ pub struct Handle {
 impl Handle {
     pub fn parse(input: &str) -> Result<Self> {
         let s = input.trim().trim_start_matches('@');
-        let (name, node) = s.split_once('@').ok_or(Error::BadUsername("manca @nodo"))?;
+        let (name, node) = s.split_once('@').ok_or(Error::BadUsername("manca @nido"))?;
         if node.is_empty() || node.contains('/') {
-            return Err(Error::BadUsername("nodo non valido"));
+            return Err(Error::BadUsername("nido non valido"));
         }
         Ok(Self {
             name: normalize_name(name)?,
@@ -81,11 +81,11 @@ pub fn node_host(url: &str) -> Result<String> {
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
         .ok_or(Error::Invalid(
-            "l'URL del nodo deve iniziare con http:// o https://",
+            "l'URL del nido deve iniziare con http:// o https://",
         ))?;
     let host = rest.split('/').next().unwrap_or_default();
     if host.is_empty() {
-        return Err(Error::Invalid("URL del nodo senza host"));
+        return Err(Error::Invalid("URL del nido senza host"));
     }
     Ok(host.to_lowercase())
 }

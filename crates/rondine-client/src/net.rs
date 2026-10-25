@@ -120,7 +120,7 @@ impl Net {
             return Err(Error::Node {
                 status: status.as_u16(),
                 code: "not_rondine".into(),
-                message: "questo indirizzo non sembra un nodo Rondine".into(),
+                message: "questo indirizzo non sembra un nido Rondine".into(),
             });
         };
         Err(Error::Node {

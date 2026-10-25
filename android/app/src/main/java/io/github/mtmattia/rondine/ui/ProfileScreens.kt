@@ -8,7 +8,6 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Info
@@ -308,7 +307,7 @@ fun SafetyScreen(contactId: String, onBack: () -> Unit) {
 private enum class SettingsDialog { Username, Phone, Node, Name }
 
 /** Pagine delle Impostazioni, come quelle di WhatsApp: elenco, profilo, Info e sezioni. */
-private enum class SettingsPage { Main, Profile, About, Account, Privacy, Chat, Notifications, Help, Updates }
+private enum class SettingsPage { Main, Profile, About, Account, Privacy, Blocked, Chat, Notifications, Help, Updates }
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Unit) {
@@ -483,7 +482,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 Column {
                     Text(
                         "La vedono solo i tuoi contatti e chi è nei tuoi gruppi: viaggia cifrata, " +
-                            "il nodo non la vede.",
+                            "il nido non la vede.",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -517,6 +516,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
         page = when (page) {
             SettingsPage.Main -> SettingsPage.Main.also { onBack() }
             SettingsPage.About -> SettingsPage.Profile
+            SettingsPage.Blocked -> SettingsPage.Privacy
             else -> SettingsPage.Main
         }
     }
@@ -597,7 +597,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 ) { dialog = SettingsDialog.Phone }
                 SettingRow(
                     Icons.Filled.Dns,
-                    "Nodo",
+                    "Nido",
                     if (p.hasNode) p.node else "Nessuno: tocca per aggiungerne uno",
                 ) { dialog = SettingsDialog.Node }
                 SettingRow(Icons.Filled.QrCode2, "Link d'invito e QR", "Condividi o reimposta", onMyQr)
@@ -610,8 +610,12 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
         }
         SettingsPage.Privacy -> BackScaffold("Privacy", back, snackbar) { m ->
             Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
-                val blocked = Repo.chats.collectAsState().value.count { it.contact.blocked }
-                SettingRow(Icons.Filled.Block, "Contatti bloccati", if (blocked == 0) "Nessuno" else "$blocked") {}
+                val revision by Repo.revision.collectAsState()
+                var blocked by remember { mutableStateOf(0) }
+                LaunchedEffect(revision) { blocked = Repo.client().contacts().count { it.blocked } }
+                SettingRow(Icons.Filled.Block, "Contatti bloccati", if (blocked == 0) "Nessuno" else "$blocked") {
+                    page = SettingsPage.Blocked
+                }
                 var maps by remember { mutableStateOf(MapTiles.enabled(context)) }
                 SettingRow(
                     Icons.Filled.Map,
@@ -652,8 +656,17 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                         Repo.refresh()
                     }
                 }
-                SettingRow(Icons.Filled.PrivacyTip, "Cosa vede il nodo", "Cosa resta sul telefono e cosa passa dal nodo") {
+                SettingRow(Icons.Filled.PrivacyTip, "Cosa vede il nido", "Cosa resta sul telefono e cosa passa dal nido") {
                     open("https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md")
+                }
+            }
+        }
+        SettingsPage.Blocked -> BackScaffold("Contatti bloccati", back, snackbar) { m ->
+            BlockedList(m) { c ->
+                run {
+                    Repo.client().unblock(c.id)
+                    Repo.refresh()
+                    "${c.name} è sbloccato"
                 }
             }
         }
@@ -698,7 +711,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
         }
         SettingsPage.Help -> BackScaffold("Aiuto", back, snackbar) { m ->
             Column(m.fillMaxSize().verticalScroll(rememberScrollState())) {
-                SettingRow(Icons.Filled.PrivacyTip, "Informativa sulla privacy", "Cosa resta sul telefono e cosa vede il nodo") {
+                SettingRow(Icons.Filled.PrivacyTip, "Informativa sulla privacy", "Cosa resta sul telefono e cosa vede il nido") {
                     open("https://github.com/mtmattia/Rondine/blob/main/docs/PRIVACY.md")
                 }
                 SettingRow(Icons.Filled.Code, "Codice sorgente", "Rondine è open source (MIT o Apache-2.0)") {
@@ -743,7 +756,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             label = "Nome",
             placeholder = "mattia",
             initial = p.username?.substringBefore('@') ?: "",
-            note = "Da 3 a 30 caratteri: lettere, cifre, punto e trattino basso. È unico sul tuo nodo.",
+            note = "Da 3 a 30 caratteri: lettere, cifre, punto e trattino basso. È unico sul tuo nido.",
             onDismiss = { dialog = null },
         ) { value ->
             dialog = null
@@ -778,7 +791,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             label = "Numero",
             placeholder = "340 123 4567",
             initial = p.phone ?: "",
-            note = "Resta sul telefono: al nodo arrivano solo voci cifrate per chi ha già il tuo numero. " +
+            note = "Resta sul telefono: al nido arrivano solo voci cifrate per chi ha già il tuo numero. " +
                 "Lo verificano i tuoi amici, con uno squillo dalla tua pagina nella loro app.",
             onDismiss = { dialog = null },
         ) { value ->
@@ -790,14 +803,14 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
             }
         }
         SettingsDialog.Node -> TextDialog(
-            title = if (p.hasNode) "Cambia nodo" else "Aggiungi un nodo",
-            label = "Nodo",
+            title = if (p.hasNode) "Cambia nido" else "Aggiungi un nido",
+            label = "Nido",
             placeholder = "https://…",
             initial = if (p.hasNode) p.node else BuildConfig.DEFAULT_NODE.ifEmpty { "https://" },
             note = if (p.hasNode) {
                 "I tuoi contatti e i tuoi gruppi ricevono il nuovo biglietto. Per 30 giorni Rondine " +
-                    "ritira anche dal vecchio nodo. Il nome utente e il numero verificato restano al " +
-                    "vecchio nodo: potrai sceglierli di nuovo."
+                    "ritira anche dal vecchio nido. Il nome utente e il numero verificato restano al " +
+                    "vecchio nido: potrai sceglierli di nuovo."
             } else {
                 "I tuoi contatti ricevono il nuovo biglietto: da lì ti arrivano messaggi e " +
                     "notifiche anche col telefono spento, e puoi scegliere un nome utente."
@@ -810,7 +823,7 @@ fun SettingsScreen(onBack: () -> Unit, onMyQr: () -> Unit, onPickPush: () -> Uni
                 Repo.refresh()
                 // Col nodo arrivano anche le notifiche: si registra subito il distributore.
                 onPickPush()
-                if (p.hasNode) "Nodo cambiato" else "Nodo aggiunto"
+                if (p.hasNode) "Nido cambiato" else "Nido aggiunto"
             }
         }
         null -> {}
@@ -838,7 +851,7 @@ private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onCli
 }
 
 
-/** Prima pagina delle Impostazioni, con la struttura di WhatsApp: Info, foto, nome e sezioni. */
+/** Prima pagina delle Impostazioni, con la struttura di WhatsApp: riga del profilo e sezioni. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsMain(
@@ -856,46 +869,33 @@ private fun SettingsMain(
         topBar = {
             TopAppBar(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
-                title = {},
-                actions = {
-                    IconButton(onClick = onMyQr) { Icon(Icons.Filled.QrCode2, "Il mio codice QR") }
-                    IconButton(onClick = { onPage(SettingsPage.Profile) }) { Icon(Icons.Filled.Edit, "Modifica profilo") }
-                },
+                title = { Text("Impostazioni") },
             )
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
-            Column(
-                Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+            // Il profilo in una riga: foto, nome e Info; a destra il QR.
+            Row(
+                Modifier.fillMaxWidth().clickable { onPage(SettingsPage.Profile) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Le Info in una nuvoletta sopra la foto; vuota invita a scriverle.
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.padding(horizontal = 32.dp).clickable { onPage(SettingsPage.About) },
-                ) {
+                Avatar(p.name, p.id, 64.dp, p.photo)
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(p.name, fontSize = 20.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     Text(
-                        p.about ?: "Oggi in emoji…",
-                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        p.about ?: p.username?.let { "@$it" } ?: "Tocca per scrivere le tue Info",
                         fontSize = 14.sp,
-                        maxLines = 2,
-                        textAlign = TextAlign.Center,
-                        color = if (p.about == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-                Box(Modifier.clickable { onPage(SettingsPage.Profile) }) { Avatar(p.name, p.id, 120.dp, p.photo) }
-                Spacer(Modifier.height(12.dp))
-                Text(p.name, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-                Text(
-                    p.username?.let { "@$it" } ?: "Nessun nome utente",
-                    fontSize = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                IconButton(onClick = onMyQr) { Icon(Icons.Filled.QrCode2, "Il mio codice QR", tint = MaterialTheme.colorScheme.primary) }
             }
-            SettingRow(Icons.Filled.Key, "Account", "Numero di telefono, nodo, la tua chiave") { onPage(SettingsPage.Account) }
-            SettingRow(Icons.Filled.Lock, "Privacy", "Contatti bloccati, mappe, cosa vede il nodo") { onPage(SettingsPage.Privacy) }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SettingRow(Icons.Filled.Key, "Account", "Numero di telefono, nido, link d'invito") { onPage(SettingsPage.Account) }
+            SettingRow(Icons.Filled.Lock, "Privacy", "Contatti bloccati, mappe, cosa vede il nido") { onPage(SettingsPage.Privacy) }
             SettingRow(Icons.Filled.Forum, "Chat", "Backup delle chat") { onPage(SettingsPage.Chat) }
             SettingRow(Icons.Filled.Notifications, "Notifiche", push) { onPage(SettingsPage.Notifications) }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -1053,5 +1053,53 @@ private fun AboutPage(
             }
             Spacer(Modifier.height(80.dp))
         }
+    }
+}
+
+/** Contatti bloccati: tocco su uno per sbloccarlo, come su WhatsApp. */
+@Composable
+private fun BlockedList(modifier: Modifier, onUnblock: (ContactInfo) -> Unit) {
+    val revision by Repo.revision.collectAsState()
+    var blocked by remember { mutableStateOf<List<ContactInfo>>(emptyList()) }
+    var ask by remember { mutableStateOf<ContactInfo?>(null) }
+    LaunchedEffect(revision) { blocked = Repo.client().contacts().filter { it.blocked } }
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        if (blocked.isEmpty()) {
+            Text(
+                "Nessun contatto bloccato.",
+                Modifier.padding(20.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        blocked.forEach { c ->
+            Row(
+                Modifier.fillMaxWidth().clickable { ask = c }.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Avatar(c.name, c.id, 44.dp, c.photo)
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(c.name, fontSize = 16.sp)
+                    (c.phone ?: c.username?.let { "@$it" })?.let {
+                        Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        Text(
+            "I contatti bloccati non possono chiamarti né mandarti messaggi.",
+            Modifier.padding(20.dp),
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    ask?.let { c ->
+        AlertDialog(
+            onDismissRequest = { ask = null },
+            title = { Text("Sbloccare ${c.name}?") },
+            text = { Text("Potrà di nuovo scriverti e chiamarti.") },
+            confirmButton = { TextButton(onClick = { ask = null; onUnblock(c) }) { Text("Sblocca") } },
+            dismissButton = { TextButton(onClick = { ask = null }) { Text("Annulla") } },
+        )
     }
 }

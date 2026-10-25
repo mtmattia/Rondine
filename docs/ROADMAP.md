@@ -13,7 +13,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Biglietto firmato e link d'invito | ✅ | SPEC §4 |
 | Chat 1:1 cifrata end-to-end | ✅ | MLS, anche tra nodi diversi |
 | Casella postale sul nodo (messaggi offline) | ✅ | 30 giorni o fino alla conferma |
-| Permessi di consegna revocabili (blocco contatto) | ✅ | |
+| Permessi di consegna revocabili (blocco e sblocco contatto) | ✅ | |
 | Nome utente univoco `nome@nodo` | ✅ | |
 | Scoperta dalla rubrica | ✅ | a coppie (SPEC §9) e con i numeri verificati (§13), a lotti e con i segreti in cache; nell'app la rubrica del telefono come WhatsApp: chi usa Rondine in alto, gli altri con "Invita" |
 | Numero verificato via SMS | 🟡 | SPEC §13: client, nodo, CLI e app; il nodo spedisce gli SMS da un telefono Android con "SMS Gateway for Android" (docs/NIDO.md); manca la SIM sul telefono gateway del nido di Mattia |

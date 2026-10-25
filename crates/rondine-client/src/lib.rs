@@ -149,7 +149,7 @@ fn uploaded_id(res: &[u8]) -> Result<String> {
     up["id"]
         .as_str()
         .map(str::to_string)
-        .ok_or_else(|| Error::Invalid("il nodo non ha dato l'id del file".into()))
+        .ok_or_else(|| Error::Invalid("il nido non ha dato l'id del file".into()))
 }
 
 /// Come depositare una busta (SPEC §6): normale, effimera ("sta scrivendo") o silenziosa (senza
@@ -423,7 +423,7 @@ impl Client {
         )?;
         let inbox = created["inbox"]
             .as_str()
-            .ok_or_else(|| Error::Invalid("risposta del nodo senza casella".into()))?
+            .ok_or_else(|| Error::Invalid("risposta del nido senza casella".into()))?
             .to_string();
 
         let invite_permit = issue_permit(&net, &identity, &node, &inbox, "invito").await?;
@@ -579,7 +579,7 @@ impl Client {
             .as_ref()
             .is_some_and(|(n, _)| node_host(n).ok() == node_host(&node).ok())
         {
-            return Err(Error::Invalid("è già il tuo nodo".into()));
+            return Err(Error::Invalid("è già il tuo nido".into()));
         }
         require_seal(&self.net, &node).await?;
         let old_invite = self.state.invite_permit.clone();
@@ -598,7 +598,7 @@ impl Client {
         )?;
         let inbox = created["inbox"]
             .as_str()
-            .ok_or_else(|| Error::Invalid("risposta del nodo senza casella".into()))?
+            .ok_or_else(|| Error::Invalid("risposta del nido senza casella".into()))?
             .to_string();
         let invite = issue_permit(&self.net, &self.identity, &node, &inbox, "invito").await?;
         self.state.node = node.clone();
@@ -673,7 +673,7 @@ impl Client {
             Ok(())
         } else {
             Err(Error::Invalid(
-                "questo profilo non ha un nodo: funziona solo in rete locale".into(),
+                "questo profilo non ha un nido: funziona solo in rete locale".into(),
             ))
         }
     }
@@ -1419,7 +1419,7 @@ impl Client {
             }
         }
         Err(Error::Invalid(
-            "testo non riconosciuto: serve un link d'invito o un nome come @nome@nodo".into(),
+            "testo non riconosciuto: serve un link d'invito o un nome come @nome@nido".into(),
         ))
     }
 
@@ -1554,6 +1554,21 @@ impl Client {
             c.blocked = true;
         }
         self.save()
+    }
+
+    /// Sblocca un contatto: gli manda in una chat nuova un biglietto con un permesso nuovo, così il
+    /// mio nido torna ad accettare i suoi messaggi. Su chi non è bloccato non fa niente.
+    pub async fn unblock(&mut self, id: &PublicKey) -> Result<()> {
+        let c = self
+            .contact_mut(id)
+            .ok_or_else(|| Error::NotFound("contatto sconosciuto".into()))?;
+        if !c.blocked {
+            return Ok(());
+        }
+        c.blocked = false;
+        c.my_permit_id = None;
+        self.save()?;
+        self.start_chat(id).await
     }
 
     /// Avvia (o riprende) la chat con il proprietario di un biglietto.
@@ -2383,7 +2398,7 @@ impl Client {
                     let info = verify_card(card)?;
                     let Some((node, inbox, permit)) = info.mailbox() else {
                         return Err(Error::Invalid(format!(
-                            "{name} non ha un nodo: si possono mandare solo file fino a 64 KiB"
+                            "{name} non ha un nido: si possono mandare solo file fino a 64 KiB"
                         )));
                     };
                     let res = self
@@ -2404,7 +2419,7 @@ impl Client {
                 FileDest::Shared => {
                     if !self.has_node() {
                         return Err(Error::Invalid(
-                            "senza un nodo nei gruppi si possono mandare solo file fino a 64 KiB"
+                            "senza un nido nei gruppi si possono mandare solo file fino a 64 KiB"
                                 .into(),
                         ));
                     }
@@ -2522,7 +2537,7 @@ impl Client {
                 self.require_node()?;
                 if node_host(&at.node)? != node_host(&self.state.node)? {
                     return Err(Error::Invalid(
-                        "il file è su un nodo che non è il mio".into(),
+                        "il file è su un nido che non è il mio".into(),
                     ));
                 }
                 let path = format!("/v1/inboxes/{}/files/{file}", self.state.inbox);

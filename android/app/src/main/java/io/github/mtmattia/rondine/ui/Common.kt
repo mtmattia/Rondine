@@ -197,7 +197,7 @@ fun withBigEmoji(text: String, emojiSize: androidx.compose.ui.unit.TextUnit): an
 
 /**
  * Grado di fiducia di un contatto (SPEC §10): "persona" (codice di sicurezza confrontato),
- * "numero" (numero confermato via SMS dal nodo) o "nessuno".
+ * "numero" (numero confermato via SMS dal nido) o "nessuno".
  */
 fun trustLabel(trust: String): String = when (trust) {
     "persona" -> "verificato di persona"
@@ -212,7 +212,7 @@ fun trustExplanation(trust: String, name: String, checkedByMe: Boolean = false):
         "Hai verificato tu, con uno squillo o un SMS, che questa chiave ha la SIM del numero di $name. Ti fidi " +
             "solo dell'operatore telefonico: confrontate il codice di sicurezza per non doverti fidare di nessuno."
     } else {
-        "Il nodo ha confermato con un SMS che il numero è di $name. Ti fidi del nodo e dell'operatore " +
+        "Il nido ha confermato con un SMS che il numero è di $name. Ti fidi del nido e dell'operatore " +
             "telefonico: confrontate il codice di sicurezza per non doverti fidare di nessuno."
     }
     else -> "Nessuno ha confermato che questa chiave sia di $name. Confrontate il codice di sicurezza, " +

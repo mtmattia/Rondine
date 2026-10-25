@@ -168,7 +168,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
                 }
             }
             item {
-                ActionRow(Icons.Filled.AlternateEmail, "Nuovo contatto", "Con il nome utente, es. @mattia@nodo") {
+                ActionRow(Icons.Filled.AlternateEmail, "Nuovo contatto", "Con il nome utente, es. @mattia@nido") {
                     dialog = AddDialog.Username
                 }
             }
@@ -322,7 +322,7 @@ fun NewChatScreen(onBack: () -> Unit, onOpenChat: (String) -> Unit, onMyQr: () -
         AddDialog.Username -> TextDialog(
             title = "Nuovo contatto",
             label = "Nome utente",
-            placeholder = "@nome@nodo",
+            placeholder = "@nome@nido",
             onDismiss = { dialog = null },
         ) { value ->
             dialog = null

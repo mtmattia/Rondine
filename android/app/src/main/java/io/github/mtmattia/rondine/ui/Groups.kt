@@ -333,7 +333,7 @@ fun NewGroupScreen(onBack: () -> Unit, onCreated: (String) -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Sei l'amministratore: solo tu aggiungi e togli membri. I messaggi sono cifrati " +
-                        "end-to-end con MLS e arrivano a ognuno dal suo nodo.",
+                        "end-to-end con MLS e arrivano a ognuno dal suo nido.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

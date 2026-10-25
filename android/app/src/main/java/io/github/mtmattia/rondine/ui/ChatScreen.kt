@@ -265,6 +265,9 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     var voiceLevels by remember { mutableStateOf(listOf<Float>()) }
     var cameraFile by remember { mutableStateOf<java.io.File?>(null) }
     var locationOpen by remember { mutableStateOf(false) }
+    // Messaggio con la posizione aperta nella mappa dell'app.
+    var mapOf by remember { mutableStateOf<String?>(null) }
+    val me by Repo.profile.collectAsState()
     var here by remember { mutableStateOf<android.location.Location?>(null) }
     var hereError by remember { mutableStateOf<String?>(null) }
     val chats by Repo.chats.collectAsState()
@@ -479,14 +482,17 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
         if (res.values.any { it }) openLocation()
         else scope.launch { snackbar.showSnackbar("Serve il permesso della posizione") }
     }
-    fun sendLocation(liveFor: Long?) {
-        val l = here ?: return
+    /** Manda la posizione: quella attuale, o `point` (lat, lon, precisione) scelto sulla mappa. */
+    fun sendLocation(liveFor: Long?, point: Triple<Double, Double, Float?>? = null) {
+        val l = here
+        val (lat, lon, acc) = point
+            ?: l?.let { Triple(it.latitude, it.longitude, if (it.hasAccuracy()) it.accuracy else null) }
+            ?: return
         locationOpen = false
         scope.launch {
             try {
-                val acc = if (l.hasAccuracy()) l.accuracy else null
-                if (isGroup) Repo.client().sendGroupLocation(contactId, l.latitude, l.longitude, acc, liveFor?.toULong())
-                else Repo.client().sendLocation(contactId, l.latitude, l.longitude, acc, liveFor?.toULong())
+                if (isGroup) Repo.client().sendGroupLocation(contactId, lat, lon, acc, liveFor?.toULong())
+                else Repo.client().sendLocation(contactId, lat, lon, acc, liveFor?.toULong())
                 if (liveFor != null) io.github.mtmattia.rondine.location.LiveLocationService.start(context)
                 Repo.refresh()
             } catch (e: RondineException) {
@@ -778,6 +784,55 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     }
 
     val c = contact
+    // Posizione aperta nella mappa dell'app: si segue il messaggio, così quella in tempo reale si
+    // aggiorna da sola.
+    mapOf?.let { id ->
+        val m = messages.firstOrNull { it.id == id }
+        val l = m?.location
+        if (m == null || l == null) {
+            mapOf = null
+        } else {
+            val who = if (m.outgoing) "Tu" else (m.senderName ?: c?.name ?: "Posizione")
+            val until = l.liveUntil
+            val active = l.isLive
+            MapViewer(
+                lat = l.lat, lon = l.lon,
+                title = if (isGroup) group?.name ?: who else c?.name ?: who,
+                who = who,
+                subtitle = when {
+                    until == null -> null
+                    active -> "Condivisione fino alle ${hourMinute(until)}"
+                    else -> "Condivisione terminata"
+                },
+                live = active,
+                face = when {
+                    m.outgoing -> me?.let { PinFace(it.name, it.id, it.photo) }
+                    isGroup -> group?.members?.firstOrNull { it.id == m.senderId }
+                        ?.let { PinFace(it.name, it.id, it.photo) }
+                        ?: PinFace(who, m.senderId, null)
+                    else -> PinFace(c?.name ?: who, contactId, c?.photo)
+                },
+                onStop = if (m.outgoing && active) {
+                    {
+                        scope.launch {
+                            try {
+                                Repo.client().stopLocation(m.id)
+                                Repo.refresh()
+                            } catch (e: RondineException) {
+                                snackbar.showSnackbar(e.userMessage)
+                            }
+                        }
+                    }
+                } else {
+                    null
+                },
+                onOpenElsewhere = {
+                    openInMaps(context, l.lat, l.lon, who)?.let { scope.launch { snackbar.showSnackbar(it) } }
+                },
+                onDismiss = { mapOf = null },
+            )
+        }
+    }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         // Il fondo lo gestisce la colonna (tastiera o barra di navigazione, mai tutte e due): se
@@ -1017,10 +1072,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                     }
                                 },
                                 onDownload = { download(item.m) },
-                                onOpenLocation = { l ->
-                                    openInMaps(context, l.lat, l.lon, item.m.senderName ?: c?.name ?: "Posizione")
-                                        ?.let { scope.launch { snackbar.showSnackbar(it) } }
-                                },
+                                onOpenLocation = { mapOf = item.m.id },
                                 onStopLocation = {
                                     scope.launch {
                                         try {
@@ -1165,11 +1217,12 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                         },
                         onSend = { stopRecording(cancel = false) },
                     )
-                    locationOpen -> LocationPanel(
-                        location = here,
+                    locationOpen -> LocationPicker(
+                        here = here,
                         error = hereError,
-                        onSendCurrent = { sendLocation(null) },
+                        onSendPoint = { lat, lon, acc -> sendLocation(null, Triple(lat, lon, acc)) },
                         onShareLive = { sendLocation(it) },
+                        onDismiss = { locationOpen = false },
                     )
                     emojiOpen -> ExpressionPanel(
                         onEmoji = { e ->

@@ -1,4 +1,5 @@
 [versions]
+osmdroid = "6.1.20"
 agp = "9.3.3"
 kotlin = "2.4.10"
 composeBom = "2026.08.00"
@@ -20,6 +21,7 @@ firebaseMessaging = "26.0.0"
 fragment = "1.9.1"
 
 [libraries]
+osmdroid = { module = "org.osmdroid:osmdroid-android", version.ref = "osmdroid" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }

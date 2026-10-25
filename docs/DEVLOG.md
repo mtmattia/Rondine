@@ -492,3 +492,4 @@ Una riga per modifica: data, cosa è cambiato.
 - 2026-10-25 — Versione 0.1.20 (versionCode 21).
 - 2026-10-25 — Icone della strada sotto le bolle: segno piccolo sopra le spunte, centrato (dopo l'ora nei ricevuti): lucchetto se diretto, cassetto se dal nodo. Tolto il lucchetto della staffetta.
 - 2026-10-25 — Chat: scorrere una bolla da destra a sinistra risponde; un tocco apre le opzioni del messaggio; le foto si aprono dentro l'app, con le opzioni del messaggio nel ⋮ (Rispondi, Inoltra, Copia didascalia, Apri con…, Elimina).
+- 2026-10-25 — Posizione nella mappa dell'app (osmdroid 6.1.20, Apache-2.0): toccando una posizione, anche in tempo reale, si apre a tutto schermo con la foto di chi la manda e una punta sul punto preciso, e la mappa la segue; "Invia posizione" a tutto schermo con la posizione attuale o un punto toccato sulla mappa.

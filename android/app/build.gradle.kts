@@ -205,6 +205,8 @@ dependencies {
     implementation(libs.jna) { artifact { type = "aar" } }
     implementation(libs.unifiedpush.connector)
     implementation(libs.zxing.core)
+    // Mappe nell'app (Apache-2.0): tessere OpenStreetMap, niente Google.
+    implementation(libs.osmdroid)
     // Lettore QR con la fotocamera (Apache-2.0, nessun servizio Google).
     implementation(libs.zxing.embedded)
     // Chiamate voce e video (SPEC §7.9): WebRTC compilato dai sorgenti dal progetto Conversations

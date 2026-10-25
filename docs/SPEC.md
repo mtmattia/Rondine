@@ -445,10 +445,15 @@ viaggia fuori da MLS; dentro MLS viaggia solo il messaggio `file`, con la chiave
   solo le 4 tessere (zoom 15) del quadrato fisso di zoom 14 che contiene il punto (circa 2,4 km
   di lato all'equatore, 1,7 km a 45° di latitudine): il server delle mappe vede quale quadrato,
   non dove dentro. Il segnaposto lo disegna il telefono sopra le tessere. Le tessere restano in
-  cache 7 giorni; le mappe si possono spegnere. Toccando la mappa la posizione si apre nell'app
-  di mappe del telefono (`geo:`). Limite noto: chi segue una posizione in tempo reale scarica un
-  quadrato nuovo quando il punto ne esce, quindi il server delle mappe vede gli spostamenti a
-  quadrati di quella grandezza.
+  cache 7 giorni; le mappe si possono spegnere. Limite noto: chi segue una posizione in tempo
+  reale scarica un quadrato nuovo quando il punto ne esce, quindi il server delle mappe vede gli
+  spostamenti a quadrati di quella grandezza.
+- **Mappa a tutto schermo.** Toccando la posizione si apre una mappa dentro l'app (osmdroid,
+  tessere OpenStreetMap), con la foto di chi la manda e una punta sul punto preciso; in tempo
+  reale la mappa la segue. Da lì "Apri in un'altra app" (`geo:`). Anche "Invia posizione" usa
+  questa mappa: si manda la posizione attuale o un punto toccato. Qui le tessere sono quelle
+  della zona guardata, a zoom stradale: **solo quando si apre la mappa** il server delle mappe
+  vede la zona con la precisione di un isolato; l'anteprima nella chat resta a due livelli.
 
 ### 7.7 Foto del profilo
 

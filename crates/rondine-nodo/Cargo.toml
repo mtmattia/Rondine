@@ -14,7 +14,8 @@ rondine-core.workspace = true
 axum.workspace = true
 tokio.workspace = true
 rusqlite.workspace = true
-reqwest.workspace = true
+# "socks": il ripetitore FCM parla con Google attraverso Tor (SPEC §8.1).
+reqwest = { workspace = true, features = ["socks"] }
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
 serde.workspace = true

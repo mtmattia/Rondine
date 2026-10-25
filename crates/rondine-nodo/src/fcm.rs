@@ -30,6 +30,9 @@ pub struct FcmConfig {
     key_der: Vec<u8>,
     /// `https://fcm.googleapis.com`; cambia solo nei test.
     pub api_base: String,
+    /// Proxy SOCKS di Tor (`socks5h://127.0.0.1:9050`): con questo Google non vede l'IP del
+    /// ripetitore, e senza Tor la sveglia fallisce invece di partire in chiaro.
+    pub proxy: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -65,6 +68,7 @@ impl FcmConfig {
             token_uri: sa.token_uri,
             key_der,
             api_base: "https://fcm.googleapis.com".into(),
+            proxy: None,
         })
     }
 }
@@ -72,7 +76,9 @@ impl FcmConfig {
 /// Il ripetitore: credenziali, token d'accesso in cache e ultime sveglie per token.
 pub struct Fcm {
     cfg: FcmConfig,
-    http: reqwest::Client,
+    /// Un client per tentativo: con Tor, ognuno ha un utente SOCKS diverso e quindi un percorso
+    /// diverso (Tor isola i circuiti per utente).
+    http: Vec<reqwest::Client>,
     access: tokio::sync::Mutex<Option<(String, u64)>>,
     last: Mutex<HashMap<String, u64>>,
 }
@@ -85,13 +91,35 @@ enum Sent {
 }
 
 impl Fcm {
-    pub fn new(cfg: FcmConfig, http: reqwest::Client) -> Self {
-        Self {
+    pub fn new(cfg: FcmConfig) -> anyhow::Result<Self> {
+        let http = match &cfg.proxy {
+            None => vec![crate::push::http_client()?],
+            Some(proxy) => {
+                let url = reqwest::Url::parse(proxy)?;
+                // socks5 risolverebbe i nomi (googleapis.com) fuori da Tor.
+                anyhow::ensure!(
+                    url.scheme() == "socks5h",
+                    "il proxy del ripetitore deve essere socks5h://, non {}",
+                    url.scheme()
+                );
+                (0..2)
+                    .map(|_| {
+                        let mut u = url.clone();
+                        u.set_username(&random_user()?)
+                            .map_err(|_| anyhow::anyhow!("proxy senza host"))?;
+                        u.set_password(Some("rondine"))
+                            .map_err(|_| anyhow::anyhow!("proxy senza host"))?;
+                        crate::push::http_client_via(Some(reqwest::Proxy::all(u.as_str())?))
+                    })
+                    .collect::<anyhow::Result<_>>()?
+            }
+        };
+        Ok(Self {
             cfg,
             http,
             access: tokio::sync::Mutex::new(None),
             last: Mutex::new(HashMap::new()),
-        }
+        })
     }
 
     /// JWT firmato RS256 per chiedere un token d'accesso a Google.
@@ -121,7 +149,7 @@ impl Fcm {
     }
 
     /// Token d'accesso, rinnovato 5 minuti prima della scadenza.
-    async fn access_token(&self) -> anyhow::Result<String> {
+    async fn access_token(&self, http: &reqwest::Client) -> anyhow::Result<String> {
         let mut cached = self.access.lock().await;
         if let Some((tok, until)) = cached.as_ref()
             && now() + 300 < *until
@@ -132,8 +160,7 @@ impl Fcm {
             "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={}",
             self.assertion()?
         );
-        let res = self
-            .http
+        let res = http
             .post(&self.cfg.token_uri)
             .header("content-type", "application/x-www-form-urlencoded")
             .body(body)
@@ -152,8 +179,19 @@ impl Fcm {
         Ok(tok)
     }
 
+    /// Manda la sveglia, riprovando con il client successivo (con Tor, un altro percorso).
     async fn send(&self, token: &str) -> Sent {
-        let access = match self.access_token().await {
+        for http in &self.http {
+            match self.send_with(http, token).await {
+                Sent::Failed => continue,
+                done => return done,
+            }
+        }
+        Sent::Failed
+    }
+
+    async fn send_with(&self, http: &reqwest::Client, token: &str) -> Sent {
+        let access = match self.access_token(http).await {
             Ok(a) => a,
             Err(e) => {
                 tracing::warn!(error = %e, "token d'accesso FCM non ottenuto");
@@ -170,13 +208,7 @@ impl Fcm {
             "data": { "t": "wake" },
             "android": { "priority": "high", "ttl": "86400s" },
         }});
-        let res = self
-            .http
-            .post(url)
-            .bearer_auth(access)
-            .json(&msg)
-            .send()
-            .await;
+        let res = http.post(url).bearer_auth(access).json(&msg).send().await;
         match res {
             Ok(r) if r.status().is_success() => Sent::Ok,
             // Token sconosciuto o non più registrato: l'app è stata disinstallata o l'ha cambiato.
@@ -202,6 +234,14 @@ impl Fcm {
             Sent::Failed => crate::PushOutcome::Failed,
         }
     }
+}
+
+/// Utente SOCKS a caso: a Tor dice "percorso nuovo".
+fn random_user() -> anyhow::Result<String> {
+    let mut b = [0u8; 8];
+    ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b)
+        .map_err(|_| anyhow::anyhow!("generatore casuale non disponibile"))?;
+    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
 /// Il token, se l'endpoint è il ripetitore di questo nodo (`<public_url>/v1/fcm/<token>`).

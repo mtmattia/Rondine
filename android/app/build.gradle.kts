@@ -33,10 +33,10 @@ android {
         // Nodo proposto al primo avvio sui telefoni veri (facoltativo, si può cancellare o cambiare
         // dopo in Impostazioni): il nido pubblico di Mattia. Un altro con `rondine.nodo` in
         // ~/.gradle/gradle.properties o `-Prondine.nodo=…`; vuoto per non proporne nessuno.
-        val defaultNode = (findProperty("rondine.nodo") as String?) ?: "https://cachyos-mattia.tail9cc49c.ts.net"
+        val defaultNode = (findProperty("rondine.nodo") as String?) ?: "https://macbook-pro-di-mattia-4.tail9cc49c.ts.net"
         buildConfigField("String", "DEFAULT_NODE", "\"$defaultNode\"")
         // Ripetitore FCM della versione Play (SPEC §8.1): il nido con le credenziali Firebase.
-        val relay = (findProperty("rondine.ripetitore") as String?) ?: "https://cachyos-mattia.tail9cc49c.ts.net"
+        val relay = (findProperty("rondine.ripetitore") as String?) ?: "https://macbook-pro-di-mattia-4.tail9cc49c.ts.net"
         buildConfigField("String", "PUSH_RELAY", "\"$relay\"")
         buildConfigField("boolean", "PLAY_STORE", "$playStore")
     }

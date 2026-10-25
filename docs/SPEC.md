@@ -272,6 +272,8 @@ nemmeno l'esito.
 
 Nessuno dei due nodi conserva o registra IP, intestazioni o plichi.
 
+In v2 (§14.2) la staffetta non si usa più: deposito e ritiro passano da Tor.
+
 **Scelta della staffetta** (sempre diversa dal nodo di destinazione): il proprio nodo; poi le
 staffette suggerite dal proprio nodo (`"relays": [URL]` in `/v1/info`); poi i nodi dei contatti.
 Una staffetta che non risponde si salta.
@@ -610,6 +612,12 @@ che l'app ha ricevuto una sveglia. Per chiamare FCM (API HTTP v1) il ripetitore 
 (libreria `ring`) un JWT per `https://oauth2.googleapis.com/token`, con lo scope
 `https://www.googleapis.com/auth/firebase.messaging`. Lo stesso schema servirà per APNs (iPhone).
 
+**Verso Google solo via Tor** (`--fcm-proxy socks5h://…`, opzionale): con il proxy SOCKS di un
+client Tor (Arti o tor) tutte le chiamate a Google (token d'accesso e invio) passano da Tor, nomi
+compresi (`socks5h`; `socks5` è rifiutato perché risolverebbe i nomi fuori da Tor). Google non vede
+l'IP del ripetitore. Ogni sveglia prova al massimo due percorsi, con due utenti SOCKS a caso diversi
+(Tor isola i circuiti per utente); se nessuno riesce risponde `502` e **non** riprova in chiaro.
+
 ## 9. Scoperta dalla rubrica, senza centralino
 
 Due persone che hanno l'una il numero dell'altra si trovano da sole.
@@ -717,6 +725,10 @@ non c'è): un errore in un altro formato vuol dire che l'indirizzo non è un nod
 | `POST /v1/wake` | permesso | `{permit}` |
 | `POST /v1/sealed` | permesso nel plico | plico sigillato → risposta sigillata (§6.3) |
 | `POST /v1/relay` | — | intestazione `Rondine-Target`, plico → risposta del destinatario (§6.3) |
+| `POST /v2/drop` | gettone | `{inbox, token, blob}` → `{id}`, via Tor, senza sveglia (§14.5) |
+| `POST /v2/pickup` | — | `{inbox}` → `[{id, blob}]`, una casella per richiesta (§14.5) |
+| `POST /v2/ack` | — | `{inbox, ids}` (§14.5) |
+| `POST /v2/tokens` | chiave di membro | gettoni anonimi per tutto il nido (§14.4) |
 | `PUT /v1/names/{nome}` | firma nel record | registra o aggiorna `Signed<NameClaim>` |
 | `GET /v1/names/{nome}` | — | `Signed<NameClaim>` |
 | `DELETE /v1/names/{nome}` | proprietario | libera il nome (auth con la chiave dell'identità) |
@@ -968,12 +980,12 @@ contro il proprio elenco; l'Argon2id lo rallenta, non lo impedisce.
 
 ## 14. Proposta: un nodo che non conserva né messaggi né numeri
 
-> **Stato: proposta, non implementata.** Decisa con Mattia il 2026-10-24 come direzione; i
-> dettagli qui sotto vanno confermati prima del codice. Cambia il protocollo: sarà `v: 2` dove
+> **Stato:** §14.1 decisa il 2026-10-24; §14.2–14.9 (nido cieco, v2) decise con Mattia il
+> 2026-10-25, non ancora implementate. Cambia il protocollo: sarà `v: 2` dove
 > serve, e i nodi accetteranno le due versioni finché le app vecchie non spariscono.
 
-Obiettivo: chi gestisce un nodo non vede **chi scrive a chi**, **quanto** si scrivono, né **i numeri
-di telefono**. Oggi (§6, §9, §13) vede la quantità e la dimensione dei messaggi depositati, il
+Obiettivo: chi gestisce un nodo non vede **chi scrive a chi** né **i numeri di telefono** (dal
+2026-10-25: quanto riceve ciascuno non è più un obiettivo, §14.2). Oggi (§6, §9, §13) vede la quantità e la dimensione dei messaggi depositati, il
 permesso di ogni mittente, gli IP e, verificando, il numero in chiaro.
 
 Ordine dei metodi per il numero, deciso con Mattia: **uno squillo**, poi **SMS tra amici**, poi **QR
@@ -1053,44 +1065,121 @@ squillo è un tocco solo.
 **In tutto il mondo.** Non serve un gateway né un fornitore di SMS per ogni Paese: ognuno usa la
 sua tariffa. Uno squillo non risposto di solito non costa; un SMS internazionale o in roaming
 può costare a chi lo manda, e l'app lo dice prima di mandarlo.
-### 14.2 Avviso di giacenza al posto del deposito
+### 14.2 Nido cieco: obiettivo e regole (v2)
 
-Come la posta quando non ti trovano: il messaggio **resta sul telefono di chi scrive**, al nodo
-va solo un avviso.
+> **Stato: deciso con Mattia il 2026-10-25, non implementato.** Sostituisce l'avviso di giacenza e
+> il tubo della prima proposta (codice del commit d19f09f, mai acceso nell'app: andrà tolto).
+> Le API sono sotto `/v2`; i nodi accettano `/v1` finché le app vecchie non spariscono.
 
-1. Si tenta il diretto (rete locale, buco nel NAT, §12). Se non riesce, il mittente lascia sulla
-   casella del destinatario un **avviso**: un pacchetto di dimensione fissa, cifrato per il
-   destinatario, che dice solo "cercami" e come (gli indirizzi del mittente, il suo nodo).
-   Nessun contenuto, nessuna dimensione del messaggio. Il nodo sveglia il destinatario (§8).
-2. Il destinatario, sveglio, cerca il mittente in diretto. Se il mittente dorme, gli lascia a sua
-   volta un avviso "ti cerco" sul **suo** nodo, che lo sveglia.
-3. I due telefoni si collegano e il messaggio passa in diretto. Il nodo non l'ha mai avuto.
-4. Se il diretto non riesce (alcune reti mobili e aziendali), il nodo fa da **tubo** (§14.3).
-5. I messaggi restano in coda sul telefono (🕓, §12.4) finché non passano. Prezzo: con il
-   mittente spento il messaggio aspetta che si riaccenda.
+**Obiettivo:** nessuno deve poter **legare chi scrive a chi riceve** (X a Y). Che un telefono
+riceva tanti o pochi messaggi non è un obiettivo da nascondere.
 
-Il nodo vede solo "un avviso per questa casella a quest'ora". Gli avvisi hanno tutti la stessa
-dimensione e non dicono da chi vengono (sigillo, §6.3).
+Regole:
+1. **Prima il diretto** (§12): rete locale o buco nel NAT. Il nido è l'**ultima spiaggia**.
+2. Il nido è trattato **sempre come un estraneo**: qualunque nido, anche il proprio.
+3. Verso il nido e verso il servizio di sveglia si passa **sempre da Tor** (§14.6), mai dal proprio
+   IP. Niente staffetta (§6.3) in v2.
+4. Il nido non conosce **caselle di qualcuno**: solo caselle anonime che cambiano ogni giorno
+   (§14.3), pagate con gettoni che non dicono chi li usa (§14.4).
+5. La sveglia la suona **chi scrive**, non il nido (§14.5).
 
-### 14.3 Tubo: passaggio senza memoria
+Scartati con Mattia, e perché: casella comune scaricata da tutti e "fette" (non scala, sveglie a
+gruppi rifiutate), staffetta e nido di famiglia (il nido deve valere come estraneo), sveglie finte
+(costo in batteria), avviso di giacenza e tubo (il nido vede l'ora per casella; il tubo lega i due
+telefoni sullo stesso id).
 
-Quando i due telefoni sono accesi ma non riescono a collegarsi direttamente, il nodo li unisce in
-tempo reale: apre un canale tra i due, che si presentano con un gettone monouso scambiato
-nell'avviso, e passa i byte dall'uno all'altro **senza scriverli da nessuna parte**. Il traffico
-è cifrato tra i due telefoni come il diretto, e viaggia in pacchetti di **dimensione fissa** (con
-riempimento), così il nodo non capisce quanto sono lunghi i messaggi. Si chiude appena la coda è
-vuota.
+### 14.3 Caselle di chat rotanti
 
-### 14.4 Permessi anonimi
+Ogni chat ha, per ogni destinatario e per ogni giorno, una casella che conoscono solo i membri.
 
-Oggi ogni contatto deposita con il suo permesso (§5), e il nodo può contare quanti contatti ti
-scrivono e quanto. Con gli avvisi a dimensione fissa e un permesso che non distingue i mittenti
-(gettoni a firma cieca, da definire: si usa una libreria verificata, regola 1) il nodo vede solo
-quanti avvisi arrivano, non da quante persone.
+- Alla nascita della chat (Welcome, §7.1 e §7.4) ogni membro calcola
+  `seme = MLS-Exporter("rondine/v2/chat-inbox", "", 32)` sull'epoca del Welcome e lo conserva:
+  non cambia con le epoche successive, così i messaggi in volo durante un commit non si perdono.
+  Chi entra dopo riceve il seme in un messaggio MLS `{"type": "chat_seed", "v": 2, "seed": "<b64>"}`.
+- `casella(giorno, destinatario) = b64(blake3::keyed_hash(seme, "rondine/v2/inbox" || giorno ||
+  chiave_destinatario)[..16])`, `giorno` = giorni UNIX (u64 big endian).
+- La casella sta sul **nido del destinatario** (dal suo biglietto, §4). Chi ritira guarda la
+  casella di oggi e di ieri.
+- Il nido crea una casella al primo deposito. Conoscere i 16 byte della casella basta per ritirare
+  e confermare: sono 128 bit casuali per chi non ha il seme.
 
-### 14.5 Nell'app
+Il nido vede caselle casuali che nascono e spariscono ogni giorno: non sa di chi sono, né che due
+caselle sono della stessa persona o della stessa chat.
 
-Ogni messaggio mostra da dove è passato:
-- **diretto** (icona "P2P"): rete locale o internet, il nodo non l'ha visto;
-- **nodo** (icona "cassetta"): depositato nel nodo, come oggi; con questa proposta diventa
-  **tubo** (icona "tubo"): passato dal nodo in tempo reale, senza essere conservato.
+### 14.4 Gettoni anonimi (v2)
+
+Gettoni ciechi VOPRF (RFC 9497, ristretto255, libreria `voprf`, già in `rondine-core::token`):
+il nodo vede che un gettone è valido ma non a chi l'aveva dato. Rispetto alla prima versione:
+- il gettone vale per **tutto il nido**, non per una casella (l'input è
+  `"rondine/v2/token|" || nonce`), perché le caselle cambiano ogni giorno;
+- i gettoni li chiede al nido chi ci tiene la casella, con una **chiave di membro** del nido:
+  una chiave Ed25519 creata per quel nido, diversa dall'identità e mai nel biglietto. La richiesta
+  passa da Tor. Il nido sa che il membro M ha chiesto 20 gettoni, non a chi li darà.
+- Il destinatario passa i gettoni ai contatti dentro MLS:
+  `{"type": "tokens", "v": 2, "node": "<URL>", "items": ["<b64>", …]}`. Il nido limita i
+  gettoni per membro e per epoca (anti-spam).
+
+### 14.5 Busta, deposito, ritiro (v2)
+
+- **Busta a misura fissa:** il `blob` (§6.1) si riempie fino a **2048 byte** prima della codifica
+  (riempimento dentro il messaggio MLS, con il padding di openmls). Busta più grande → si manda come
+  file. I file (§7.5) si riempiono fino a una taglia: 64 KiB, 1 MiB, 8 MiB o 64 MiB.
+- `POST /v2/drop` `{inbox, token, blob}` → `{id}`. Nessuna sveglia.
+- `POST /v2/pickup` `{inbox}` → `[{id, blob}]`. **Una casella per richiesta, ognuna su un circuito
+  Tor diverso** (isolamento di Arti): chiedere più caselle insieme le legherebbe tra loro.
+- `POST /v2/ack` `{inbox, ids}`: il nido cancella. Senza conferma, cancella dopo 30 giorni.
+- Il nido salva solo `inbox`, `id`, `blob` e il **giorno** di arrivo. Niente IP, niente ore, niente
+  log delle richieste.
+- Il nido si raggiunge solo in HTTPS: l'uscita di Tor non deve vedere caselle e gettoni.
+
+### 14.6 Tor
+
+- Libreria **Arti** (Tor Project, Rust, MIT OR Apache-2.0), come client: il nido resta un normale
+  indirizzo HTTPS, non serve un servizio onion.
+- Passano da Tor: deposito, ritiro, conferma, richiesta di gettoni, sveglia (§14.7), e il deposito
+  dell'offerta del buco nel NAT (§12.8).
+- **STUN** per il buco nel NAT: non dal nido (vedrebbe i due IP insieme), ma da server pubblici
+  scelti a caso da un elenco nell'app, diversi per i due lati.
+- Tor si avvia solo quando serve (deposito o ritiro), non tiene connessioni in sottofondo.
+
+### 14.7 Sveglia suonata da chi scrive
+
+- Il destinatario manda a ogni contatto, dentro MLS, il suo indirizzo di sveglia:
+  `{"type": "wake_target", "v": 2, "url": "https://…"}`. Versione libera: l'endpoint UnifiedPush
+  (ntfy), uno diverso per contatto. Versione Play e iPhone: `<ripetitore>/v1/fcm/<token>` o
+  l'equivalente APNs (§8.1).
+- Dopo un deposito nel nido, chi scrive fa `POST` all'indirizzo, via Tor, con `{"v":1,"t":"wake"}`.
+  Il nido non sveglia più nessuno in v2 (`PUT /v1/inboxes/{inbox}/push` non si usa).
+- **Sveglie con giudizio:**
+  - niente sveglia se c'è un collegamento diretto vivo con il contatto (§12.4): mentre si chatta
+    con l'app aperta, nessuna sveglia;
+  - al massimo una sveglia per contatto ogni 60 s: i messaggi ravvicinati ne fanno una sola;
+  - prima di suonare si aspetta un tempo casuale tra 0 e 5 s.
+  - Niente sveglie finte (scelta di Mattia).
+- Il **ripetitore** (§8.1) è gestito da chi ha il progetto Firebase/Apple, separato dai nidi; deve
+  stare su un server sempre acceso. Limite di frequenza per token come in §8.1.
+
+### 14.8 Chi vede cosa, e limiti noti
+
+| Chi | Vede | Non vede |
+|---|---|---|
+| **nido** | che una casella anonima ha ricevuto una busta in quel giorno | IP, chi scrive, chi ritira, contenuto, a chi è la casella |
+| **ripetitore, Google, Apple** | che un telefono si è svegliato, e quando | chi l'ha svegliato, perché |
+| **server ntfy** | che un suo indirizzo è stato suonato, e quando | chi l'ha suonato |
+| **operatore di rete** | che il telefono usa Tor, o che parla in diretto con un IP | contenuto, nomi |
+| **contatto in diretto** | l'IP dell'altro | — |
+
+Limiti noti:
+- **Sveglie alternate.** Chi vede le sveglie di molti telefoni per molto tempo (Google, Apple, il
+  ripetitore) può notare due telefoni che si svegliano a turno e indovinare le coppie che si
+  scrivono spesso a telefono chiuso. Le regole di §14.7 lo riducono, non lo eliminano.
+- **Quanto si riceve:** ripetitore e Google contano le sveglie di ogni telefono.
+- **Chi vede tutta internet** (le due estremità di Tor insieme) può collegare i tempi.
+- **iPhone:** far partire Tor dentro l'estensione delle notifiche (circa 30 s, poca memoria) è da
+  provare; se non ci sta, la notifica dice "nuovo messaggio" e il testo arriva aprendo l'app.
+- Tor costa batteria e 1–3 s per deposito o ritiro; alcune reti lo bloccano (serviranno i ponti).
+
+### 14.9 Nell'app
+
+Ogni messaggio mostra da dove è passato: **diretto** (il nido non l'ha visto) o **nido** (passato
+da Tor, in una casella anonima). Nessuna impostazione da scegliere: l'app fa tutto da sola.

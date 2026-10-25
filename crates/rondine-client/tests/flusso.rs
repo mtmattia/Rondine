@@ -1739,6 +1739,175 @@ async fn sveglia_fcm_sul_nido_che_fa_da_ripetitore() -> R {
     Ok(())
 }
 
+/// Finto proxy SOCKS5 (come quello di Tor): annota l'utente di ogni connessione (Tor usa utenti
+/// diversi per percorsi diversi) e, se `fail_first`, fa cadere la prima.
+async fn fake_socks(
+    fail_first: bool,
+) -> Result<(String, Arc<Mutex<Vec<String>>>), Box<dyn std::error::Error>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let users: Arc<Mutex<Vec<String>>> = Arc::default();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let seen = users.clone();
+    tokio::spawn(async move {
+        let mut first = fail_first;
+        while let Ok((mut c, _)) = listener.accept().await {
+            let drop_it = std::mem::take(&mut first);
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let mut head = [0u8; 2];
+                c.read_exact(&mut head).await.ok()?;
+                let mut methods = vec![0u8; head[1] as usize];
+                c.read_exact(&mut methods).await.ok()?;
+                let mut user = String::new();
+                if methods.contains(&2) {
+                    c.write_all(&[5, 2]).await.ok()?;
+                    let mut v = [0u8; 2];
+                    c.read_exact(&mut v).await.ok()?;
+                    let mut u = vec![0u8; v[1] as usize];
+                    c.read_exact(&mut u).await.ok()?;
+                    let mut pl = [0u8; 1];
+                    c.read_exact(&mut pl).await.ok()?;
+                    let mut pw = vec![0u8; pl[0] as usize];
+                    c.read_exact(&mut pw).await.ok()?;
+                    user = String::from_utf8_lossy(&u).into_owned();
+                    c.write_all(&[1, 0]).await.ok()?;
+                } else {
+                    c.write_all(&[5, 0]).await.ok()?;
+                }
+                seen.lock().ok()?.push(user);
+                if drop_it {
+                    return None;
+                }
+                let mut req = [0u8; 4];
+                c.read_exact(&mut req).await.ok()?;
+                let host = match req[3] {
+                    1 => {
+                        let mut ip = [0u8; 4];
+                        c.read_exact(&mut ip).await.ok()?;
+                        std::net::Ipv4Addr::from(ip).to_string()
+                    }
+                    3 => {
+                        let mut l = [0u8; 1];
+                        c.read_exact(&mut l).await.ok()?;
+                        let mut d = vec![0u8; l[0] as usize];
+                        c.read_exact(&mut d).await.ok()?;
+                        String::from_utf8_lossy(&d).into_owned()
+                    }
+                    _ => return None,
+                };
+                let mut port = [0u8; 2];
+                c.read_exact(&mut port).await.ok()?;
+                let mut up =
+                    tokio::net::TcpStream::connect((host.as_str(), u16::from_be_bytes(port)))
+                        .await
+                        .ok()?;
+                c.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await.ok()?;
+                tokio::io::copy_bidirectional(&mut c, &mut up).await.ok()?;
+                Some(())
+            });
+        }
+    });
+    Ok((format!("socks5h://{addr}"), users))
+}
+
+/// Ripetitore che parla con Google solo attraverso Tor (SPEC §8.1): se il proxy non risponde la
+/// sveglia fallisce e Google non riceve niente (mai in chiaro); se cade un percorso si riprova
+/// con un utente SOCKS diverso, cioè un altro percorso di Tor.
+#[tokio::test]
+async fn sveglia_fcm_solo_attraverso_tor() -> R {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let (google, calls) = fake_google().await?;
+    let account = serde_json::json!({
+        "type": "service_account",
+        "project_id": "rondine-prova",
+        "client_email": "ripetitore@rondine-prova.iam.gserviceaccount.com",
+        "private_key": include_str!("dati/fcm-prova.pem"),
+        "token_uri": format!("{google}/token"),
+    })
+    .to_string();
+    let relay_with =
+        |proxy: String| -> Result<rondine_nodo::FcmConfig, Box<dyn std::error::Error>> {
+            let mut fcm = rondine_nodo::FcmConfig::from_service_account(&account)?;
+            fcm.api_base = google.clone();
+            fcm.proxy = Some(proxy);
+            Ok(fcm)
+        };
+    async fn start_relay(
+        fcm: rondine_nodo::FcmConfig,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}", listener.local_addr()?);
+        let state = AppState::new(Config {
+            public_url: url.clone(),
+            node_key: Identity::generate(),
+            store: Store::in_memory()?,
+            allow_local_push: true,
+            fcm: Some(fcm),
+            sms: None,
+            turn: None,
+        })?;
+        tokio::spawn(rondine_nodo::serve(listener, state));
+        Ok(url)
+    }
+    let http = reqwest::Client::new();
+
+    // Solo socks5h: con socks5 i nomi si risolverebbero fuori da Tor.
+    assert!(
+        AppState::new(Config {
+            public_url: "http://127.0.0.1:1".into(),
+            node_key: Identity::generate(),
+            store: Store::in_memory()?,
+            allow_local_push: true,
+            fcm: Some(relay_with("socks5://127.0.0.1:9050".into())?),
+            sms: None,
+            turn: None,
+        })
+        .is_err()
+    );
+
+    // Tor spento: niente sveglia, e niente a Google.
+    let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let dead_url = format!("socks5h://{}", dead.local_addr()?);
+    drop(dead);
+    let relay = start_relay(relay_with(dead_url)?).await?;
+    let r = http
+        .post(format!("{relay}/v1/fcm/token-di-mattia"))
+        .body(WAKE_BODY)
+        .send()
+        .await?;
+    assert_eq!(r.status(), 502);
+    assert!(
+        calls.lock().map_err(|_| "lock")?.is_empty(),
+        "Google raggiunto senza Tor"
+    );
+
+    // Il primo percorso cade: si riprova con un altro utente SOCKS e la sveglia arriva.
+    let (proxy, users) = fake_socks(true).await?;
+    let relay = start_relay(relay_with(proxy)?).await?;
+    let r = http
+        .post(format!("{relay}/v1/fcm/token-di-mattia"))
+        .body(WAKE_BODY)
+        .send()
+        .await?;
+    assert_eq!(r.status(), 202);
+    let users = users.lock().map_err(|_| "lock")?.clone();
+    assert!(users.len() >= 2, "nessun secondo tentativo: {users:?}");
+    assert!(
+        users.iter().all(|u| !u.is_empty()),
+        "senza utente SOCKS: {users:?}"
+    );
+    assert_ne!(users[0], users[1], "stesso percorso al secondo tentativo");
+    let sent = calls
+        .lock()
+        .map_err(|_| "lock")?
+        .iter()
+        .filter(|(p, ..)| p == "/send")
+        .count();
+    assert_eq!(sent, 1);
+    Ok(())
+}
+
 /// Rubrica (SPEC §9, §13.3): una sola ricerca trova sia chi mi ha in rubrica a sua volta sia chi
 /// ha verificato il numero, dice a quale numero corrisponde ciascuno, e la seconda volta è
 /// immediata (segreti già calcolati).

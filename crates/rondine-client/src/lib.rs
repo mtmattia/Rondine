@@ -640,23 +640,7 @@ impl Client {
             .cloned()
             .collect();
         for c in contacts {
-            let permit = self.new_permit("contatto").await?;
-            let card = self.card_with(Some(&permit))?;
-            let permit_id = permit.verify()?.id;
-            if let Some(cm) = self.contact_mut(&c.identity) {
-                cm.my_permit_id = Some(permit_id);
-            }
-            // Chi non è raggiungibile adesso lo riceve dalla coda o dalla mesh.
-            let _ = self
-                .send_app(
-                    &c,
-                    &AppMessage::Hello {
-                        v: 1,
-                        card,
-                        reset: false,
-                    },
-                )
-                .await;
+            self.send_card(&c).await?;
         }
         // I gruppi ricevono il biglietto con un permesso `gruppo` del nodo nuovo (SPEC §7.4).
         for g in self.state.group_chats.iter_mut().filter(|g| g.active) {
@@ -668,6 +652,28 @@ impl Client {
         // Gli errori dei gruppi qui non fermano il cambio: il prossimo annuncio li ripara.
         let _ = self.run_pending().await;
         self.save()
+    }
+
+    /// Manda al contatto il mio biglietto attuale, con un permesso nuovo del mio nodo, dentro la
+    /// chat che abbiamo già. Chi non è raggiungibile adesso lo riceve dalla coda o dalla mesh.
+    async fn send_card(&mut self, c: &Contact) -> Result<()> {
+        let permit = self.new_permit("contatto").await?;
+        let card = self.card_with(Some(&permit))?;
+        let permit_id = permit.verify()?.id;
+        if let Some(cm) = self.contact_mut(&c.identity) {
+            cm.my_permit_id = Some(permit_id);
+        }
+        let _ = self
+            .send_app(
+                c,
+                &AppMessage::Hello {
+                    v: 1,
+                    card,
+                    reset: false,
+                },
+            )
+            .await;
+        Ok(())
     }
 
     /// Il profilo ha un nodo? Senza, niente casella, nomi utente, push né rubrica.
@@ -1576,6 +1582,17 @@ impl Client {
             existing.username = info.username;
             if !existing.groups.is_empty() {
                 let c = existing.clone();
+                self.save()?;
+                // Riallaccio (SPEC §12.7): se cambiamo nodo tutti e due e il vecchio si spegne,
+                // nessuno dei due biglietti nuovi arriva. Col biglietto preso adesso riparte la
+                // coda, poi il mio biglietto, così anche l'altro torna a trovarmi.
+                for o in self.state.outbox.iter_mut().filter(|o| o.to == c.identity) {
+                    o.next_try = 0;
+                }
+                self.flush_outbox().await;
+                if self.has_node() && !c.blocked {
+                    self.send_card(&c).await?;
+                }
                 self.save()?;
                 return Ok(c);
             }
@@ -3962,6 +3979,10 @@ impl Client {
                     c.card = card;
                     c.display_name = info.display_name;
                     c.username = info.username;
+                }
+                // Biglietto nuovo (cambio di nodo): la coda verso di lui riparte subito.
+                for o in self.state.outbox.iter_mut().filter(|o| o.to == sender) {
+                    o.next_try = 0;
                 }
                 Ok(Vec::new())
             }

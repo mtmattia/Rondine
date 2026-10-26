@@ -250,6 +250,7 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
     }
     var sending by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var relink by remember { mutableStateOf(false) }
     val startCall = rememberCallStarter()
     var attachMenu by remember { mutableStateOf(false) }
     /** File scelto, in attesa della didascalia e di "Invia". */
@@ -977,6 +978,9 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
                                     }
                                 },
                             )
+                            if (c?.blocked == false) {
+                                DropdownMenuItem(text = { Text("Riallaccia contatto") }, onClick = { menu = false; relink = true })
+                            }
                             DeleteChatItem(contactId, { menu = false }, onBack)
                             if (c?.blocked == false) {
                                 DropdownMenuItem(
@@ -1001,6 +1005,30 @@ fun ChatScreen(target: ChatTarget, onBack: () -> Unit, onHeader: () -> Unit) {
             )
         },
     ) { padding ->
+        // Riallaccio (SPEC §12.7): il suo link nuovo ripara la chat dopo un cambio di nido.
+        if (relink && c != null) {
+            TextDialog(
+                title = "Riallaccia contatto",
+                label = "Link d'invito",
+                placeholder = "https://…/invito#…",
+                note = "Se non vi arrivano più i messaggi dopo un cambio di nido, chiedi a ${c.name} il suo " +
+                    "link d'invito e incollalo qui. La chat resta la stessa.",
+                onDismiss = { relink = false },
+            ) { value ->
+                relink = false
+                scope.launch {
+                    try {
+                        val added = Repo.client().add(value.trim())
+                        Repo.refresh()
+                        snackbar.showSnackbar(
+                            if (added.id == contactId) "Contatto riallacciato" else "Questo link è di ${added.name}, non di ${c.name}",
+                        )
+                    } catch (e: RondineException) {
+                        snackbar.showSnackbar(e.userMessage)
+                    }
+                }
+            }
+        }
         val colors = LocalChatColors.current
         Column(
             Modifier

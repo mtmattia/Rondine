@@ -12,6 +12,7 @@ mod rubrica;
 mod scheduled;
 mod state;
 mod status;
+mod trasloco;
 mod tubo;
 mod verify;
 
@@ -286,6 +287,8 @@ pub struct Client {
     confirm_wait: u64,
     /// Lavori della mesh raccolti durante l'elaborazione, eseguiti alla fine di `sync`.
     relay_jobs: Vec<RelayJob>,
+    /// Ultima ricerca dei cartelli di trasloco per contatto (SPEC §12.7).
+    move_checks: HashMap<PublicKey, u64>,
     /// Eventi e azioni dei gruppi raccolti durante l'elaborazione (SPEC §7.4).
     batch: Batch,
     /// Intervallo minimo tra due aggiornamenti della posizione (SPEC §7.6); cambia nei test.
@@ -451,6 +454,7 @@ impl Client {
                 unconfirmed: Vec::new(),
                 phone_verified: false,
                 retired: Vec::new(),
+                moves_published: None,
                 push_endpoint: None,
                 my_photo_ts: 0,
                 my_about: None,
@@ -492,6 +496,7 @@ impl Client {
             seal_cache: Default::default(),
             confirm_wait: CONFIRM_WAIT_SECS,
             relay_jobs: Vec::new(),
+            move_checks: HashMap::new(),
         };
         client.upload_keypackages(KEYPACKAGE_BATCH).await?;
         client.save()?;
@@ -528,6 +533,7 @@ impl Client {
                 unconfirmed: Vec::new(),
                 phone_verified: false,
                 retired: Vec::new(),
+                moves_published: None,
                 push_endpoint: None,
                 my_photo_ts: 0,
                 my_about: None,
@@ -569,6 +575,7 @@ impl Client {
             seal_cache: Default::default(),
             confirm_wait: CONFIRM_WAIT_SECS,
             relay_jobs: Vec::new(),
+            move_checks: HashMap::new(),
         };
         client.save()?;
         Ok(client)
@@ -639,9 +646,14 @@ impl Client {
             .filter(|c| !c.blocked && !c.groups.is_empty())
             .cloned()
             .collect();
+        let mut cards = Vec::new();
         for c in contacts {
-            self.send_card(&c).await?;
+            let card = self.card_for(&c).await?;
+            self.send_card_with(&c, card.clone()).await;
+            cards.push((c, card));
         }
+        // Cartelli di trasloco (SPEC §12.7): se i `hello` si perdono, mi trovano lì.
+        let _ = self.publish_moves_with(&cards).await;
         // I gruppi ricevono il biglietto con un permesso `gruppo` del nodo nuovo (SPEC §7.4).
         for g in self.state.group_chats.iter_mut().filter(|g| g.active) {
             g.my_permit = None;
@@ -657,12 +669,27 @@ impl Client {
     /// Manda al contatto il mio biglietto attuale, con un permesso nuovo del mio nodo, dentro la
     /// chat che abbiamo già. Chi non è raggiungibile adesso lo riceve dalla coda o dalla mesh.
     async fn send_card(&mut self, c: &Contact) -> Result<()> {
+        let card = self.card_for(c).await?;
+        self.send_card_with(c, card).await;
+        Ok(())
+    }
+
+    /// Il mio biglietto per un contatto, con un permesso nuovo del mio nodo. Il permesso di prima
+    /// resta valido (un `hello` può essere ancora in viaggio) ma si ricorda, per revocarlo se lo
+    /// blocco.
+    pub(crate) async fn card_for(&mut self, c: &Contact) -> Result<SignedCard> {
         let permit = self.new_permit("contatto").await?;
         let card = self.card_with(Some(&permit))?;
         let permit_id = permit.verify()?.id;
-        if let Some(cm) = self.contact_mut(&c.identity) {
-            cm.my_permit_id = Some(permit_id);
+        if let Some(cm) = self.contact_mut(&c.identity)
+            && let Some(old) = cm.my_permit_id.replace(permit_id)
+        {
+            cm.old_permit_ids.push(old);
         }
+        Ok(card)
+    }
+
+    async fn send_card_with(&mut self, c: &Contact, card: SignedCard) {
         let _ = self
             .send_app(
                 c,
@@ -673,7 +700,6 @@ impl Client {
                 },
             )
             .await;
-        Ok(())
     }
 
     /// Il profilo ha un nodo? Senza, niente casella, nomi utente, push né rubrica.
@@ -1134,6 +1160,7 @@ impl Client {
             seal_cache: Default::default(),
             confirm_wait: CONFIRM_WAIT_SECS,
             relay_jobs: Vec::new(),
+            move_checks: HashMap::new(),
         })
     }
 
@@ -1567,6 +1594,14 @@ impl Client {
         if let Some(c) = self.contact_mut(id) {
             c.blocked = true;
         }
+        // Anche i permessi dati prima (riallacci, cartelli): quelli dei nodi lasciati non contano.
+        let old = self
+            .contact_mut(id)
+            .map(|c| std::mem::take(&mut c.old_permit_ids))
+            .unwrap_or_default();
+        for pid in old {
+            let _ = self.revoke_permit(&pid).await;
+        }
         self.save()
     }
 
@@ -1622,6 +1657,7 @@ impl Client {
                 blind_in: None,
                 blind_out: None,
                 blind_rx: 0,
+                old_permit_ids: Vec::new(),
             });
         }
         self.note_key_change(&info.identity);
@@ -3495,6 +3531,10 @@ impl Client {
         if self.online_marker() != online_before {
             events.extend(self.flush_outbox().await);
         }
+        // Cartelli di trasloco (SPEC §12.7): lasciati una volta dopo un cambio di nodo, cercati
+        // per chi ha messaggi fermi in coda.
+        let _ = self.publish_moves().await;
+        events.extend(self.check_moves().await);
         // Foto e documenti arrivati: si scaricano subito dal mio nodo (SPEC §7.5). Se non
         // riesce, il messaggio resta da scaricare con `download`.
         for e in events.iter_mut() {
@@ -3702,6 +3742,7 @@ impl Client {
                     blind_in: None,
                     blind_out: None,
                     blind_rx: 0,
+                    old_permit_ids: Vec::new(),
                 });
                 self.note_key_change(&from);
             }

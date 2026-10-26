@@ -415,6 +415,18 @@ impl Device {
         }
     }
 
+    /// Segreto esportato dall'epoca attuale del gruppo (MLS-Exporter, RFC 9420 §8.5): lo
+    /// conoscono solo i membri.
+    pub fn export_secret(&self, group_id: &[u8], label: &str) -> Result<[u8; 32]> {
+        let secret = self
+            .load(group_id)?
+            .export_secret(self.provider.crypto(), label, &[], 32)
+            .map_err(mls)?;
+        secret
+            .try_into()
+            .map_err(|_| Error::Mls("segreto esportato corto".into()))
+    }
+
     /// Identità dei membri di un gruppo.
     pub fn members(&self, group_id: &[u8]) -> Result<Vec<PublicKey>> {
         self.load(group_id)?
@@ -458,6 +470,19 @@ fn member_identity(m: &Member) -> Result<PublicKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn segreto_esportato_uguale_per_i_due_membri() -> Result<()> {
+        let (alice_id, bob_id) = (Identity::generate(), Identity::generate());
+        let (alice, bob) = (Device::new(&alice_id), Device::new(&bob_id));
+        let kps = bob.key_packages(1)?;
+        let (gid, welcome) = alice.start_dm(&kps[0], &bob_id.public())?;
+        bob.join(&welcome)?;
+        let a = alice.export_secret(&gid, "rondine/v1/trasloco")?;
+        assert_eq!(a, bob.export_secret(&gid, "rondine/v1/trasloco")?);
+        assert_ne!(a, alice.export_secret(&gid, "altro")?);
+        Ok(())
+    }
 
     #[test]
     fn chat_uno_a_uno_con_salvataggio_su_disco() -> Result<()> {

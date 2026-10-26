@@ -58,6 +58,14 @@ pub struct DiscoveryRecord {
 
 /// Cifra un record: `nonce (24 byte) || testo cifrato`.
 pub fn seal(key: &[u8; 32], record: &DiscoveryRecord) -> Result<Vec<u8>> {
+    seal_json(key, record)
+}
+
+pub fn open(key: &[u8; 32], blob: &[u8]) -> Result<DiscoveryRecord> {
+    open_json(key, blob)
+}
+
+fn seal_json<T: Serialize>(key: &[u8; 32], record: &T) -> Result<Vec<u8>> {
     let cipher = XChaCha20Poly1305::new(key.into());
     let nonce = XChaCha20Poly1305::generate_nonce(&mut rand::rngs::OsRng);
     let ct = cipher
@@ -68,7 +76,7 @@ pub fn seal(key: &[u8; 32], record: &DiscoveryRecord) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn open(key: &[u8; 32], blob: &[u8]) -> Result<DiscoveryRecord> {
+fn open_json<T: serde::de::DeserializeOwned>(key: &[u8; 32], blob: &[u8]) -> Result<T> {
     if blob.len() < 24 {
         return Err(Error::Crypto);
     }
@@ -78,6 +86,33 @@ pub fn open(key: &[u8; 32], blob: &[u8]) -> Result<DiscoveryRecord> {
         .decrypt(XNonce::from_slice(nonce), ct)
         .map_err(|_| Error::Crypto)?;
     Ok(serde_json::from_slice(&pt)?)
+}
+
+/// Etichetta MLS-Exporter del cartello di trasloco (SPEC §12.7).
+pub const MOVE_LABEL: &str = "rondine/v1/trasloco";
+
+/// Luogo in bacheca e chiave del cartello di trasloco per una chat 1:1 (SPEC §12.7), dal segreto
+/// esportato dal gruppo MLS.
+pub fn move_secrets(exported: &[u8; 32]) -> PairSecrets {
+    PairSecrets {
+        loc: blake3::derive_key("rondine v1 trasloco luogo", exported),
+        key: blake3::derive_key("rondine v1 trasloco chiave", exported),
+    }
+}
+
+/// Contenuto di un cartello di trasloco: il biglietto nuovo.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct MoveRecord {
+    pub v: u32,
+    pub card: SignedCard,
+}
+
+pub fn seal_move(key: &[u8; 32], record: &MoveRecord) -> Result<Vec<u8>> {
+    seal_json(key, record)
+}
+
+pub fn open_move(key: &[u8; 32], blob: &[u8]) -> Result<MoveRecord> {
+    open_json(key, blob)
 }
 
 /// Chiave proprietaria di una voce: diversa per ogni luogo, così le voci non si collegano.

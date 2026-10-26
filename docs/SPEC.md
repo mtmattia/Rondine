@@ -878,6 +878,35 @@ dei due riaggiunga l'altro (invito, nome utente o numero): il client prende il b
 ritenta subito la coda verso di lui e gli manda un `hello` col proprio biglietto e un permesso
 nuovo. Chi riceve un `hello` ritenta subito la sua coda verso il mittente. Nessun campo nuovo.
 
+**Cartello di trasloco.** Per non dover riaggiungere a mano, chi cambia nodo lascia un cartello
+per ogni contatto sulle **bacheche** (§9), le stesse della scoperta dalla rubrica. Il nodo non ha
+rotte nuove: per lui è una voce di bacheca come le altre.
+
+1. Per ogni chat 1:1 con il contatto (ogni gruppo MLS in `groups`):
+   `s = MLS-Exporter("rondine/v1/trasloco", "", 32)` (RFC 9420 §8.5). Lo conoscono solo i due
+   membri: il nodo no.
+2. `loc = blake3_derive_key("rondine v1 trasloco luogo", s)`;
+   `key = blake3_derive_key("rondine v1 trasloco chiave", s)`.
+3. Voce = XChaCha20-Poly1305(`key`, nonce casuale di 24 byte) di
+   `{"v": 1, "card": <Signed<Card>>}`: il biglietto nuovo con un permesso `contatto` nuovo, come
+   nel `hello`. Chiave proprietaria per luogo come in §9, durata 30 giorni.
+4. Si pubblica con `PUT /v1/board/{b64 loc}` su ogni bacheca del client, una volta per cambio di
+   nodo (anche dopo, se il cambio è avvenuto con una versione che non lo faceva, finché si
+   ritirano le vecchie caselle).
+5. Chi ha messaggi fermi in coda verso un contatto cerca i suoi cartelli
+   (`POST /v1/board/lookup` sulle proprie bacheche, al massimo ogni 10 minuti per contatto),
+   decifra, controlla che il biglietto sia firmato **dal contatto** e più recente di quello che ha.
+   Se lo è: lo prende, ritenta subito la coda e gli manda un `hello` col proprio biglietto, come nel
+   riallaccio.
+
+Due contatti si ritrovano da soli se hanno almeno una bacheca in comune (il nodo nuovo di uno è
+tra le bacheche dell'altro, per esempio se si spostano sullo stesso nodo, o una bacheca
+predefinita dell'app). Il nodo vede luoghi casuali, proprietari diversi per ogni voce e voci
+cifrate; non sa di chi sono né per chi. **Limite noto**, lo stesso di §9: senza Tor un nodo che
+vede l'indirizzo IP di chi pubblica una voce e di chi poi la cerca può supporre che i due si
+conoscano. Una chat 1:1 rifatta dopo un ripristino (§7.8) ha un gruppo nuovo e quindi un segreto
+nuovo; i gruppi non usano cartelli.
+
 ### 12.8 Buco nel NAT IPv4 (hole punching)
 Due telefoni dietro NAT IPv4 si collegano direttamente. Il nodo serve solo da punto d'incontro:
 porta i due messaggi MLS qui sotto, poi esce di mezzo. È lo stesso schema delle chiamate (§7.9).

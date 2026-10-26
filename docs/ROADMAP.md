@@ -40,7 +40,7 @@ Legenda: ✅ fatto · 🟡 parziale · ⬜ da fare
 | Nome e Info del profilo | ✅ | SPEC §7.7: nome da cambiare e "Info" con scadenza (1 ora … per sempre) e suggerimenti, come su WhatsApp; chi ti ha in rubrica vede il nome della sua rubrica |
 | Impostazioni come WhatsApp | ✅ | nuvoletta Info sopra la foto, Profilo (foto, Nome, Info, Nome utente, Telefono), sezioni Account, Privacy, Chat, Notifiche, Aiuto, feedback, invita un amico, aggiornamenti |
 | Posizione e posizione in tempo reale | ✅ | SPEC §7.6: fino a 8 ore, aggiornamenti silenziosi (senza sveglia) ogni 15 s anche ad app chiusa; mappa su due livelli (tessere OpenStreetMap del quadrato di ~2 km, punto esatto disegnato dal telefono), si può spegnere; mappa a tutto schermo nell'app con la foto di chi la manda, invio di un punto scelto sulla mappa; client, CLI e app |
-| Cambiare nodo | ✅ | SPEC §12.7: contatti e gruppi ricevono il biglietto nuovo, la vecchia casella si ritira per 30 giorni; CLI `rondine nodo` e Impostazioni |
+| Cambiare nodo | ✅ | SPEC §12.7: contatti e gruppi ricevono il biglietto nuovo, la vecchia casella si ritira per 30 giorni; cartelli di trasloco sulle bacheche e "Riallaccia contatto" se cambiano nodo tutti e due; CLI `rondine nodo` e Impostazioni |
 | Contatto, sondaggio, evento | ⬜ | voci del pannello allegati di WhatsApp non ancora fatte |
 | Conferme di lettura, "sta scrivendo" | ✅ | spunte ✓ / ✓✓ / ✓✓ verdi (SPEC §7.2), "sta scrivendo" effimero senza sveglia (§7.3) |
 | Più dispositivi per persona | ⬜ | ogni dispositivo membro MLS |

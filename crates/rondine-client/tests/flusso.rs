@@ -2979,3 +2979,40 @@ async fn cambio_di_nodo_tutti_e_due_col_vecchio_spento() -> R {
     assert_eq!(texts(&mattia.sync().await?), ["sì"]);
     Ok(())
 }
+
+/// Cartello di trasloco (SPEC §12.7): cambiano nodo tutti e due, il vecchio si spegne prima che
+/// i biglietti nuovi arrivino, e si ritrovano da soli, senza riaggiungersi.
+#[tokio::test]
+async fn cartello_di_trasloco_si_ritrovano_da_soli() -> R {
+    let (n1, killer) = start_node_killable().await?;
+    let n2 = start_node().await?;
+    let tmp = TempDir::new()?;
+    let (mut mattia, mut silvia) = pair(&tmp, &n1).await?;
+    mattia.set_node(&n2).await?;
+    silvia.set_node(&n2).await?;
+    killer.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Il messaggio resta in coda (Silvia è ancora al nodo spento), poi Mattia trova il cartello.
+    mattia.send_text(&silvia.identity(), "ci sei?").await?;
+    mattia.sync_all().await?;
+    let card_node = |c: &rondine_core::SignedCard| c.verify().ok().and_then(|i| i.node);
+    let node_of = |cl: &Client, id| {
+        cl.contacts()
+            .iter()
+            .find(|c| c.identity == id)
+            .and_then(|c| card_node(&c.card))
+    };
+    assert_eq!(
+        node_of(&mattia, silvia.identity()),
+        Some(n2.clone()),
+        "cartello non trovato"
+    );
+
+    // Silvia riceve il messaggio e il biglietto nuovo di Mattia.
+    assert_eq!(texts(&silvia.sync().await?), ["ci sei?"]);
+    assert_eq!(node_of(&silvia, mattia.identity()), Some(n2.clone()));
+    silvia.send_text(&mattia.identity(), "sì").await?;
+    assert_eq!(texts(&mattia.sync().await?), ["sì"]);
+    Ok(())
+}

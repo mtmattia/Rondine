@@ -216,6 +216,7 @@ impl Client {
                     blind_in: None,
                     blind_out: None,
                     blind_rx: 0,
+                    old_permit_ids: Vec::new(),
                 });
             }
             self.note_key_change(&info.identity);

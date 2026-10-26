@@ -74,6 +74,9 @@ pub struct Contact {
     /// Buste ritirate dalle sue caselle dall'ultima volta che gli ho dato gettoni.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub blind_rx: u32,
+    /// Permessi dati prima di `my_permit_id` sul nodo attuale: si revocano se lo blocco.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub old_permit_ids: Vec<String>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -335,6 +338,9 @@ pub struct State {
     /// Caselle dei nodi lasciati: si ritirano ancora per un po' (SPEC §12.7).
     #[serde(default)]
     pub retired: Vec<RetiredInbox>,
+    /// Nodo per cui ho già lasciato i cartelli di trasloco (SPEC §12.7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moves_published: Option<String>,
     /// Endpoint UnifiedPush registrato, da spostare se cambia il nodo.
     #[serde(default)]
     pub push_endpoint: Option<String>,
